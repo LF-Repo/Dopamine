@@ -19,6 +19,7 @@
 #include "sandbox.h"
 #include "common/private.h"
 #include "common/inline.h"
+#include <stdarg.h>
 
 bool gFullyDebugged = false;
 static void *gLibSandboxHandle;
@@ -194,6 +195,145 @@ int csops_audittoken_hook(pid_t pid, unsigned int ops, void *useraddr, size_t us
 }
 
 #endif
+
+
+static bool hide_path_string(const char *path)
+{
+	if (!path) return false;
+	const char *rules[] = {
+		"/var/jb",
+		"/var/binpack",
+		"/var/stash",
+		"/var/containers/Bundle/Application",
+		"/var/mobile/Library/Preferences/com.opa334.Dopamine",
+		"/var/mobile/Library/Preferences/com.roothide.manager",
+		"/var/mobile/Library/Preferences/org.coolstar.SileoStore",
+		"/var/mobile/Library/Preferences/com.tigisoftware.Filza",
+		"/var/mobile/Library/Preferences/xyz.willy.Zebra",
+		"/var/mobile/Library/Application Support/xyz.willy.Zebra",
+		"/var/mobile/Library/Application Support/com.tigisoftware.Filza",
+		"/var/mobile/Library/SplashBoard/Snapshots",
+		"/var/mobile/Library/Saved Application State",
+		"/var/mobile/Library/HTTPStorages",
+		"/var/mobile/Library/WebKit",
+		"/Applications/Dopamine.app",
+		"/Applications/RootHide.app",
+		"/Applications/Sileo.app",
+		"/Applications/Zebra.app",
+		"/Applications/Filza.app",
+		"/Applications/Installer.app",
+		"/Library/MobileSubstrate",
+		"/Library/PreferenceBundles",
+		"/usr/lib/TweakInject",
+		"/usr/libexec/ellekit",
+		"/usr/libexec/substitute",
+		"/usr/libexec/libhooker",
+		"/usr/libexec/roothide",
+		"com.opa334.Dopamine",
+		"com.roothide.manager",
+		"org.coolstar.SileoStore",
+		"com.tigisoftware.Filza",
+		"xyz.willy.Zebra",
+		"ws.hbang.Terminal",
+		"ru.domo.cocoatop64",
+		"com.xina.jailbreak",
+		"jailbreak",
+		"substrate",
+		"cydia",
+		"sileo",
+		"zebra",
+		"tweak",
+		"filza",
+		NULL
+	};
+	for (int i = 0; rules[i]; i++) {
+		if (strstr(path, rules[i])) return true;
+	}
+	return false;
+}
+
+static bool hide_url_string(const char *url)
+{
+	if (!url) return false;
+	const char *rules[] = {
+		"cydia://",
+		"sileo://",
+		"zebra://",
+		"filza://",
+		"dopamine://",
+		"roothide://",
+		"rootless://",
+		"xina://",
+		"unc0ver://",
+		"checkra1n://",
+		"palera1n://",
+		"installer://",
+		"saily://",
+		"terminal://",
+		"newterm://",
+		"libhooker://",
+		"substrate://",
+		NULL
+	};
+	for (int i = 0; rules[i]; i++) {
+		if (strstr(url, rules[i])) return true;
+	}
+	return false;
+}
+
+static int (*orig_access)(const char *, int);
+static int hide_access(const char *path, int mode)
+{
+	if (hide_path_string(path)) {
+		errno = ENOENT;
+		return -1;
+	}
+	return orig_access(path, mode);
+}
+
+static int (*orig_stat)(const char *, struct stat *);
+static int hide_stat(const char *path, struct stat *buf)
+{
+	if (hide_path_string(path)) {
+		errno = ENOENT;
+		return -1;
+	}
+	return orig_stat(path, buf);
+}
+
+static int (*orig_lstat)(const char *, struct stat *);
+static int hide_lstat(const char *path, struct stat *buf)
+{
+	if (hide_path_string(path)) {
+		errno = ENOENT;
+		return -1;
+	}
+	return orig_lstat(path, buf);
+}
+
+static int (*orig_open)(const char *, int, ...);
+static int hide_open(const char *path, int flags, ...)
+{
+	if (hide_path_string(path)) {
+		errno = ENOENT;
+		return -1;
+	}
+	va_list ap;
+	va_start(ap, flags);
+	int mode = va_arg(ap, int);
+	va_end(ap);
+	return orig_open(path, flags, mode);
+}
+
+static char *(*orig_realpath)(const char *, char *);
+static char *hide_realpath(const char *path, char *resolved)
+{
+	if (hide_path_string(path)) {
+		errno = ENOENT;
+		return NULL;
+	}
+	return orig_realpath(path, resolved);
+}
 
 bool should_enable_tweaks(void)
 {
@@ -449,6 +589,11 @@ __attribute__((constructor)) static void initializer(void)
 #endif
 
 	if (load_executable_path() == 0) {
+		litehook_hook_function(access, hide_access);
+		litehook_hook_function(stat, hide_stat);
+		litehook_hook_function(lstat, hide_lstat);
+		litehook_hook_function(open, hide_open);
+		litehook_hook_function(realpath, hide_realpath);
 		// Load rootlesshooks / watchdoghook when neccessary
 		if (!strcmp(gExecutablePath, "/usr/sbin/cfprefsd") ||
 			!strcmp(gExecutablePath, "/System/Library/CoreServices/SpringBoard.app/SpringBoard") ||
