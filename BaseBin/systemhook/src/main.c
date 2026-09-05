@@ -204,7 +204,6 @@ static bool hide_path_string(const char *path)
 		"/var/jb",
 		"/var/binpack",
 		"/var/stash",
-		"/var/containers/Bundle/Application",
 		"/var/mobile/Library/Preferences/com.opa334.Dopamine",
 		"/var/mobile/Library/Preferences/com.roothide.manager",
 		"/var/mobile/Library/Preferences/org.coolstar.SileoStore",
