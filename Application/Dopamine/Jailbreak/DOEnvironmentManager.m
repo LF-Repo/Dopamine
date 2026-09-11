@@ -721,11 +721,13 @@ extern char **environ;
                 NSString *fullPath = [uuidPath stringByAppendingPathComponent:item];
                 BOOL isDir = NO;
                 if ([fm fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
+                    NSLog(@"[HideURLScheme] found %@", fullPath);
                     return fullPath;
                 }
             }
         }
     }
+    NSLog(@"[HideURLScheme] app not found: %@", appName);
     return nil;
 }
 
@@ -734,25 +736,39 @@ extern char **environ;
     NSString *infoPlistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
     NSFileManager *fm = [NSFileManager defaultManager];
 
+    NSLog(@"[HideURLScheme] target scheme=%@ app=%@", scheme, appPath);
+
     if (![fm fileExistsAtPath:infoPlistPath]) {
         NSLog(@"[HideURLScheme] Info.plist not found at %@", infoPlistPath);
         return NO;
     }
 
-    NSMutableDictionary *plist = [[NSMutableDictionary alloc] initWithContentsOfFile:infoPlistPath];
-    if (!plist) {
-        NSLog(@"[HideURLScheme] Failed to read plist at %@", infoPlistPath);
+    NSError *readErr = nil;
+    NSData *data = [NSData dataWithContentsOfFile:infoPlistPath options:0 error:&readErr];
+    if (!data) {
+        NSLog(@"[HideURLScheme] read failed: %@", readErr);
         return NO;
     }
 
+    NSError *parseErr = nil;
+    id parsed = [NSPropertyListSerialization propertyListWithData:data
+                                                          options:NSPropertyListMutableContainersAndLeaves
+                                                           format:NULL
+                                                            error:&parseErr];
+    if (![parsed isKindOfClass:[NSMutableDictionary class]]) {
+        NSLog(@"[HideURLScheme] parse failed: %@", parseErr);
+        return NO;
+    }
+
+    NSMutableDictionary *plist = (NSMutableDictionary *)parsed;
     BOOL modified = NO;
 
     NSArray *urlTypes = plist[@"CFBundleURLTypes"];
-    if (urlTypes) {
+    if ([urlTypes isKindOfClass:[NSArray class]]) {
         NSMutableArray *newUrlTypes = [NSMutableArray array];
         for (NSDictionary *urlType in urlTypes) {
             NSArray *schemes = urlType[@"CFBundleURLSchemes"];
-            if (schemes && [schemes containsObject:scheme]) {
+            if ([schemes isKindOfClass:[NSArray class]] && [schemes containsObject:scheme]) {
                 NSMutableDictionary *newUrlType = [urlType mutableCopy];
                 NSMutableArray *newSchemes = [schemes mutableCopy];
                 [newSchemes removeObject:scheme];
@@ -761,6 +777,7 @@ extern char **environ;
                     [newUrlTypes addObject:newUrlType];
                 }
                 modified = YES;
+                NSLog(@"[HideURLScheme] removed '%@' from CFBundleURLTypes", scheme);
             } else {
                 [newUrlTypes addObject:urlType];
             }
@@ -771,36 +788,44 @@ extern char **environ;
     }
 
     NSArray *queriesSchemes = plist[@"LSApplicationQueriesSchemes"];
-    if (queriesSchemes && [queriesSchemes containsObject:scheme]) {
+    if ([queriesSchemes isKindOfClass:[NSArray class]] && [queriesSchemes containsObject:scheme]) {
         NSMutableArray *newQueries = [queriesSchemes mutableCopy];
         [newQueries removeObject:scheme];
         plist[@"LSApplicationQueriesSchemes"] = newQueries;
         modified = YES;
+        NSLog(@"[HideURLScheme] removed '%@' from LSApplicationQueriesSchemes", scheme);
     }
 
     if (!modified) {
-        NSLog(@"[HideURLScheme] Scheme '%@' not found in %@", scheme, infoPlistPath);
+        NSLog(@"[HideURLScheme] scheme '%@' not found in %@", scheme, infoPlistPath);
         return NO;
     }
 
     NSString *backupPath = [infoPlistPath stringByAppendingString:@".hideurl_backup"];
     if (![fm fileExistsAtPath:backupPath]) {
-        [fm copyItemAtPath:infoPlistPath toPath:backupPath error:nil];
+        NSError *cpErr = nil;
+        if (![fm copyItemAtPath:infoPlistPath toPath:backupPath error:&cpErr]) {
+            NSLog(@"[HideURLScheme] backup failed: %@", cpErr);
+            return NO;
+        }
     }
 
-    if (![plist writeToFile:infoPlistPath atomically:YES]) {
-        NSLog(@"[HideURLScheme] Failed to write plist at %@", infoPlistPath);
+    NSError *writeErr = nil;
+    NSData *outData = [NSPropertyListSerialization dataWithPropertyList:plist
+                                                                  format:NSPropertyListXMLFormat_v1_0
+                                                                 options:0
+                                                                   error:&writeErr];
+    if (!outData) {
+        NSLog(@"[HideURLScheme] serialize failed: %@", writeErr);
         return NO;
     }
 
-    const char *ldidPath = JBROOT_PATH("/usr/bin/ldid");
-    if (access(ldidPath, F_OK) == 0) {
-        exec_cmd(ldidPath, "-S", appPath.fileSystemRepresentation, NULL);
-    } else {
-        NSLog(@"[HideURLScheme] ldid not found at %s, skipping re-sign", ldidPath);
+    if (![outData writeToFile:infoPlistPath options:NSDataWritingAtomic error:&writeErr]) {
+        NSLog(@"[HideURLScheme] write failed: %@", writeErr);
+        return NO;
     }
 
-    NSLog(@"[HideURLScheme] Hidden scheme '%@' in %@", scheme, appPath);
+    NSLog(@"[HideURLScheme] wrote %lu bytes to %@", (unsigned long)outData.length, infoPlistPath);
     return YES;
 }
 
@@ -818,11 +843,6 @@ extern char **environ;
     [fm removeItemAtPath:infoPlistPath error:nil];
     [fm copyItemAtPath:backupPath toPath:infoPlistPath error:nil];
     [fm removeItemAtPath:backupPath error:nil];
-
-    const char *ldidPath = JBROOT_PATH("/usr/bin/ldid");
-    if (access(ldidPath, F_OK) == 0) {
-        exec_cmd(ldidPath, "-S", appPath.fileSystemRepresentation, NULL);
-    }
 
     NSLog(@"[HideURLScheme] Restored %@", appPath);
 }
@@ -844,6 +864,13 @@ extern char **environ;
             [self hideURLScheme:scheme forAppAtPath:appPath];
         }
     }
+
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-a", NULL);
+        }];
+    }];
+    [self spawnJbctlAsRootWithArgs:@[@"rebuild_icon_cache"]];
 }
 
 - (void)restoreJailbreakURLSchemes
@@ -855,6 +882,13 @@ extern char **environ;
         if (!appPath) continue;
         [self restoreURLSchemeForAppAtPath:appPath];
     }
+
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-a", NULL);
+        }];
+    }];
+    [self spawnJbctlAsRootWithArgs:@[@"rebuild_icon_cache"]];
 }
 
 - (void)runJailbreakLibraryAudit
