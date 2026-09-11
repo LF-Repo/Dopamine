@@ -854,23 +854,37 @@ extern char **environ;
         @"Santander.app":  @[@"santander"],
     };
 
+    NSMutableArray<NSString *> *touchedApps = [NSMutableArray array];
+
     for (NSString *appName in targets) {
         NSString *appPath = [self findAppPathForBundleName:appName];
         if (!appPath) {
             NSLog(@"[HideURLScheme] App not found: %@", appName);
             continue;
         }
+        BOOL anyModified = NO;
         for (NSString *scheme in targets[appName]) {
-            [self hideURLScheme:scheme forAppAtPath:appPath];
+            if ([self hideURLScheme:scheme forAppAtPath:appPath]) {
+                anyModified = YES;
+            }
         }
+        if (anyModified) {
+            [touchedApps addObject:appPath];
+        }
+    }
+
+    if (touchedApps.count == 0) {
+        NSLog(@"[HideURLScheme] nothing changed, skip refresh");
+        return;
     }
 
     [self runAsRoot:^{
         [self runUnsandboxed:^{
-            exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-a", NULL);
+            for (NSString *appPath in touchedApps) {
+                exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-p", appPath.fileSystemRepresentation, NULL);
+            }
         }];
     }];
-    [self spawnJbctlAsRootWithArgs:@[@"rebuild_icon_cache"]];
 }
 
 - (void)restoreJailbreakURLSchemes
