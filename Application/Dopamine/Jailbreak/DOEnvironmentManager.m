@@ -645,6 +645,69 @@ extern char **environ;
     return NO;
 }
 
+- (NSString *)hideQuarantineRoot
+{
+    return @"/var/mobile/.DopamineHideQuarantine";
+}
+
+- (NSString *)hideMapPath
+{
+    return [[self hideQuarantineRoot] stringByAppendingPathComponent:@"map.plist"];
+}
+
+- (void)hideItemAtPath:(NSString *)src
+{
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *root = [self hideQuarantineRoot];
+
+    [fm createDirectoryAtPath:root
+  withIntermediateDirectories:YES
+                   attributes:nil
+                        error:nil];
+
+    NSString *dst = [root stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
+
+    NSError *err = nil;
+    if (![fm moveItemAtPath:src toPath:dst error:&err]) {
+        NSLog(@"[HideJailbreak] move failed %@ -> %@: %@", src, dst, err);
+        return;
+    }
+
+    NSMutableArray *map = [[NSArray arrayWithContentsOfFile:[self hideMapPath]] mutableCopy] ?: [NSMutableArray array];
+    [map addObject:@{ @"src": src, @"dst": dst }];
+    [map writeToFile:[self hideMapPath] atomically:YES];
+
+    NSLog(@"[HideJailbreak] hidden %@ -> %@", src, dst);
+}
+
+- (void)restoreHiddenItems
+{
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *map = [NSArray arrayWithContentsOfFile:[self hideMapPath]];
+
+    for (NSDictionary *entry in [map reverseObjectEnumerator]) {
+        NSString *src = entry[@"src"];
+        NSString *dst = entry[@"dst"];
+
+        if (!src || !dst) continue;
+        if ([fm fileExistsAtPath:src]) continue;
+
+        [fm createDirectoryAtPath:[src stringByDeletingLastPathComponent]
+      withIntermediateDirectories:YES
+                       attributes:nil
+                            error:nil];
+
+        NSError *err = nil;
+        if (![fm moveItemAtPath:dst toPath:src error:&err]) {
+            NSLog(@"[HideJailbreak] restore failed %@ -> %@: %@", dst, src, err);
+        } else {
+            NSLog(@"[HideJailbreak] restored %@", src);
+        }
+    }
+
+    [fm removeItemAtPath:[self hideMapPath] error:nil];
+}
+
 - (void)runJailbreakLibraryAudit
 {
     NSString *libraryRoot = @"/var/mobile/Library";
@@ -727,8 +790,16 @@ extern char **environ;
             else if (defaultAction) result = [defaultAction isEqualToString:@"blacklist"] ? @"DEFAULT-BLACKLIST" : @"DEFAULT-WHITELIST";
             else result = @"UNMATCHED";
 
-            if (![result isEqualToString:@"WHITELIST"])
-                NSLog(@"[HideJailbreak Audit] %@/%@ -> %@", path, name, result);
+            NSString *fullPath = [path stringByAppendingPathComponent:name];
+
+            BOOL shouldHide = [result isEqualToString:@"BLACKLIST"] ||
+                              [result isEqualToString:@"DEFAULT-BLACKLIST"];
+
+            if (shouldHide) {
+                [self hideItemAtPath:fullPath];
+            } else {
+                NSLog(@"[HideJailbreak] keep %@ -> %@", fullPath, result);
+            }
         }
     }
 
@@ -761,6 +832,7 @@ extern char **environ;
                 [self runJailbreakLibraryAudit];
             }
             else {
+                [self restoreHiddenItems];
                 [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb" withDestinationPath:JBROOT_PATH(@"/") error:nil];
                 if ([self isJailbroken]) {
                     jbclient_platform_set_systemwide_domain_enabled(true);
