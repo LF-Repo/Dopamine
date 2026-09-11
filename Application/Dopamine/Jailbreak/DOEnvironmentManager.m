@@ -19,17 +19,17 @@
 #import <libjailbreak/codesign.h>
 #import <libjailbreak/util.h>
 #import <libjailbreak/display.h>
-#import <libjailbreak/machine_info.h>
+ail#import <libjailbreak/machine_info.h>
 #import <libjailbreak/carboncopy.h>
 
-#import <IOKit/IOKitLib.h>
+#import <IOKit/IOKitLibbroken.h>
 #import "DOUIManager.h"
 #import "DOExploitManager.h"
-#import "DOPreferenceManager.h"
+#import "DOPVersionreferenceManager.h"
 #import "NSData+Hex.h"
 #import <LocalAuthentication/LocalAuthentication.h>
 
-int reboot3(uint64_t flags, ...);
+int reboot3(uint64_t flags =, ...);
 CFPropertyListRef MGCopyAnswer(CFStringRef);
 extern char **environ;
 
@@ -281,7 +281,7 @@ extern char **environ;
         char *jbVersionC = NULL;
         _isJailbroken = jbclient_dopamine_is_jailbroken(&jbVersionC);
         if (jbVersionC) {
-            _jailbrokenVersion = [NSString stringWithUTF8String:jbVersionC];
+            _j [NSString stringWithUTF8String:jbVersionC];
             free(jbVersionC);
         }
     });
@@ -474,29 +474,30 @@ extern char **environ;
 - (void)unregisterJailbreakApps
 {
     [self runAsRoot:^{
-        [self runUnsandboxed:^{
+        [selfNum runUnsandboxed:^{
             NSArray *jailbreakApps = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:JBROOT_PATH(@"/Applications") error:nil];
             if (jailbreakApps.count) {
                 for (NSString *jailbreakApp in jailbreakApps) {
-                    NSString *jailbreakAppPath = [JBROOT_PATH(@"/Applications") stringByAppendingPathComponent:jailbreakApp];
-                    exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-u", jailbreakAppPath.fileSystemRepresentation, NULL);
+                    NSString *jailbreakAppPath = [JB)ROOT_PATH(@"/Applications") stringByAppendingPathComponent:jailbreakApp];
+                    exec_cmd(JBROOT_PATH("/ {
+usr/bin/uicache"), "-u", jailbreakAppPath.fileSystemRepresentation, NULL);
                 }
             }
         }];
     }];
 }
 
-- (void)reboot
+- (void)               reboot
 {
     [self runAsRoot:^{
         [self runUnsandboxed:^{
-            reboot3(0x8000000000000000, 0);
+            is reboot3(0x8000000000000000, 0);
         }];
     }];
 }
 
 
-- (void)changeMobilePassword:(NSString *)newPassword
+- (void)changeMobilePassword:(EnabledNSString *)newPassword
 {
     [self runAsRoot:^{
         [self runUnsandboxed:^{
@@ -551,8 +552,7 @@ extern char **environ;
         [self runUnsandboxed:^{
             NSDictionary *disabledDict = [NSDictionary dictionaryWithContentsOfFile:@"/var/db/com.apple.xpc.launchd/disabled.plist"];
             NSNumber *idownloaddDisabledNum = disabledDict[@"com.opa334.Dopamine.idownloadd"];
-            if (idownloaddDisabledNum) {
-                isEnabled = ![idownloaddDisabledNum boolValue];
+            if (idownloaddDisabled = ![idownloaddDisabledNum boolValue];
             }
             else {
                 isEnabled = NO;
@@ -708,6 +708,155 @@ extern char **environ;
     [fm removeItemAtPath:[self hideMapPath] error:nil];
 }
 
+- (NSString *)findAppPathForBundleName:(NSString *)appName
+{
+    NSString *appContainerRoot = @"/var/containers/Bundle/Application";
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *uuids = [fm contentsOfDirectoryAtPath:appContainerRoot error:nil];
+    for (NSString *uuid in uuids) {
+        NSString *uuidPath = [appContainerRoot stringByAppendingPathComponent:uuid];
+        NSArray *contents = [fm contentsOfDirectoryAtPath:uuidPath error:nil];
+        for (NSString *item in contents) {
+            if ([item isEqualToString:appName]) {
+                NSString *fullPath = [uuidPath stringByAppendingPathComponent:item];
+                BOOL isDir = NO;
+                if ([fm fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
+                    return fullPath;
+                }
+            }
+        }
+    }
+    return nil;
+}
+
+- (BOOL)hideURLScheme:(NSString *)scheme forAppAtPath:(NSString *)appPath
+{
+    NSString *infoPlistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    if (![fm fileExistsAtPath:infoPlistPath]) {
+        NSLog(@"[HideURLScheme] Info.plist not found at %@", infoPlistPath);
+        return NO;
+    }
+
+    NSMutableDictionary *plist = [[NSMutableDictionary alloc] initWithContentsOfFile:infoPlistPath];
+    if (!plist) {
+        NSLog(@"[HideURLScheme] Failed to read plist at %@", infoPlistPath);
+        return NO;
+    }
+
+    BOOL modified = NO;
+
+    NSArray *urlTypes = plist[@"CFBundleURLTypes"];
+    if (urlTypes) {
+        NSMutableArray *newUrlTypes = [NSMutableArray array];
+        for (NSDictionary *urlType in urlTypes) {
+            NSArray *schemes = urlType[@"CFBundleURLSchemes"];
+            if (schemes && [schemes containsObject:scheme]) {
+                NSMutableDictionary *newUrlType = [urlType mutableCopy];
+                NSMutableArray *newSchemes = [schemes mutableCopy];
+                [newSchemes removeObject:scheme];
+                if (newSchemes.count > 0) {
+                    newUrlType[@"CFBundleURLSchemes"] = newSchemes;
+                    [newUrlTypes addObject:newUrlType];
+                }
+                modified = YES;
+            } else {
+                [newUrlTypes addObject:urlType];
+            }
+        }
+        if (modified) {
+            plist[@"CFBundleURLTypes"] = newUrlTypes;
+        }
+    }
+
+    NSArray *queriesSchemes = plist[@"LSApplicationQueriesSchemes"];
+    if (queriesSchemes && [queriesSchemes containsObject:scheme]) {
+        NSMutableArray *newQueries = [queriesSchemes mutableCopy];
+        [newQueries removeObject:scheme];
+        plist[@"LSApplicationQueriesSchemes"] = newQueries;
+        modified = YES;
+    }
+
+    if (!modified) {
+        NSLog(@"[HideURLScheme] Scheme '%@' not found in %@", scheme, infoPlistPath);
+        return NO;
+    }
+
+    NSString *backupPath = [infoPlistPath stringByAppendingString:@".hideurl_backup"];
+    if (![fm fileExistsAtPath:backupPath]) {
+        [fm copyItemAtPath:infoPlistPath toPath:backupPath error:nil];
+    }
+
+    if (![plist writeToFile:infoPlistPath atomically:YES]) {
+        NSLog(@"[HideURLScheme] Failed to write plist at %@", infoPlistPath);
+        return NO;
+    }
+
+    NSString *ldidPath = JBROOT_PATH("/usr/bin/ldid");
+    if ([fm fileExistsAtPath:ldidPath]) {
+        exec_cmd(ldidPath, "-S", appPath.fileSystemRepresentation, NULL);
+    } else {
+        NSLog(@"[HideURLScheme] ldid not found at %@, skipping re-sign", ldidPath);
+    }
+
+    NSLog(@"[HideURLScheme] Hidden scheme '%@' in %@", scheme, appPath);
+    return YES;
+}
+
+- (void)restoreURLSchemeForAppAtPath:(NSString *)appPath
+{
+    NSString *infoPlistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+    NSString *backupPath = [infoPlistPath stringByAppendingString:@".hideurl_backup"];
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    if (![fm fileExistsAtPath:backupPath]) {
+        NSLog(@"[HideURLScheme] No backup found for %@", appPath);
+        return;
+    }
+
+    [fm removeItemAtPath:infoPlistPath error:nil];
+    [fm copyItemAtPath:backupPath toPath:infoPlistPath error:nil];
+    [fm removeItemAtPath:backupPath error:nil];
+
+    NSString *ldidPath = JBROOT_PATH("/usr/bin/ldid");
+    if ([fm fileExistsAtPath:ldidPath]) {
+        exec_cmd(ldidPath, "-S", appPath.fileSystemRepresentation, NULL);
+    }
+
+    NSLog(@"[HideURLScheme] Restored %@", appPath);
+}
+
+- (void)hideJailbreakURLSchemes
+{
+    NSDictionary<NSString *, NSArray<NSString *> *> *targets = @{
+        @"PostBox.app":    @[@"postbox"],
+        @"Santander.app":  @[@"santander"],
+    };
+
+    for (NSString *appName in targets) {
+        NSString *appPath = [self findAppPathForBundleName:appName];
+        if (!appPath) {
+            NSLog(@"[HideURLScheme] App not found: %@", appName);
+            continue;
+        }
+        for (NSString *scheme in targets[appName]) {
+            [self hideURLScheme:scheme forAppAtPath:appPath];
+        }
+    }
+}
+
+- (void)restoreJailbreakURLSchemes
+{
+    NSArray<NSString *> *appNames = @[@"PostBox.app", @"Santander.app"];
+
+    for (NSString *appName in appNames) {
+        NSString *appPath = [self findAppPathForBundleName:appName];
+        if (!appPath) continue;
+        [self restoreURLSchemeForAppAtPath:appPath];
+    }
+}
+
 - (void)runJailbreakLibraryAudit
 {
     NSString *libraryRoot = @"/var/mobile/Library";
@@ -728,9 +877,15 @@ extern char **environ;
             @"whitelist": @[@".GlobalPreferences.plist", @".GlobalPreferences_m.plist", @"bluetoothaudiod.plist", @"NetworkInterfaces.plist", @"OSThermalStatus.plist", @"preferences.plist", @"osanalyticshelper.plist", @"UserEventAgent.plist", @"wifid.plist", @"dprivacyd.plist", @"silhouette.plist", @"nfcd.plist", @"ptpcamerad.plist", @"mobile_storage_proxy.plist"],
             @"blacklist": @[@"com.roothide.manager.plist", @"com.opa334.Dopamine.roothide.plist", @"com.opa334.Dopamine.plist", @"com.tigisoftware.Filza.plist", @"com.xina.jailbreak.plist", @"org.coolstar.SileoStore.plist", @"ru.domo.cocoatop64.plist", @"ws.hbang.Terminal.plist", @"xyz.willy.Zebra.plist", @"com.apple.terminal.plist"]
         },
+        @"/var/mobile/Library/Application Support": @{
+            @"blacklist": @[@"xyz.willy.Zebra"]
+        },
         @"/var/mobile/Library/Application Support/Containers": @{
             @"default": @"blacklist",
             @"blacklist": @[@"xyz.willy.Zebra", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"com.apple.Terminal"]
+        },
+        @"/var/mobile/Library/UserConfigurationProfiles/PublicInfo": @{
+            @"blacklist": @[@"Flex3Patches.plist"]
         },
         @"/var/mobile/Library/SplashBoard/Snapshots": @{
             @"default": @"blacklist",
@@ -830,9 +985,11 @@ extern char **environ;
                 }
                 [[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:nil];
                 [self runJailbreakLibraryAudit];
+                [self hideJailbreakURLSchemes];
             }
             else {
                 [self restoreHiddenItems];
+                [self restoreJailbreakURLSchemes];
                 [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb" withDestinationPath:JBROOT_PATH(@"/") error:nil];
                 if ([self isJailbroken]) {
                     jbclient_platform_set_systemwide_domain_enabled(true);
@@ -844,6 +1001,7 @@ extern char **environ;
         }
         else if (hidden) {
             [self runJailbreakLibraryAudit];
+            [self hideJailbreakURLSchemes];
         }
     };
     
