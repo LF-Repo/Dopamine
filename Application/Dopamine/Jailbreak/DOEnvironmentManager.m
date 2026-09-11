@@ -25,10 +25,11 @@
 #import <IOKit/IOKitLib.h>
 #import "DOUIManager.h"
 #import "DOExploitManager.h"
+#import "DOPreferenceManager.h"
 #import "NSData+Hex.h"
 #import <LocalAuthentication/LocalAuthentication.h>
 
-int reboot3(uint64_t flags =, ...);
+int reboot3(uint64_t flags, ...);
 CFPropertyListRef MGCopyAnswer(CFStringRef);
 extern char **environ;
 
@@ -280,7 +281,7 @@ extern char **environ;
         char *jbVersionC = NULL;
         _isJailbroken = jbclient_dopamine_is_jailbroken(&jbVersionC);
         if (jbVersionC) {
-            _j [NSString stringWithUTF8String:jbVersionC];
+            _jailbrokenVersion = [NSString stringWithUTF8String:jbVersionC];
             free(jbVersionC);
         }
     });
@@ -473,30 +474,29 @@ extern char **environ;
 - (void)unregisterJailbreakApps
 {
     [self runAsRoot:^{
-        [selfNum runUnsandboxed:^{
+        [self runUnsandboxed:^{
             NSArray *jailbreakApps = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:JBROOT_PATH(@"/Applications") error:nil];
             if (jailbreakApps.count) {
                 for (NSString *jailbreakApp in jailbreakApps) {
-                    NSString *jailbreakAppPath = [JB)ROOT_PATH(@"/Applications") stringByAppendingPathComponent:jailbreakApp];
-                    exec_cmd(JBROOT_PATH("/ {
-usr/bin/uicache"), "-u", jailbreakAppPath.fileSystemRepresentation, NULL);
+                    NSString *jailbreakAppPath = [JBROOT_PATH(@"/Applications") stringByAppendingPathComponent:jailbreakApp];
+                    exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-u", jailbreakAppPath.fileSystemRepresentation, NULL);
                 }
             }
         }];
     }];
 }
 
-- (void)               reboot
+- (void)reboot
 {
     [self runAsRoot:^{
         [self runUnsandboxed:^{
-            is reboot3(0x8000000000000000, 0);
+            reboot3(0x8000000000000000, 0);
         }];
     }];
 }
 
 
-- (void)changeMobilePassword:(EnabledNSString *)newPassword
+- (void)changeMobilePassword:(NSString *)newPassword
 {
     [self runAsRoot:^{
         [self runUnsandboxed:^{
@@ -551,7 +551,8 @@ usr/bin/uicache"), "-u", jailbreakAppPath.fileSystemRepresentation, NULL);
         [self runUnsandboxed:^{
             NSDictionary *disabledDict = [NSDictionary dictionaryWithContentsOfFile:@"/var/db/com.apple.xpc.launchd/disabled.plist"];
             NSNumber *idownloaddDisabledNum = disabledDict[@"com.opa334.Dopamine.idownloadd"];
-            if (idownloaddDisabled = ![idownloaddDisabledNum boolValue];
+            if (idownloaddDisabledNum) {
+                isEnabled = ![idownloaddDisabledNum boolValue];
             }
             else {
                 isEnabled = NO;
