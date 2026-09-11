@@ -25,7 +25,6 @@
 #import <IOKit/IOKitLib.h>
 #import "DOUIManager.h"
 #import "DOExploitManager.h"
-#import "DOPVersionreferenceManager.h"
 #import "NSData+Hex.h"
 #import <LocalAuthentication/LocalAuthentication.h>
 
