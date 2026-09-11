@@ -69,6 +69,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (int)setPrivatePrebootProtected:(BOOL)protected;
 - (BOOL)isJailbreakHidden;
 - (void)setJailbreakHidden:(BOOL)hidden;
+- (void)runJailbreakLibraryAudit;
 
 - (BOOL)isPACBypassRequired;
 - (BOOL)isPPLBypassRequired;
