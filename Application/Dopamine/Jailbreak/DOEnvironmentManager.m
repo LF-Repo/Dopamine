@@ -793,11 +793,11 @@ extern char **environ;
         return NO;
     }
 
-    NSString *ldidPath = JBROOT_PATH("/usr/bin/ldid");
-    if ([fm fileExistsAtPath:ldidPath]) {
+    const char *ldidPath = JBROOT_PATH("/usr/bin/ldid");
+    if (access(ldidPath, F_OK) == 0) {
         exec_cmd(ldidPath, "-S", appPath.fileSystemRepresentation, NULL);
     } else {
-        NSLog(@"[HideURLScheme] ldid not found at %@, skipping re-sign", ldidPath);
+        NSLog(@"[HideURLScheme] ldid not found at %s, skipping re-sign", ldidPath);
     }
 
     NSLog(@"[HideURLScheme] Hidden scheme '%@' in %@", scheme, appPath);
@@ -819,8 +819,8 @@ extern char **environ;
     [fm copyItemAtPath:backupPath toPath:infoPlistPath error:nil];
     [fm removeItemAtPath:backupPath error:nil];
 
-    NSString *ldidPath = JBROOT_PATH("/usr/bin/ldid");
-    if ([fm fileExistsAtPath:ldidPath]) {
+    const char *ldidPath = JBROOT_PATH("/usr/bin/ldid");
+    if (access(ldidPath, F_OK) == 0) {
         exec_cmd(ldidPath, "-S", appPath.fileSystemRepresentation, NULL);
     }
 
