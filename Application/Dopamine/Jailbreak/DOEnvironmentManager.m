@@ -19,10 +19,10 @@
 #import <libjailbreak/codesign.h>
 #import <libjailbreak/util.h>
 #import <libjailbreak/display.h>
-ail#import <libjailbreak/machine_info.h>
+#import <libjailbreak/machine_info.h>
 #import <libjailbreak/carboncopy.h>
 
-#import <IOKit/IOKitLibbroken.h>
+#import <IOKit/IOKitLib.h>
 #import "DOUIManager.h"
 #import "DOExploitManager.h"
 #import "DOPVersionreferenceManager.h"
