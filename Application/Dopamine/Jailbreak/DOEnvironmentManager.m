@@ -635,6 +635,106 @@ extern char **environ;
     return [self spawnJbctlAsRootWithArgs:@[@"internal", @"protection", arg]];
 }
 
+- (BOOL)doAuditName:(NSString *)name matchesExact:(NSArray<NSString *> *)exact regex:(NSArray<NSString *> *)regex
+{
+    if ([exact containsObject:name]) return YES;
+    for (NSString *pattern in regex) {
+        NSRegularExpression *expression = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:nil];
+        if ([expression firstMatchInString:name options:0 range:NSMakeRange(0, name.length)]) return YES;
+    }
+    return NO;
+}
+
+- (void)runJailbreakLibraryAudit
+{
+    NSString *libraryRoot = @"/var/mobile/Library";
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:libraryRoot]) {
+        NSLog(@"[HideJailbreak Audit] %@ is not accessible", libraryRoot);
+        return;
+    }
+
+    NSDictionary<NSString *, NSDictionary *> *rules = @{
+        @"/var/mobile/Library": @{
+            @"whitelist": @[@"Accessibility", @"CoreBrightness", @"Keyboard", @"Preferences", @"Voicemail", @"Accounts", @"CoreDuet", @"KeyboardServices", @"PrivacyAccounting", @"WatchConnectivity", @"AddressBook", @"CoreFollowUp", @"LASD", @"Recents", @"Weather", @"AggregateDictionary", @"CountryBundles", @"LanguageModeling", @"Reminders", @"WebClips", @"CrashReporter", @"Logs", @"ReplayKit", @"WebKit", @"Application Support", @"MediaRemote", @"Safari", @"Caches", @"SplashBoard", @"MobileInstallation", @"SoftwareUpdate", @"BulletinBoard", @"MobileContainerManager", @"TCC", @"Settings", @"Cookies", @"Passes", @"UserNotifications", @"ApplicationSync", @"DataDeliveryServices", @"MediaStream", @"SafeHarbor", @"Wallet", @"Maps", @"Phone"],
+            @"blacklist": @[@"Sileo", @"Filza", @"Flex3", @"SBSettings", @"iCleaner"]
+        },
+        @"/var/mobile/Library/Preferences": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\.", @"^systemgroup\\.com\\.apple\\."],
+            @"whitelist": @[@".GlobalPreferences.plist", @".GlobalPreferences_m.plist", @"bluetoothaudiod.plist", @"NetworkInterfaces.plist", @"OSThermalStatus.plist", @"preferences.plist", @"osanalyticshelper.plist", @"UserEventAgent.plist", @"wifid.plist", @"dprivacyd.plist", @"silhouette.plist", @"nfcd.plist", @"ptpcamerad.plist", @"mobile_storage_proxy.plist"],
+            @"blacklist": @[@"com.roothide.manager.plist", @"com.opa334.Dopamine.roothide.plist", @"com.opa334.Dopamine.plist", @"com.tigisoftware.Filza.plist", @"com.xina.jailbreak.plist", @"org.coolstar.SileoStore.plist", @"ru.domo.cocoatop64.plist", @"ws.hbang.Terminal.plist", @"xyz.willy.Zebra.plist", @"com.apple.terminal.plist"]
+        },
+        @"/var/mobile/Library/Application Support/Containers": @{
+            @"default": @"blacklist",
+            @"blacklist": @[@"xyz.willy.Zebra", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"com.apple.Terminal"]
+        },
+        @"/var/mobile/Library/SplashBoard/Snapshots": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"blacklist": @[@"com.roothide.manager", @"com.opa334.Dopamine.roothide", @"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ru.domo.cocoatop64", @"ws.hbang.Terminal", @"xyz.willy.Zebra", @"com.apple.Terminal"]
+        },
+        @"/var/mobile/Library/Caches": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\.", @"^TelephonyUI-\\d+$", @"^FamilyMarquee.*Mode-.*\\.png$"],
+            @"whitelist": @[@"CloudKit", @"GameKit", @"GeoServices", @"FamilyCircle", @"PassKit", @"VoiceServices", @"VoiceTrigger", @"Backup", @"ssu"],
+            @"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.hbang.Terminal", @"xyz.willy.Zebra", @"Cephei", @"com.apple.Terminal", @"GDFileManagerCache.sqlite", @"GDFileManagerCache.sqlite-shm", @"GDFileManagerCache.sqlite-wal", @"ImageTables", @"SentryCrash", @"io.sentry", @"com.hackemist.SDImageCache"]
+        },
+        @"/var/mobile/Library/Saved Application State": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"blacklist": @[@"com.opa334.Dopamine.savedState", @"com.tigisoftware.Filza.savedState", @"org.coolstar.SileoStore.savedState", @"ws.hbang.Terminal.savedState", @"xyz.willy.Zebra.savedState", @"ru.domo.cocoatop64.savedState", @"com.apple.Terminal.savedState"]
+        },
+        @"/var/mobile/Library/WebKit": @{
+            @"whitelist": @[@"Databases", @"LocalStorage"],
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"blacklist": @[@"xyz.willy.Zebra"]
+        },
+        @"/var/mobile/Library/Cookies": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"whitelist": @[@"Cookies.binarycookies"],
+            @"blacklist": @[@"com.johncoates.Flex.binarycookies"]
+        },
+        @"/var/mobile/Library/HTTPStorages": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.hbang.Terminal", @"xyz.willy.Zebra"]
+        }
+    };
+
+    NSLog(@"[HideJailbreak Audit] begin %@", libraryRoot);
+
+    NSArray<NSString *> *paths = [rules.allKeys sortedArrayUsingSelector:@selector(compare:)];
+    for (NSString *path in paths) {
+        if (![fm fileExistsAtPath:path]) continue;
+
+        NSDictionary *rule = rules[path];
+        NSString *defaultAction = rule[@"default"];
+        NSArray *whitelist = rule[@"whitelist"] ?: @[];
+        NSArray *blacklist = rule[@"blacklist"] ?: @[];
+        NSArray *whitelistRegex = rule[@"whitelistRegex"] ?: @[];
+        NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:path error:nil];
+
+        NSLog(@"[HideJailbreak Audit] rule %@ default=%@ entries=%lu", path, defaultAction ?: @"none", (unsigned long)children.count);
+
+        for (NSString *name in children) {
+            BOOL white = [self doAuditName:name matchesExact:whitelist regex:whitelistRegex];
+            BOOL black = [blacklist containsObject:name];
+            NSString *result = nil;
+            if (black) result = @"BLACKLIST";
+            else if (white) result = @"WHITELIST";
+            else if (defaultAction) result = [defaultAction isEqualToString:@"blacklist"] ? @"DEFAULT-BLACKLIST" : @"DEFAULT-WHITELIST";
+            else result = @"UNMATCHED";
+
+            if (![result isEqualToString:@"WHITELIST"])
+                NSLog(@"[HideJailbreak Audit] %@/%@ -> %@", path, name, result);
+        }
+    }
+
+    NSLog(@"[HideJailbreak Audit] end");
+}
+
 - (BOOL)isJailbreakHidden
 {
     return ![[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"];
@@ -658,6 +758,7 @@ extern char **environ;
                     jbclient_platform_set_systemwide_domain_enabled(false);
                 }
                 [[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:nil];
+                [self runJailbreakLibraryAudit];
             }
             else {
                 [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb" withDestinationPath:JBROOT_PATH(@"/") error:nil];
@@ -668,6 +769,9 @@ extern char **environ;
                     [self refreshJailbreakApps];
                 }
             }
+        }
+        else if (hidden) {
+            [self runJailbreakLibraryAudit];
         }
     };
     
