@@ -70,6 +70,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)isJailbreakHidden;
 - (void)setJailbreakHidden:(BOOL)hidden;
 
+- (NSString *)injectionRulesPath;
+- (NSDictionary *)injectionRules;
+- (BOOL)isInjectionBlockedForBundleID:(NSString *)bundleID;
+- (void)setInjectionBlocked:(BOOL)blocked forBundleID:(NSString *)bundleID;
+- (NSArray<NSString *> *)allInjectionBlockedBundleIDs;
+
 - (BOOL)isPACBypassRequired;
 - (BOOL)isPPLBypassRequired;
 
