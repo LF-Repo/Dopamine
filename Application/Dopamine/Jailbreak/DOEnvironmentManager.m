@@ -1089,34 +1089,44 @@ extern char **environ;
         if (hidden != alreadyHidden) {
             if (hidden) {
                 if ([self isJailbroken]) {
-                    // 先禁用 forkfix，避免 fork 检测
+                    jbclient_platform_set_systemwide_domain_enabled(false);
+
+
                     [self setForkfixEnabled:NO];
 
                     NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
-                    [[NSData data] writeToFile:safeModePath atomically:YES];
+                    [[ NSData data] writeToFile:safeModePath atomically:YES];
 
                     [self unregisterJailbreakApps];
                     [self setPrivatePrebootProtected:NO];
                     [self setFakelibMounted:NO];
                 }
-                // 先隐藏 URL Scheme（依赖 App bundle 路径，需要 /var/containers，与 /var/jb 无关）
+
+
                 [self hideJailbreakURLSchemes];
-                // 再删 /var/jb 符号链接
+
+
                 [[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:nil];
+
                 [self runJailbreakLibraryAudit];
             }
             else {
                 [self restoreHiddenItems];
                 [self restoreJailbreakURLSchemes];
-                [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb" withDestinationPath:JBROOT_PATH(@"/") error:nil];
+
+                [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb"
+                                                     withDestinationPath:JBROOT_PATH(@"/")
+                                                                   error:nil];
+
                 if ([self isJailbroken]) {
                     NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
                     [[NSFileManager defaultManager] removeItemAtPath:safeModePath error:nil];
 
-                    // 恢复 forkfix
                     [self setForkfixEnabled:YES];
 
+
                     jbclient_platform_set_systemwide_domain_enabled(true);
+
                     [self setFakelibMounted:YES];
                     [self setPrivatePrebootProtected:YES];
                     [self refreshJailbreakApps];
