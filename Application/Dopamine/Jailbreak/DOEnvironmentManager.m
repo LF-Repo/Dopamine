@@ -708,201 +708,43 @@ extern char **environ;
     [fm removeItemAtPath:[self hideMapPath] error:nil];
 }
 
-- (NSString *)findAppPathForBundleName:(NSString *)appName
+- (NSString *)hiddenSchemesFilePath
 {
-    NSString *appContainerRoot = @"/var/containers/Bundle/Application";
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *uuids = [fm contentsOfDirectoryAtPath:appContainerRoot error:nil];
-    for (NSString *uuid in uuids) {
-        NSString *uuidPath = [appContainerRoot stringByAppendingPathComponent:uuid];
-        NSArray *contents = [fm contentsOfDirectoryAtPath:uuidPath error:nil];
-        for (NSString *item in contents) {
-            if ([item isEqualToString:appName]) {
-                NSString *fullPath = [uuidPath stringByAppendingPathComponent:item];
-                BOOL isDir = NO;
-                if ([fm fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
-                    NSLog(@"[HideURLScheme] found %@", fullPath);
-                    return fullPath;
-                }
-            }
-        }
-    }
-    NSLog(@"[HideURLScheme] app not found: %@", appName);
-    return nil;
+    return @"/var/mobile/Library/Preferences/.DopamineHiddenSchemes";
 }
 
-- (BOOL)hideURLScheme:(NSString *)scheme forAppAtPath:(NSString *)appPath
+- (void)writeHiddenSchemes:(NSArray<NSString *> *)schemes
 {
-    NSString *infoPlistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+    NSString *path = [self hiddenSchemesFilePath];
     NSFileManager *fm = [NSFileManager defaultManager];
 
-    NSLog(@"[HideURLScheme] target scheme=%@ app=%@", scheme, appPath);
-
-    if (![fm fileExistsAtPath:infoPlistPath]) {
-        NSLog(@"[HideURLScheme] Info.plist not found at %@", infoPlistPath);
-        return NO;
-    }
-
-    NSError *readErr = nil;
-    NSData *data = [NSData dataWithContentsOfFile:infoPlistPath options:0 error:&readErr];
-    if (!data) {
-        NSLog(@"[HideURLScheme] read failed: %@", readErr);
-        return NO;
-    }
-
-    NSError *parseErr = nil;
-    id parsed = [NSPropertyListSerialization propertyListWithData:data
-                                                          options:NSPropertyListMutableContainersAndLeaves
-                                                           format:NULL
-                                                            error:&parseErr];
-    if (![parsed isKindOfClass:[NSMutableDictionary class]]) {
-        NSLog(@"[HideURLScheme] parse failed: %@", parseErr);
-        return NO;
-    }
-
-    NSMutableDictionary *plist = (NSMutableDictionary *)parsed;
-    BOOL modified = NO;
-
-    NSArray *urlTypes = plist[@"CFBundleURLTypes"];
-    if ([urlTypes isKindOfClass:[NSArray class]]) {
-        NSMutableArray *newUrlTypes = [NSMutableArray array];
-        for (NSDictionary *urlType in urlTypes) {
-            NSArray *schemes = urlType[@"CFBundleURLSchemes"];
-            if ([schemes isKindOfClass:[NSArray class]] && [schemes containsObject:scheme]) {
-                NSMutableDictionary *newUrlType = [urlType mutableCopy];
-                NSMutableArray *newSchemes = [schemes mutableCopy];
-                [newSchemes removeObject:scheme];
-                if (newSchemes.count > 0) {
-                    newUrlType[@"CFBundleURLSchemes"] = newSchemes;
-                    [newUrlTypes addObject:newUrlType];
-                }
-                modified = YES;
-                NSLog(@"[HideURLScheme] removed '%@' from CFBundleURLTypes", scheme);
-            } else {
-                [newUrlTypes addObject:urlType];
-            }
-        }
-        if (modified) {
-            plist[@"CFBundleURLTypes"] = newUrlTypes;
-        }
-    }
-
-    NSArray *queriesSchemes = plist[@"LSApplicationQueriesSchemes"];
-    if ([queriesSchemes isKindOfClass:[NSArray class]] && [queriesSchemes containsObject:scheme]) {
-        NSMutableArray *newQueries = [queriesSchemes mutableCopy];
-        [newQueries removeObject:scheme];
-        plist[@"LSApplicationQueriesSchemes"] = newQueries;
-        modified = YES;
-        NSLog(@"[HideURLScheme] removed '%@' from LSApplicationQueriesSchemes", scheme);
-    }
-
-    if (!modified) {
-        NSLog(@"[HideURLScheme] scheme '%@' not found in %@", scheme, infoPlistPath);
-        return NO;
-    }
-
-    NSString *backupPath = [infoPlistPath stringByAppendingString:@".hideurl_backup"];
-    if (![fm fileExistsAtPath:backupPath]) {
-        NSError *cpErr = nil;
-        if (![fm copyItemAtPath:infoPlistPath toPath:backupPath error:&cpErr]) {
-            NSLog(@"[HideURLScheme] backup failed: %@", cpErr);
-            return NO;
-        }
-    }
-
-    NSError *writeErr = nil;
-    NSData *outData = [NSPropertyListSerialization dataWithPropertyList:plist
-                                                                  format:NSPropertyListXMLFormat_v1_0
-                                                                 options:0
-                                                                   error:&writeErr];
-    if (!outData) {
-        NSLog(@"[HideURLScheme] serialize failed: %@", writeErr);
-        return NO;
-    }
-
-    if (![outData writeToFile:infoPlistPath options:NSDataWritingAtomic error:&writeErr]) {
-        NSLog(@"[HideURLScheme] write failed: %@", writeErr);
-        return NO;
-    }
-
-    NSLog(@"[HideURLScheme] wrote %lu bytes to %@", (unsigned long)outData.length, infoPlistPath);
-    return YES;
-}
-
-- (void)restoreURLSchemeForAppAtPath:(NSString *)appPath
-{
-    NSString *infoPlistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
-    NSString *backupPath = [infoPlistPath stringByAppendingString:@".hideurl_backup"];
-    NSFileManager *fm = [NSFileManager defaultManager];
-
-    if (![fm fileExistsAtPath:backupPath]) {
-        NSLog(@"[HideURLScheme] No backup found for %@", appPath);
+    if (schemes.count == 0) {
+        [fm removeItemAtPath:path error:nil];
+        NSLog(@"[HideURLScheme] cleared hidden schemes file");
         return;
     }
 
-    [fm removeItemAtPath:infoPlistPath error:nil];
-    [fm copyItemAtPath:backupPath toPath:infoPlistPath error:nil];
-    [fm removeItemAtPath:backupPath error:nil];
+    NSString *content = [schemes componentsJoinedByString:@"\n"];
+    NSError *writeErr = nil;
+    if (![content writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&writeErr]) {
+        NSLog(@"[HideURLScheme] write failed: %@", writeErr);
+        return;
+    }
 
-    NSLog(@"[HideURLScheme] Restored %@", appPath);
+    // 0644 让所有 App 进程都能读取
+    chmod(path.fileSystemRepresentation, 0644);
+
+    NSLog(@"[HideURLScheme] wrote %lu schemes: %@", (unsigned long)schemes.count, schemes);
 }
 
 - (void)hideJailbreakURLSchemes
 {
-    NSDictionary<NSString *, NSArray<NSString *> *> *targets = @{
-        @"PostBox.app":    @[@"postbox"],
-        @"Santander.app":  @[@"santander"],
-    };
-
-    NSMutableArray<NSString *> *touchedApps = [NSMutableArray array];
-
-    for (NSString *appName in targets) {
-        NSString *appPath = [self findAppPathForBundleName:appName];
-        if (!appPath) {
-            NSLog(@"[HideURLScheme] App not found: %@", appName);
-            continue;
-        }
-        BOOL anyModified = NO;
-        for (NSString *scheme in targets[appName]) {
-            if ([self hideURLScheme:scheme forAppAtPath:appPath]) {
-                anyModified = YES;
-            }
-        }
-        if (anyModified) {
-            [touchedApps addObject:appPath];
-        }
-    }
-
-    if (touchedApps.count == 0) {
-        NSLog(@"[HideURLScheme] nothing changed, skip refresh");
-        return;
-    }
-
-    [self runAsRoot:^{
-        [self runUnsandboxed:^{
-            for (NSString *appPath in touchedApps) {
-                exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-p", appPath.fileSystemRepresentation, NULL);
-            }
-        }];
-    }];
+    [self writeHiddenSchemes:@[@"postbox", @"santander"]];
 }
 
 - (void)restoreJailbreakURLSchemes
 {
-    NSArray<NSString *> *appNames = @[@"PostBox.app", @"Santander.app"];
-
-    for (NSString *appName in appNames) {
-        NSString *appPath = [self findAppPathForBundleName:appName];
-        if (!appPath) continue;
-        [self restoreURLSchemeForAppAtPath:appPath];
-    }
-
-    [self runAsRoot:^{
-        [self runUnsandboxed:^{
-            exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-a", NULL);
-        }];
-    }];
-    [self spawnJbctlAsRootWithArgs:@[@"rebuild_icon_cache"]];
+    [self writeHiddenSchemes:@[]];
 }
 
 - (void)runJailbreakLibraryAudit
