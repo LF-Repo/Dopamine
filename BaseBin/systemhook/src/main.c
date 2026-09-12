@@ -19,6 +19,7 @@
 #include "sandbox.h"
 #include "common/private.h"
 #include "common/inline.h"
+extern void install_urlscheme_hook(void);
 
 bool gFullyDebugged = false;
 static void *gLibSandboxHandle;
