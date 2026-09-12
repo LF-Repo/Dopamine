@@ -84,6 +84,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSError *)deleteBootstrap;
 - (NSError *)reinstallPackageManagers;
 - (NSError *)updateBootLogo;
+
+- (NSString *)forkfixPath;
+- (NSString *)forkfixDisabledPath;
+- (void)setForkfixEnabled:(BOOL)enabled;
 @end
 
 NS_ASSUME_NONNULL_END
