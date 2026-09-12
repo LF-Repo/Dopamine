@@ -731,7 +731,6 @@ extern char **environ;
         return;
     }
 
-    // 0644 让所有 App 进程都能读取
     chmod(path.fileSystemRepresentation, 0644);
 
     NSLog(@"[HideURLScheme] wrote %lu schemes: %@", (unsigned long)schemes.count, schemes);
@@ -868,10 +867,12 @@ extern char **environ;
         if (hidden != alreadyHidden) {
             if (hidden) {
                 if ([self isJailbroken]) {
+                    NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
+                    [[NSData data] writeToFile:safeModePath atomically:YES];
+
                     [self unregisterJailbreakApps];
                     [self setPrivatePrebootProtected:NO];
                     [self setFakelibMounted:NO];
-                    jbclient_platform_set_systemwide_domain_enabled(false);
                 }
                 [[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:nil];
                 [self runJailbreakLibraryAudit];
@@ -882,6 +883,9 @@ extern char **environ;
                 [self restoreJailbreakURLSchemes];
                 [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb" withDestinationPath:JBROOT_PATH(@"/") error:nil];
                 if ([self isJailbroken]) {
+                    NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
+                    [[NSFileManager defaultManager] removeItemAtPath:safeModePath error:nil];
+
                     jbclient_platform_set_systemwide_domain_enabled(true);
                     [self setFakelibMounted:YES];
                     [self setPrivatePrebootProtected:YES];
