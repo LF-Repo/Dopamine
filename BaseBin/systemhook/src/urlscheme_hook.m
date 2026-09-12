@@ -1,14 +1,13 @@
-#import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
-#import <os/log.h>
-#import <stdio.h>
-#import <string.h>
-#import <strings.h>
-#import <stdlib.h>
-#import <stdbool.h>
-#import <unistd.h>
-#import <mach-o/dyld.h>
+#include <mach-o/dyld.h>
+#include <os/log.h>
+#include <stdio.h>
+#include <string.h>
+#include <strings.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <unistd.h>
 
 #define HIDDEN_SCHEMES_FILE "/var/mobile/Library/Preferences/.DopamineHiddenSchemes"
 
@@ -38,12 +37,24 @@ static bool scheme_is_hidden(const char *scheme)
     return found;
 }
 
-#pragma mark - UIApplication hooks
-
-static BOOL (*orig_canOpenURL)(id, SEL, NSURL *);
-static BOOL hooked_canOpenURL(id self, SEL _cmd, NSURL *url)
+static const char *url_scheme_cstr(id url)
 {
-    const char *scheme = [[url scheme] UTF8String];
+    if (!url) return NULL;
+    id scheme = ((id (*)(id, SEL))objc_msgSend)(url, sel_registerName("scheme"));
+    if (!scheme) return NULL;
+    return ((const char *(*)(id, SEL))objc_msgSend)(scheme, sel_registerName("UTF8String"));
+}
+
+static const char *nsstring_cstr(id str)
+{
+    if (!str) return NULL;
+    return ((const char *(*)(id, SEL))objc_msgSend)(str, sel_registerName("UTF8String"));
+}
+
+static BOOL (*orig_canOpenURL)(id, SEL, id);
+static BOOL hooked_canOpenURL(id self, SEL _cmd, id url)
+{
+    const char *scheme = url_scheme_cstr(url);
     if (scheme_is_hidden(scheme)) {
         os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] canOpenURL blocked: %{public}s", scheme);
         return NO;
@@ -51,10 +62,10 @@ static BOOL hooked_canOpenURL(id self, SEL _cmd, NSURL *url)
     return orig_canOpenURL(self, _cmd, url);
 }
 
-static void (*orig_openURL_opts)(id, SEL, NSURL *, NSDictionary *, void (^)(BOOL));
-static void hooked_openURL_opts(id self, SEL _cmd, NSURL *url, NSDictionary *opts, void (^completion)(BOOL))
+static void (*orig_openURL_opts)(id, SEL, id, id, void (^)(BOOL));
+static void hooked_openURL_opts(id self, SEL _cmd, id url, id opts, void (^completion)(BOOL))
 {
-    const char *scheme = [[url scheme] UTF8String];
+    const char *scheme = url_scheme_cstr(url);
     if (scheme_is_hidden(scheme)) {
         os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] openURL:options: blocked: %{public}s", scheme);
         if (completion) completion(NO);
@@ -63,10 +74,10 @@ static void hooked_openURL_opts(id self, SEL _cmd, NSURL *url, NSDictionary *opt
     orig_openURL_opts(self, _cmd, url, opts, completion);
 }
 
-static BOOL (*orig_openURL)(id, SEL, NSURL *);
-static BOOL hooked_openURL(id self, SEL _cmd, NSURL *url)
+static BOOL (*orig_openURL)(id, SEL, id);
+static BOOL hooked_openURL(id self, SEL _cmd, id url)
 {
-    const char *scheme = [[url scheme] UTF8String];
+    const char *scheme = url_scheme_cstr(url);
     if (scheme_is_hidden(scheme)) {
         os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] openURL: blocked: %{public}s", scheme);
         return NO;
@@ -74,31 +85,27 @@ static BOOL hooked_openURL(id self, SEL _cmd, NSURL *url)
     return orig_openURL(self, _cmd, url);
 }
 
-#pragma mark - LSApplicationWorkspace hooks
-
-static NSArray *(*orig_appsForScheme)(id, SEL, NSString *);
-static NSArray *hooked_appsForScheme(id self, SEL _cmd, NSString *scheme)
+static id (*orig_appsForScheme)(id, SEL, id);
+static id hooked_appsForScheme(id self, SEL _cmd, id scheme)
 {
-    if (scheme_is_hidden([scheme UTF8String])) {
-        os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] LSApplicationWorkspace blocked: %{public}s",
-               [scheme UTF8String]);
-        return @[];
+    const char *s = nsstring_cstr(scheme);
+    if (scheme_is_hidden(s)) {
+        os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] LSApplicationWorkspace blocked: %{public}s", s);
+        return nil;
     }
     return orig_appsForScheme(self, _cmd, scheme);
 }
 
-static NSArray *(*orig_appsForURL)(id, SEL, NSURL *);
-static NSArray *hooked_appsForURL(id self, SEL _cmd, NSURL *url)
+static id (*orig_appsForURL)(id, SEL, id);
+static id hooked_appsForURL(id self, SEL _cmd, id url)
 {
-    const char *scheme = [[url scheme] UTF8String];
+    const char *scheme = url_scheme_cstr(url);
     if (scheme_is_hidden(scheme)) {
         os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] LSApplicationWorkspace URL blocked: %{public}s", scheme);
-        return @[];
+        return nil;
     }
     return orig_appsForURL(self, _cmd, url);
 }
-
-#pragma mark - Installer
 
 static bool gHooksInstalled = false;
 
@@ -109,21 +116,21 @@ static void try_install_hooks(void)
     Class uiApp = objc_getClass("UIApplication");
     if (!uiApp) return;
 
-    Method m1 = class_getInstanceMethod(uiApp, @selector(canOpenURL:));
+    Method m1 = class_getInstanceMethod(uiApp, sel_registerName("canOpenURL:"));
     if (m1) {
         orig_canOpenURL = (void *)method_getImplementation(m1);
         method_setImplementation(m1, (IMP)hooked_canOpenURL);
         os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] hooked UIApplication canOpenURL:");
     }
 
-    Method m2 = class_getInstanceMethod(uiApp, @selector(openURL:options:completionHandler:));
+    Method m2 = class_getInstanceMethod(uiApp, sel_registerName("openURL:options:completionHandler:"));
     if (m2) {
         orig_openURL_opts = (void *)method_getImplementation(m2);
         method_setImplementation(m2, (IMP)hooked_openURL_opts);
         os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] hooked UIApplication openURL:options:completionHandler:");
     }
 
-    Method m3 = class_getInstanceMethod(uiApp, @selector(openURL:));
+    Method m3 = class_getInstanceMethod(uiApp, sel_registerName("openURL:"));
     if (m3) {
         orig_openURL = (void *)method_getImplementation(m3);
         method_setImplementation(m3, (IMP)hooked_openURL);
@@ -132,14 +139,14 @@ static void try_install_hooks(void)
 
     Class lsw = objc_getClass("LSApplicationWorkspace");
     if (lsw) {
-        Method m4 = class_getInstanceMethod(lsw, @selector(applicationsAvailableForHandlingURLScheme:));
+        Method m4 = class_getInstanceMethod(lsw, sel_registerName("applicationsAvailableForHandlingURLScheme:"));
         if (m4) {
             orig_appsForScheme = (void *)method_getImplementation(m4);
             method_setImplementation(m4, (IMP)hooked_appsForScheme);
             os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] hooked LSApplicationWorkspace applicationsAvailableForHandlingURLScheme:");
         }
 
-        Method m5 = class_getInstanceMethod(lsw, @selector(applicationsAvailableForOpeningURL:));
+        Method m5 = class_getInstanceMethod(lsw, sel_registerName("applicationsAvailableForOpeningURL:"));
         if (m5) {
             orig_appsForURL = (void *)method_getImplementation(m5);
             method_setImplementation(m5, (IMP)hooked_appsForURL);
