@@ -710,7 +710,7 @@ extern char **environ;
 
 - (NSString *)hiddenSchemesFilePath
 {
-    return @"/var/mobile/Library/Preferences/.DopamineHiddenSchemes";
+    return @"/var/mobile/Library/Caches/.DopamineHiddenSchemes";
 }
 
 - (void)writeHiddenSchemes:(NSArray<NSString *> *)schemes
@@ -738,7 +738,10 @@ extern char **environ;
 
 - (void)hideJailbreakURLSchemes
 {
-    [self writeHiddenSchemes:@[@"postbox", @"santander"]];
+    [self writeHiddenSchemes:@[
+        @"postbox",
+        @"santander",
+    ]];
 }
 
 - (void)restoreJailbreakURLSchemes
