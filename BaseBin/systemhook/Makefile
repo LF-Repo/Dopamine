@@ -10,18 +10,19 @@ LDFLAGS = -dynamiclib -lobjc -isysroot $(SYSROOT) $(ARCHS) -miphoneos-version-mi
 SOURCES_C = $(wildcard src/*.c src/common/*.c ../libjailbreak/src/jbclient_*.c ../libjailbreak/src/hookd.c ../_external/modules/litehook/src/*.c)
 SOURCES_M = $(wildcard src/*.m src/common/*.m)
 SOURCES_S = $(wildcard src/*.S src/common/*.S ../libjailbreak/src/inline_svc.S)
-OBJECTS = $(SOURCES_C:.c=.o) $(SOURCES_M:.m=.o) $(SOURCES_S:.S=.o)
+
+OBJECTS = $(SOURCES_C:.c=.c.o) $(SOURCES_M:.m=.m.o) $(SOURCES_S:.S=.S.o)
 
 sign: $(TARGET)
 	@ldid -Cadhoc -S $^
 
-%.o: %.c
+%.c.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-%.o: %.m
+%.m.o: %.m
 	$(CC) $(CFLAGS) -c $< -o $@
 
-%.o: %.S
+%.S.o: %.S
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJECTS)
