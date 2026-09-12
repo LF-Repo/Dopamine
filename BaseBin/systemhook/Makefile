@@ -1,8 +1,11 @@
 TARGET = systemhook.dylib
 CC = clang
 
-CFLAGS = -I../.include -I./src -I../_external/modules/litehook/src -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -arch arm64 -arch arm64e -miphoneos-version-min=15.0 -install_name @loader_path/$(TARGET) -Wno-deprecated-declarations -D BUILD_STANDALONE=$(BUILD_STANDALONE) -Os -moutline
-LDFLAGS = -dynamiclib -lobjc
+SYSROOT = $(shell xcrun --sdk iphoneos --show-sdk-path)
+ARCHS = -arch arm64 -arch arm64e
+
+CFLAGS = -I../.include -I./src -I../_external/modules/litehook/src -isysroot $(SYSROOT) $(ARCHS) -miphoneos-version-min=15.0 -Wno-deprecated-declarations -D BUILD_STANDALONE=$(BUILD_STANDALONE) -Os -moutline
+LDFLAGS = -dynamiclib -lobjc -isysroot $(SYSROOT) $(ARCHS) -miphoneos-version-min=15.0 -install_name @loader_path/$(TARGET)
 
 SOURCES_C = $(wildcard src/*.c src/common/*.c ../libjailbreak/src/jbclient_*.c ../libjailbreak/src/hookd.c ../_external/modules/litehook/src/*.c)
 SOURCES_M = $(wildcard src/*.m src/common/*.m)
