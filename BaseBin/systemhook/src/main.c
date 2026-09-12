@@ -1,505 +1,1134 @@
-#include "common/common.h"
+//
+//  EnvironmentManager.m
+//  Dopamine
+//
+//  Created by Lars Fröder on 10.01.24.
+//
 
-#include <mach-o/dyld.h>
-#include <mach-o/dyld_images.h>
-#include <mach-o/getsect.h>
-#include <dlfcn.h>
-#include <sys/stat.h>
-#include <paths.h>
-#include <util.h>
-#include <ptrauth.h>
-#include <libjailbreak/jbclient_xpc.h>
-#include <libjailbreak/codesign.h>
-#include <libjailbreak/jbroot.h>
-#include <libjailbreak/hookd.h>
-#include "../dyldhook/src/dyld_jbinfo.h"
-#include "common/hookd_external.h"
-#include <choma/CSBlob.h>
-#include "litehook.h"
-#include "sandbox.h"
-#include "common/private.h"
-#include "common/inline.h"
-extern void install_urlscheme_hook(void);
+#import "DOEnvironmentManager.h"
+#import "UIImage+JPEG2000.h"
 
-bool gFullyDebugged = false;
-static void *gLibSandboxHandle;
-char *JB_BootUUID = NULL;
-char *JB_RootPath = NULL;
-char *get_jbroot(void) { return JB_RootPath; }
+#import <sys/sysctl.h>
+#import <sys/mount.h>
+#import <sys/utsname.h>
+#import <sys/stat.h>
+#import <unistd.h>
+#import <mach-o/dyld.h>
+#import <libgrabkernel2/libgrabkernel2.h>
+#import <libjailbreak/info.h>
+#import <libjailbreak/codesign.h>
+#import <libjailbreak/util.h>
+#import <libjailbreak/display.h>
+#import <libjailbreak/machine_info.h>
+#import <libjailbreak/carboncopy.h>
 
-static char gExecutablePath[PATH_MAX];
-static int load_executable_path(void)
+#import <IOKit/IOKitLib.h>
+#import "DOUIManager.h"
+#import "DOExploitManager.h"
+#import "DOPreferenceManager.h"
+#import "NSData+Hex.h"
+#import <LocalAuthentication/LocalAuthentication.h>
+
+int reboot3(uint64_t flags, ...);
+CFPropertyListRef MGCopyAnswer(CFStringRef);
+extern char **environ;
+
+@implementation DOEnvironmentManager
+
++ (instancetype)sharedManager
 {
-	char executablePath[PATH_MAX];
-	uint32_t bufsize = PATH_MAX;
-	if (_NSGetExecutablePath(executablePath, &bufsize) == 0) {
-		if (realpath(executablePath, gExecutablePath) != NULL) return 0;
-	}
-	return -1;
+    static DOEnvironmentManager *shared;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        shared = [[DOEnvironmentManager alloc] init];
+    });
+    return shared;
 }
 
-static char *JB_SandboxExtensions = NULL;
-
-void consume_tokenized_sandbox_extensions(char *sandboxExtensions)
+- (instancetype)init
 {
-	if (sandboxExtensions[0] == '\0') return;
-
-	char *it = sandboxExtensions;
-	char *last = sandboxExtensions;
-	while (*(++it) != '\0') {
-		if (*it == '|') {
-			*it = '\0';
-			sandbox_extension_consume(last);
-			last = &it[1];
-			*it = '|';
-		}
-	}
-	sandbox_extension_consume(last);
+    self = [super init];
+    if (self) {
+        _bootstrapNeedsMigration = NO;
+        _bootstrapper = [[DOBootstrapper alloc] init];
+        if ([self isJailbroken]) {
+            gSystemInfo.jailbreakInfo.rootPath = strdup(jbclient_get_jbroot() ?: "");
+        }
+        else if ([self isInstalledThroughTrollStore]) {
+            [self locateJailbreakRoot];
+        }
+    }
+    return self;
 }
 
-void *(*sandbox_apply_orig)(void *) = NULL;
-void *sandbox_apply_hook(void *a1)
+- (NSString *)nightlyHash
 {
-	void *r = sandbox_apply_orig(a1);
-	consume_tokenized_sandbox_extensions(JB_SandboxExtensions);
-	return r;
-}
-
-int dyld_hook_routine(void **dyld, int idx, void *hook, void **orig, uint16_t pacSalt)
-{
-	if (!dyld) return -1;
-
-	uint64_t dyldPacDiversifier = ((uint64_t)dyld & ~(0xFFFFull << 48)) | (0x63FAull << 48);
-	void **dyldFuncPtrs = ptrauth_auth_data(*dyld, ptrauth_key_process_independent_data, dyldPacDiversifier);
-	if (!dyldFuncPtrs) return -1;
-
-	if (vm_protect(mach_task_self_, (mach_vm_address_t)&dyldFuncPtrs[idx], sizeof(void *), false, VM_PROT_READ | VM_PROT_WRITE) == 0) {
-		uint64_t location = (uint64_t)&dyldFuncPtrs[idx];
-		uint64_t pacDiversifier = (location & ~(0xFFFFull << 48)) | ((uint64_t)pacSalt << 48);
-
-		*orig = ptrauth_auth_and_resign(dyldFuncPtrs[idx], ptrauth_key_process_independent_code, pacDiversifier, ptrauth_key_function_pointer, 0);
-		dyldFuncPtrs[idx] = ptrauth_auth_and_resign(hook, ptrauth_key_function_pointer, 0, ptrauth_key_process_independent_code, pacDiversifier);
-		vm_protect(mach_task_self_, (mach_vm_address_t)&dyldFuncPtrs[idx], sizeof(void *), false, VM_PROT_READ);
-		return 0;
-	}
-
-	return -1;
-}
-
-// dlsym calls use __builtin_return_address(0) to determine what library called it
-// Since we hook them, if we just call the original function on our own, the return address will always point to systemhook
-// Therefore we must ensure the call to the original function is a tail call, which ensures that the stack and lr are restored and the compiler turns the call into a direct branch
-// This is done via __attribute__((musttail)), this way __builtin_return_address(0) will point to the original calling library instead of systemhook
-
-void *(*dyld_dlsym_orig)(void *dyld, void *handle, const char *name);
-void *dyld_dlsym_hook(void *dyld, void *handle, const char *name)
-{
-	if (handle == gLibSandboxHandle && !strcmp(name, "sandbox_apply")) {
-		// We abuse the fact that libsystem_sandbox will call dlsym to get the sandbox_apply pointer here
-		// Because we can just return a different pointer, we avoid doing instruction replacements
-		return sandbox_apply_hook;
-	}
-	__attribute__((musttail)) return dyld_dlsym_orig(dyld, handle, name);
-}
-
-int ptrace_hook(int request, pid_t pid, caddr_t addr, int data)
-{
-	int r = ptrace_inline(request, pid, addr, data);
-
-	// ptrace works on any process when the caller is unsandboxed,
-	// but when the victim process does not have the get-task-allow entitlement,
-	// it will fail to set the debug flags, therefore we patch ptrace to manually apply them
-	// processes that have tweak injection enabled will have their debug flags already set
-	// this is only relevant for ones that don't, e.g. if you disable tweak injection on an app via choicy
-	// but still want to be able to attach a debugger to them
-	if (r == 0 && (request == PT_ATTACHEXC || request == PT_ATTACH)) {
-		jbclient_platform_set_process_debugged(pid, true);
-		jbclient_platform_set_process_debugged(getpid(), true);
-	}
-
-	return r;
-}
-
-#ifndef __arm64e__
-
-// The NECP subsystem is the only thing in the kernel that ever checks CS_VALID on userspace processes (Only on iOS >=16)
-// In order to not break system functionality, we need to readd CS_VALID before any of these are invoked
-
-int necp_match_policy_hook(uint8_t *parameters, size_t parameters_size, void *returned_result)
-{
-	jbclient_cs_revalidate();
-	return syscall(SYS_necp_match_policy, parameters, parameters_size, returned_result);
-}
-
-int necp_open_hook(int flags)
-{
-	jbclient_cs_revalidate();
-	return syscall(SYS_necp_open, flags);
-}
-
-int necp_client_action_hook(int necp_fd, uint32_t action, uuid_t client_id, size_t client_id_len, uint8_t *buffer, size_t buffer_size)
-{
-	jbclient_cs_revalidate();
-	return syscall(SYS_necp_client_action, necp_fd, action, client_id, client_id_len, buffer, buffer_size);
-}
-
-int necp_session_open_hook(int flags)
-{
-	jbclient_cs_revalidate();
-	return syscall(SYS_necp_session_open, flags);
-}
-
-int necp_session_action_hook(int necp_fd, uint32_t action, uint8_t *in_buffer, size_t in_buffer_length, uint8_t *out_buffer, size_t out_buffer_length)
-{
-	jbclient_cs_revalidate();
-	return syscall(SYS_necp_session_action, necp_fd, action, in_buffer, in_buffer_length, out_buffer, out_buffer_length);
-}
-
-// For the userland, there are multiple processes that will check CS_VALID for one reason or another
-// As we inject system wide (or at least almost system wide), we can just patch the source of the info though - csops itself
-// Additionally we also remove CS_DEBUGGED while we're at it, as on arm64e this also is not set and everything is fine
-// That way we have unified behaviour between both arm64 and arm64e
-
-int csops_hook(pid_t pid, unsigned int ops, void *useraddr, size_t usersize)
-{
-	int rv = syscall(SYS_csops, pid, ops, useraddr, usersize);
-	if (rv != 0) return rv;
-	if (ops == CS_OPS_STATUS) {
-		if (useraddr && usersize == sizeof(uint32_t)) {
-			uint32_t* csflag = (uint32_t *)useraddr;
-			*csflag |= CS_VALID;
-			*csflag &= ~CS_DEBUGGED;
-			if (pid == getpid() && gFullyDebugged) {
-				*csflag |= CS_DEBUGGED;
-			}
-		}
-	}
-	return rv;
-}
-
-int csops_audittoken_hook(pid_t pid, unsigned int ops, void *useraddr, size_t usersize, audit_token_t *token)
-{
-	int rv = syscall(SYS_csops_audittoken, pid, ops, useraddr, usersize, token);
-	if (rv != 0) return rv;
-	if (ops == CS_OPS_STATUS) {
-		if (useraddr && usersize == sizeof(uint32_t)) {
-			uint32_t* csflag = (uint32_t *)useraddr;
-			*csflag |= CS_VALID;
-			*csflag &= ~CS_DEBUGGED;
-			if (pid == getpid() && gFullyDebugged) {
-				*csflag |= CS_DEBUGGED;
-			}
-		}
-	}
-	return rv;
-}
-
+#ifdef NIGHTLY
+    return [NSString stringWithUTF8String:COMMIT_HASH];
+#else
+    return nil;
 #endif
-
-bool should_enable_tweaks(void)
-{
-	if (access(JBROOT_PATH("/basebin/.safe_mode"), F_OK) == 0) {
-		return false;
-	}
-
-	char *tweaksDisabledEnv = getenv("DISABLE_TWEAKS");
-	if (tweaksDisabledEnv) {
-		if (!strcmp(tweaksDisabledEnv, "1")) {
-			return false;
-		}
-	}
-
-	if (jbclient_dopamine_is_jailbroken(NULL)) {
-		// Probe whether we are the Dopamine app
-		// Only the Dopamine app is allowed to contact this domain
-		// In this case we want to disable tweak injection to prevent jailbreak detections etc messing with the app functionality
-		return false;
-	}
-
-	const char *tweaksDisabledPathSuffixes[] = {
-		// System binaries
-		"/usr/libexec/xpcproxy",
-	};
-	for (size_t i = 0; i < sizeof(tweaksDisabledPathSuffixes) / sizeof(const char*); i++) {
-		if (string_has_suffix(gExecutablePath, tweaksDisabledPathSuffixes[i])) return false;
-	}
-
-	if (__builtin_available(iOS 16.0, *)) {
-		// These seem to be problematic on iOS 16+ (dyld gets stuck in a weird way when opening TweakLoader)
-		const char *iOS16TweaksDisabledPaths[] = {
-			"/usr/libexec/logd",
-			"/usr/sbin/notifyd",
-			"/usr/libexec/usermanagerd",
-		};
-		for (size_t i = 0; i < sizeof(iOS16TweaksDisabledPaths) / sizeof(const char*); i++) {
-			if (!strcmp(gExecutablePath, iOS16TweaksDisabledPaths[i])) return false;
-		}
-	}
-
-	return true;
 }
 
-int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path, struct _posix_spawn_args_desc *desc, char *const argv[restrict], char * const envp[restrict])
+- (NSString *)appVersion
 {
-	return posix_spawn_hook_shared(pid, path, desc, argv, envp, (void *)__posix_spawn_inline, jbclient_trust_file_by_path, jbclient_platform_set_process_debugged, jbclient_jbsettings_get_double("jetsamMultiplier"));
+    return [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
 }
 
-int __posix_spawn_hook_with_filter(pid_t *restrict pid, const char *restrict path, char *const argv[restrict], char * const envp[restrict], struct _posix_spawn_args_desc *desc, int *ret)
+- (NSString *)appVersionDisplayString
 {
-	*ret = posix_spawn_hook_shared(pid, path, desc, argv, envp, (void *)__posix_spawn_inline, jbclient_trust_file_by_path, jbclient_platform_set_process_debugged, jbclient_jbsettings_get_double("jetsamMultiplier"));
-	return 1;
+    NSString *nightlyHash = [self nightlyHash];
+    if (nightlyHash) {
+        return [NSString stringWithFormat:@"%@~%@", self.appVersion, [nightlyHash substringToIndex:6]];
+    }
+    else {
+        return [self appVersion];
+    }
 }
 
-int __execve_hook(const char *path, char *const argv[], char *const envp[])
+- (NSString *)privatePrebootPath
 {
-	return execve_hook_shared(path, argv, envp, (void *)__execve_inline, jbclient_trust_file_by_path);
+    return @"/private/preboot";
 }
 
-xpc_object_t copy_entitlements_xpc(void)
+- (NSString *)activePrebootPath
 {
-	pid_t pid = getpid();
-	CS_GenericBlob hdr = {0};
-
-	// Get size (will fail with ERANGE)
-	if (csops(pid, CS_OPS_ENTITLEMENTS_BLOB, &hdr, sizeof(hdr)) != 0) {
-		if (errno != ERANGE) {
-			return NULL;
-		}
-	}
-
-	if (hdr.length <= sizeof(hdr)) {
-		// No entitlements
-		return NULL;
-	}
-
-	// Get blob
-	void *buf = malloc(hdr.length);
-	if (!buf)
-		return NULL;
-
-	if (csops(pid, CS_OPS_ENTITLEMENTS_BLOB, buf, hdr.length) != 0) {
-		free(buf);
-		return NULL;
-	}
-
-	// Skip cs_blob header
-	const void *plist = (const uint8_t *)buf + sizeof(CS_GenericBlob);
-	size_t plist_size = hdr.length - sizeof(CS_GenericBlob);
-
-	// Convert to XPC dictionary
-	xpc_object_t obj = xpc_create_from_plist(plist, plist_size);
-
-	free(buf);
-
-	if (!obj || xpc_get_type(obj) != XPC_TYPE_DICTIONARY) {
-		if (obj) xpc_release(obj);
-		return NULL;
-	}
-
-	return obj;
+    NSString *bootManifestString = [NSString stringWithUTF8String:boot_manifest_hash()];
+    return [[self privatePrebootPath] stringByAppendingPathComponent:bootManifestString];
 }
 
-bool process_requires_hookd(void)
+- (void)locateJailbreakRoot
 {
-	xpc_object_t entitlementsXdict = copy_entitlements_xpc();
-	if (!entitlementsXdict) return true;
-
-	bool requiresHookd = xpc_dictionary_get_bool(entitlementsXdict, "com.apple.private.cs.debugger") != true;
-	xpc_release(entitlementsXdict);
-	return requiresHookd;
+    if (!gSystemInfo.jailbreakInfo.rootPath) {
+        NSString *activePrebootPath = [self activePrebootPath];
+        
+        NSString *randomizedJailbreakPath;
+        
+        // First attempt at finding jailbreak root, look for Dopamine 2.x path
+        for (NSString *subItem in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:activePrebootPath error:nil]) {
+            if (subItem.length == 15 && [subItem hasPrefix:@"dopamine-"]) {
+                randomizedJailbreakPath = [activePrebootPath stringByAppendingPathComponent:subItem];
+                break;
+            }
+        }
+        
+        if (!randomizedJailbreakPath) {
+            // Second attempt at finding jailbreak root, look for Dopamine 1.x path, but as other jailbreaks use it too, make sure it is Dopamine
+            // Some other jailbreaks also commit the sin of creating .installed_dopamine, for these we try to filter them out by checking for their installed_ file
+            // If we find this and are sure it's from Dopamine 1.x, rename it so all Dopamine 2.x users will have the same path
+            for (NSString *subItem in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:activePrebootPath error:nil]) {
+                if (subItem.length == 9 && [subItem hasPrefix:@"jb-"]) {
+                    NSString *candidateLegacyPath = [activePrebootPath stringByAppendingPathComponent:subItem];
+                    
+                    BOOL installedDopamine = [[NSFileManager defaultManager] fileExistsAtPath:[candidateLegacyPath stringByAppendingPathComponent:@"procursus/.installed_dopamine"]];
+                    
+                    if (installedDopamine) {
+                        // Hopefully all other jailbreaks that use jb-<UUID>?
+                        // These checks exist because of dumb users (and jailbreak developers) creating .installed_dopamine on jailbreaks that are NOT dopamine...
+                        BOOL installedNekoJB = [[NSFileManager defaultManager] fileExistsAtPath:[candidateLegacyPath stringByAppendingPathComponent:@"procursus/.installed_nekojb"]];
+                        BOOL installedDefinitelyNotAGoodName = [[NSFileManager defaultManager] fileExistsAtPath:[candidateLegacyPath stringByAppendingPathComponent:@"procursus/.xia0o0o0o_jb_installed"]];
+                        BOOL installedPalera1n = [[NSFileManager defaultManager] fileExistsAtPath:[candidateLegacyPath stringByAppendingPathComponent:@"procursus/.palecursus_strapped"]];
+                        if (installedNekoJB || installedPalera1n || installedDefinitelyNotAGoodName) {
+                            continue;
+                        }
+                        
+                        randomizedJailbreakPath = candidateLegacyPath;
+                        _bootstrapNeedsMigration = YES;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (randomizedJailbreakPath) {
+            NSString *jailbreakRootPath = [randomizedJailbreakPath stringByAppendingPathComponent:@"procursus"];
+            if ([[NSFileManager defaultManager] fileExistsAtPath:jailbreakRootPath]) {
+                // This attribute serves as the primary source of what the root path is
+                // Anything else in the jailbreak will get it from here
+                gSystemInfo.jailbreakInfo.rootPath = strdup(jailbreakRootPath.fileSystemRepresentation);
+            }
+        }
+    }
 }
 
-const struct mach_header_64 *get_dyld_mach_header(void)
+- (NSError *)ensureJailbreakRootExists
 {
-	static const struct mach_header_64 *dyldMachHeader = NULL;
-	static dispatch_once_t onceToken;
-	dispatch_once (&onceToken, ^{
-		task_dyld_info_data_t dyldInfo;
-		uint32_t count = TASK_DYLD_INFO_COUNT;
-		kern_return_t kr = task_info(mach_task_self_, TASK_DYLD_INFO, (task_info_t)&dyldInfo, &count);
-		if (kr == KERN_SUCCESS) {
-			struct dyld_all_image_infos *infos = (struct dyld_all_image_infos *)dyldInfo.all_image_info_addr;
-			dyldMachHeader = (const struct mach_header_64 *)infos->dyldImageLoadAddress;
-		}
-	});
-	return dyldMachHeader;
+    NSError *error = nil;
+
+    [self locateJailbreakRoot];
+
+    // DOPACLEAN logic to move a corrupted dopamine directory to a different path to at least make jailbreaking work again
+    // if (gSystemInfo.jailbreakInfo.rootPath) {
+    //     NSString *randomizedJailbreakPath = [NSString stringWithUTF8String:gSystemInfo.jailbreakInfo.rootPath].stringByDeletingLastPathComponent;
+    //     NSString *characterSet = @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    //     NSUInteger stringLen = 6;
+    //     NSMutableString *randomString = [NSMutableString stringWithCapacity:stringLen];
+    //     for (NSUInteger i = 0; i < stringLen; i++) {
+    //         NSUInteger randomIndex = arc4random_uniform((uint32_t)[characterSet length]);
+    //         unichar randomCharacter = [characterSet characterAtIndex:randomIndex];
+    //         [randomString appendFormat:@"%C", randomCharacter];
+    //     }
+        
+    //     NSString *activePrebootPath = [self activePrebootPath];
+    //     NSString *orphanedName = [NSString stringWithFormat:@"orphaned-%@", randomString];
+    //     NSString *orphanedPath = [activePrebootPath stringByAppendingPathComponent:orphanedName];
+    //     [[NSFileManager defaultManager] moveItemAtPath:randomizedJailbreakPath toPath:orphanedPath error:nil];
+    // }
+
+    // return [NSError errorWithDomain:@"Cleaned" code:1 userInfo:nil];
+
+    if (!gSystemInfo.jailbreakInfo.rootPath || _bootstrapNeedsMigration) {
+        [_bootstrapper ensurePrivatePrebootIsWritable];
+
+        NSString *activePrebootPath = [self activePrebootPath];
+
+        NSString *characterSet = @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        NSUInteger stringLen = 6;
+        NSMutableString *randomString = [NSMutableString stringWithCapacity:stringLen];
+        for (NSUInteger i = 0; i < stringLen; i++) {
+            NSUInteger randomIndex = arc4random_uniform((uint32_t)[characterSet length]);
+            unichar randomCharacter = [characterSet characterAtIndex:randomIndex];
+            [randomString appendFormat:@"%C", randomCharacter];
+        }
+        
+        NSString *randomJailbreakFolderName = [NSString stringWithFormat:@"dopamine-%@", randomString];
+        NSString *randomizedJailbreakPath = [activePrebootPath stringByAppendingPathComponent:randomJailbreakFolderName];
+        NSString *jailbreakRootPath = [randomizedJailbreakPath stringByAppendingPathComponent:@"procursus"];
+        
+        if (_bootstrapNeedsMigration) {
+            NSString *oldRandomizedJailbreakPath = [[NSString stringWithUTF8String:gSystemInfo.jailbreakInfo.rootPath] stringByDeletingLastPathComponent];
+            [[NSFileManager defaultManager] moveItemAtPath:oldRandomizedJailbreakPath toPath:randomizedJailbreakPath error:&error];
+        }
+        else {
+            if (![[NSFileManager defaultManager] fileExistsAtPath:jailbreakRootPath]) {
+                [[NSFileManager defaultManager] createDirectoryAtPath:jailbreakRootPath withIntermediateDirectories:YES attributes:nil error:&error];
+            }
+        }
+        
+        if (!error) {
+            gSystemInfo.jailbreakInfo.rootPath = strdup(jailbreakRootPath.UTF8String);
+        }
+    }
+    
+    return error;
 }
 
-int parse_dyldhook_jbinfo(char **jbRootPathOut, char **bootUUIDOut, char **sandboxExtensionsOut, bool *fullyDebuggedOut)
+- (BOOL)isArm64e
 {
-	// Get dyld header
-	const struct mach_header_64 *dyldHeader = get_dyld_mach_header();
-	if (!dyldHeader) return -1;
-
-	// Check if dyld LC_UUID contains dopamine magic
-	uuid_t dyldUUID;
-	if (!_dyld_get_image_uuid((const struct mach_header *)dyldHeader, dyldUUID)) return -2;
-	if (!string_has_prefix((char *)dyldUUID, "DOPA")) return -3;
-
-	// If so, get __jbinfo section
-	size_t jbInfoSize = 0;
-	struct dyld_jbinfo *jbInfo = (struct dyld_jbinfo *)getsectiondata(dyldHeader, "__DATA", "__jbinfo", &jbInfoSize);
-	if (!jbInfo) return -4;
-
-	// Check if dyld already performed check-in
-	if (jbInfo->state != DYLD_STATE_CHECKED_IN) return -5;
-
-	// If so, parse jbinfo
-	if (jbRootPathOut)        *jbRootPathOut        = jbInfo->jbRootPath;
-	if (bootUUIDOut)          *bootUUIDOut          = jbInfo->bootUUID;
-	if (sandboxExtensionsOut) *sandboxExtensionsOut = jbInfo->sandboxExtensions;
-	if (fullyDebuggedOut)     *fullyDebuggedOut     = jbInfo->fullyDebugged;
-
-	return 0;
+    cpu_subtype_t cpusubtype = 0;
+    size_t len = sizeof(cpusubtype);
+    if (sysctlbyname("hw.cpusubtype", &cpusubtype, &len, NULL, 0) == -1) return NO;
+    return (cpusubtype & ~CPU_SUBTYPE_MASK) == CPU_SUBTYPE_ARM64E;
 }
 
-__attribute__((constructor)) static void initializer(void)
+- (BOOL)isSPTM
 {
-	// Under normal circumstances, dyldhook will have already handled the check-in, so get the check-in information from the __jbinfo section
-	// For more information on the check-in process, check the comments in dyldhook
-	if (parse_dyldhook_jbinfo(&JB_RootPath, &JB_BootUUID, &JB_SandboxExtensions, &gFullyDebugged) != 0) {
-		// If under any circumstances dyldhook has *not* performed a check-in, do it now
-		// This code path is taken inside xpcproxy on iOS 16, because launchd apparently no longer passes it a bootstrap port
-		if (jbclient_process_checkin(&JB_RootPath, &JB_BootUUID, &JB_SandboxExtensions, &gFullyDebugged, NULL) == 0) {
-			consume_tokenized_sandbox_extensions(JB_SandboxExtensions);
-		}
-		else {
-			// If neither dyldhook nor systemhook managed to perform the check-in, something is very wrong and the best thing we can do is bail out
-			// Should realistically never happen though
-			return;
-		}
-	}
+    if (@available(iOS 17.0, *)) {
+        io_registry_entry_t memory_map = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/chosen/memory-map");
+        if (memory_map == IO_OBJECT_NULL)   return NO;
 
-	// Unset DYLD_INSERT_LIBRARIES, but only if systemhook itself is the only thing contained in it
-	// Feeable attempt at making jailbreak detection harder
-	const char *dyldInsertLibraries = getenv("DYLD_INSERT_LIBRARIES");
-	if (dyldInsertLibraries) {
-		if (!strcmp(dyldInsertLibraries, HOOK_DYLIB_PATH)) {
-			unsetenv("DYLD_INSERT_LIBRARIES");
-		}
-	}
+        CFArrayRef keys = (CFArrayRef)IORegistryEntryCreateCFProperty(memory_map, CFSTR(kIORegistryEntryPropertyKeysKey), kCFAllocatorDefault, 0);
+        IOObjectRelease(memory_map);
+        if (!keys)  return NO;
 
-	// On iOS 26+, hooks have to be applied through hookd
-	if (__builtin_available(iOS 19.0, *)) {
+        CFRange range = CFRangeMake(0, CFArrayGetCount(keys));
 
-		// If available, use jbclient_mach_hookd_send_msg inside dyld instead...
-		// The reason for this is that dyldhook in itself is fully self contained without calling any external code
-		// We want to make sure no external code is invoked when some binary calls vm_protect
-		// This is mainly due to the fact if the binary is trying to remove the executable flag of a page our logic depends on, the binary will crash
-		// Frida is notorious for this, it hooks something in libsystem in every process it injects to
-		// Alternatively we could also
-		// - Implement inline mach_msg* syscalls into systemhook
-		// - Refactor all logic involving hookd into it's own library and implement the inline syscalls there
-		// But for now this works, the only problem could be something trying to hook a page in dyld itself....
-		void *dyld_jbclient_mach_hookd_send_msg = litehook_find_symbol(get_dyld_mach_header(), "_jbclient_mach_hookd_send_msg");
-		if (dyld_jbclient_mach_hookd_send_msg) {
-			hookd_send_msg = dyld_jbclient_mach_hookd_send_msg;
-		}
+        bool isSPTM = CFArrayContainsValue(keys, range, CFSTR("SPTM")) && CFArrayContainsValue(keys, range, CFSTR("TXM"));
+        CFRelease(keys);
 
-		if (process_requires_hookd()) {
-			litehook_hook_memory = litehook_hook_memory_hookd;
-			litehook_hook_function(mach_vm_protect, mach_vm_protect_fixed);
-			init_hookd_external_support();
-		}
-	}
+        return isSPTM;
+    }
+    return false;
+}
 
-	// Apply posix_spawn / execve hooks
-	if (__builtin_available(iOS 16.0, *)) {
-		litehook_hook_function(__posix_spawn, __posix_spawn_hook);
-		litehook_hook_function(__execve,      __execve_hook);
-	}
-	else {
-		// On iOS 15 there is a way to hook posix_spawn and execve without doing instruction replacements
-		// Unfortunately Apple decided to remove these in iOS 16 :(
+- (NSString *)versionSupportString
+{
+    cpu_subtype_t cpuFamily = 0;
+    size_t cpuFamilySize = sizeof(cpuFamily);
+    sysctlbyname("hw.cpufamily", &cpuFamily, &cpuFamilySize, NULL, 0);
+    
+    if ([self isArm64e]) {
+        if (cpuFamily == CPUFAMILY_ARM_VORTEX_TEMPEST || cpuFamily == CPUFAMILY_ARM_LIGHTNING_THUNDER) {
+            return @"iOS 15.0 - 18.7.1, 26.0 - 26.0.1 (A12/A13, PPL)";
+        }
+        else if (![self isSPTM]) {
+            return @"iOS 15.0 - 17.3.1 (PPL)";
+        }
+        else {
+            return @"iOS 17.0 - 17.3.1 (SPTM)";
+        }
+    }
+    else {
+        return @"iOS 15.0 - 18.7.1 (arm64)";
+    }
+}
 
-		void **posix_spawn_with_filter = litehook_find_dsc_symbol("/usr/lib/system/libsystem_kernel.dylib", "_posix_spawn_with_filter");
-		void **execve_with_filter      = litehook_find_dsc_symbol("/usr/lib/system/libsystem_kernel.dylib", "_execve_with_filter");
+- (BOOL)isInstalledThroughTrollStore
+{
+    static BOOL trollstoreInstallation = NO;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSString* trollStoreMarkerPath = [[[NSBundle mainBundle].bundlePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"_TrollStore"];
+        trollstoreInstallation = [[NSFileManager defaultManager] fileExistsAtPath:trollStoreMarkerPath];
+    });
+    return trollstoreInstallation;
+}
 
-		*posix_spawn_with_filter = __posix_spawn_hook_with_filter;
-		*execve_with_filter      = __execve_hook;
-	}
+- (void)updateJailbreakState
+{
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        char *jbVersionC = NULL;
+        _isJailbroken = jbclient_dopamine_is_jailbroken(&jbVersionC);
+        if (jbVersionC) {
+            _jailbrokenVersion = [NSString stringWithUTF8String:jbVersionC];
+            free(jbVersionC);
+        }
+    });
+}
 
-	// Hook the dyld_shared_cache __fcntl to jump to the dyld __fcntl instead
-	// This makes it so that library validation is also bypassed if someone calls fcntl in userspace to attach a signature manually
-	void *dyld___fcntl = litehook_find_symbol(get_dyld_mach_header(), "___fcntl");
-	extern int __fcntl(int fd, int op, ... /* arg */ );
-	litehook_hook_function(__fcntl, dyld___fcntl);
+- (BOOL)isJailbroken
+{
+    [self updateJailbreakState];
+    return _isJailbroken;
+}
 
-	// Initialize stuff neccessary for sandbox_apply hook
-	gLibSandboxHandle = dlopen("/usr/lib/libsandbox.1.dylib", RTLD_FIRST | RTLD_LOCAL | RTLD_LAZY);
-	sandbox_apply_orig = dlsym(gLibSandboxHandle, "sandbox_apply");
+- (void)setJailbroken:(BOOL)jailbroken withVersion:(NSString *)version
+{
+    _isJailbroken = jailbroken;
+    if (_isJailbroken) _jailbrokenVersion = version;
+}
 
-	// Apply dyld hooks
-	void ***gDyldPtr = litehook_find_dsc_symbol("/usr/lib/system/libdyld.dylib", "__ZN5dyld45gDyldE");
-	if (gDyldPtr) {
-		// TODO: Maybe we can just rebind sandbox_apply instead?
-		dyld_hook_routine(*gDyldPtr, 17, (void *)&dyld_dlsym_hook, (void **)&dyld_dlsym_orig, 0x839D);
-	} else {
-		void ***gAPIsPtr = litehook_find_dsc_symbol("/usr/lib/system/libdyld.dylib", "__ZN5dyld45gAPIsE");
-		if (gAPIsPtr) {
-			dyld_hook_routine(*gAPIsPtr, 16, (void *)&dyld_dlsym_hook, (void **)&dyld_dlsym_orig, 0x839D);
-		}
-	}
+- (BOOL)isJailbrokenWithOtherJailbreak
+{
+    if (![self isJailbroken]) {
+        uint32_t csFlags = 0;
+        csops(getpid(), CS_OPS_STATUS, &csFlags, sizeof(csFlags));
+        
+        // Palera1n
+        if (csFlags & CS_PLATFORM_BINARY) return YES;
+        
+        // Older Dopamine build
+        if (!access("/usr/lib/systemhook.dylib", F_OK)) return YES;
+    }
+    return NO;
+}
 
-#ifdef __arm64e__
-	// Since pages have been modified in this process, we need to load forkfix to ensure forking will work
-	// Optimization: If the process cannot fork at all due to sandbox, we don't need to do anything
-	if (sandbox_check(getpid(), "process-fork", SANDBOX_CHECK_NO_REPORT, NULL) == 0) {
-		dlopen(JBROOT_PATH("/basebin/forkfix.dylib"), RTLD_NOW);
-	}
-#endif
+- (NSString *)jailbrokenVersion
+{
+    [self updateJailbreakState];
+    if (!_isJailbroken) return nil;
+    return _jailbrokenVersion;
+}
 
-	if (load_executable_path() == 0) {
-		// Load rootlesshooks / watchdoghook when neccessary
-		if (!strcmp(gExecutablePath, "/usr/sbin/cfprefsd") ||
-			!strcmp(gExecutablePath, "/System/Library/CoreServices/SpringBoard.app/SpringBoard") ||
-			!strcmp(gExecutablePath, "/usr/libexec/lsd")) {
-			dlopen(JBROOT_PATH("/basebin/rootlesshooks.dylib"), RTLD_NOW);
-		}
-		else if (!strcmp(gExecutablePath, "/usr/libexec/watchdogd")) {
-			dlopen(JBROOT_PATH("/basebin/watchdoghook.dylib"), RTLD_NOW);
-		}
+- (NSString *)systemVersion
+{
+    return (__bridge NSString *)MGCopyAnswer((__bridge CFStringRef)@"ProductVersion");
+}
 
-		// ptrace hook to allow attaching a debugger to processes that systemhook did not inject into
-		// e.g. allows attaching debugserver to an app where tweak injection has been disabled via choicy
-		// since we want to keep hooks minimal and debugserver is the only thing I can think of that would
-		// call ptrace and expect it to allow invalid pages, we only hook it in debugserver
-		// this check is a bit shit since we rely on the name of the binary, but who cares ¯\_(ツ)_/¯
-		if (string_has_suffix(gExecutablePath, "/debugserver")) {
-			litehook_hook_function(ptrace, ptrace_hook);
-		}
+- (BOOL)isBootstrapped
+{
+    return (BOOL)jbinfo(rootPath);
+}
 
-#ifndef __arm64e__
-		// On arm64, writing to executable pages removes CS_VALID from the csflags of the process
-		// These hooks are neccessary to get the system to behave with this (since multiple system APIs check for CS_VALID and produce failures if it's not set)
-		// They are ugly but needed
-		litehook_hook_function(csops, csops_hook);
-		litehook_hook_function(csops_audittoken, csops_audittoken_hook);
-		if (__builtin_available(iOS 16.0, *)) {
-			litehook_hook_function(necp_match_policy, necp_match_policy_hook);
-			litehook_hook_function(necp_open, necp_open_hook);
-			litehook_hook_function(necp_client_action, necp_client_action_hook);
-			litehook_hook_function(necp_session_open, necp_session_open_hook);
-			litehook_hook_function(necp_session_action, necp_session_action_hook);
-		}
-#endif
-		// Load tweaks if desired
-		// We can hardcode /var/jb here since if it doesn't exist, loading TweakLoader.dylib is not going to work anyways
-		if (should_enable_tweaks()) {
-			const char *tweakLoaderPath = "/var/jb/usr/lib/TweakLoader.dylib";
-			if (access(tweakLoaderPath, F_OK) == 0) {
-				void *tweakLoaderHandle = dlopen(tweakLoaderPath, RTLD_NOW);
-				if (tweakLoaderHandle != NULL) {
-					dlclose(tweakLoaderHandle);
-				}
-			}
-		}
+- (void)runUnsandboxed:(void (^)(void))unsandboxBlock
+{
+    if ([self isInstalledThroughTrollStore]) {
+        unsandboxBlock();
+    }
+    else if ([self isJailbroken]) {
+        uint64_t labelBackup = 0;
+        jbclient_root_set_mac_label(1, -1, &labelBackup);
+        unsandboxBlock();
+        jbclient_root_set_mac_label(1, labelBackup, NULL);
+    }
+    else {
+        // Hope that we are already unsandboxed
+        unsandboxBlock();
+    }
+}
 
-#ifndef __arm64e__
-		// Feeable attempt at adding back CS_VALID
-        jbclient_cs_revalidate();
-#endif
+- (void)runAsRoot:(void (^)(void))rootBlock
+{
+    uint32_t orgUser = geteuid();
+    uint32_t orgGroup = getegid();
+    
+    if (orgUser == 0 && orgGroup == 0) {
+        rootBlock();
+        return;
     }
 
-    install_urlscheme_hook();
+    if (self.isJailbroken) {
+        if (jbclient_dopamine_get_root() == 0) {
+            rootBlock();
+            jbclient_dopamine_drop_root();
+        }
+    }
 }
+
+- (int)spawnJbctlAsRootWithArgs:(NSArray *)args
+{
+    bool needsLegacySolution = false;
+    if (self.jailbrokenVersion) {
+        needsLegacySolution = (strcmp(self.jailbrokenVersion.UTF8String, "3.0.5") < 0);
+    }
+
+    char **argBuf = malloc((args.count + 4) * sizeof(char *));
+    argBuf[0] = strdup(JBROOT_PATH("/basebin/jbctl"));
+    int i = 1;
+    for (NSString *arg in args) {
+        argBuf[i++] = strdup(arg.UTF8String);
+    }
+
+    if (!needsLegacySolution) {
+        argBuf[i++] = strdup("--waitfor");
+        argBuf[i++] = strdup("3");
+    }
+    argBuf[i++] = NULL;
+    
+    posix_spawn_file_actions_t act = NULL;
+	posix_spawn_file_actions_init(&act);
+    posix_spawnattr_t attr = NULL;
+    posix_spawnattr_init(&attr);
+     
+    int waitPipe[2];
+    
+    if (!needsLegacySolution) {
+        pipe(waitPipe);
+        posix_spawn_file_actions_adddup2(&act, waitPipe[0], 3);
+    }
+    else {
+        posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
+    }
+
+    __block int pid = 0;
+    __block int r = -1;
+
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            r = posix_spawn(&pid, argBuf[0], &act, &attr, (char *const *)argBuf, (char *const *)environ);
+            if (needsLegacySolution) {
+                // Legacy solution is a gamble, which is why it was removed and superseeded by --waitfor
+                // But if jailbroken with <3.0.5, jbctl doesn't support --waitfor yet
+                kill(pid, SIGCONT);
+            }
+        }];
+        // We *NEED* to leave this block on iOS 17+ to avoid a panic, --waitfor ensures this always happens
+    }];
+
+    posix_spawnattr_destroy(&attr);
+    posix_spawn_file_actions_destroy(&act);
+    for (int y = 0; y < i; y++) {
+        free(argBuf[y]);
+    }
+    free(argBuf);
+
+    if (!needsLegacySolution) {
+        if (r == 0) {
+            // We left the root/unsandbox block, now resume jbctl by writing to pipe
+            char w = 'w';
+            write(waitPipe[1], &w, sizeof(w));
+        }
+
+        close(waitPipe[0]);
+        close(waitPipe[1]);
+    }
+
+    return cmd_wait_for_exit(pid);
+}
+
+- (int)runTrollStoreAction:(NSString *)action
+{
+    if (![self isInstalledThroughTrollStore]) return -1;
+    
+    uint32_t selfPathSize = PATH_MAX;
+    char selfPath[selfPathSize];
+    _NSGetExecutablePath(selfPath, &selfPathSize);
+    return exec_cmd_root(selfPath, "trollstore", action.UTF8String, NULL);
+}
+
+- (void)respring
+{
+    [self spawnJbctlAsRootWithArgs:@[@"respring"]];
+}
+
+- (void)rebootUserspace
+{
+    [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
+}
+
+- (void)rebuildIconCache
+{
+    [self spawnJbctlAsRootWithArgs:@[@"rebuild_icon_cache"]];
+}
+
+- (void)refreshJailbreakApps
+{
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-a", NULL);
+        }];
+    }];
+}
+
+- (void)unregisterJailbreakApps
+{
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            NSArray *jailbreakApps = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:JBROOT_PATH(@"/Applications") error:nil];
+            if (jailbreakApps.count) {
+                for (NSString *jailbreakApp in jailbreakApps) {
+                    NSString *jailbreakAppPath = [JBROOT_PATH(@"/Applications") stringByAppendingPathComponent:jailbreakApp];
+                    exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-u", jailbreakAppPath.fileSystemRepresentation, NULL);
+                }
+            }
+        }];
+    }];
+}
+
+- (void)reboot
+{
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            reboot3(0x8000000000000000, 0);
+        }];
+    }];
+}
+
+
+- (void)changeMobilePassword:(NSString *)newPassword
+{
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            NSString *dashCommand = [NSString stringWithFormat:@"printf \"%%s\\n\" \"%@\" | %@ usermod 501 -h 0", newPassword, JBROOT_PATH(@"/usr/sbin/pw")];
+            exec_cmd(JBROOT_PATH("/usr/bin/dash"), "-c", dashCommand.UTF8String, NULL);
+        }];
+    }];
+}
+
+- (NSError*)updateEnvironment
+{
+    NSString *newBasebinTarPath = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:@"basebin.tar"];
+    int result = jbclient_platform_stage_jailbreak_update(newBasebinTarPath.fileSystemRepresentation);
+    if (result == 0) {
+        [self rebootUserspace];
+        return nil;
+    }
+    return [NSError errorWithDomain:@"Dopamine" code:result userInfo:nil];
+}
+
+- (void)updateJailbreakFromTIPA:(NSString *)tipaPath
+{
+    [self spawnJbctlAsRootWithArgs:@[@"update", @"tipa", tipaPath]];
+}
+
+- (BOOL)isTweakInjectionEnabled
+{
+    return ![[NSFileManager defaultManager] fileExistsAtPath:JBROOT_PATH(@"/basebin/.safe_mode")];
+}
+
+- (void)setTweakInjectionEnabled:(BOOL)enabled
+{
+    NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
+    if ([self isJailbroken]) {
+        [self runAsRoot:^{
+            [self runUnsandboxed:^{
+                if (enabled) {
+                    [[NSFileManager defaultManager] removeItemAtPath:safeModePath error:nil];
+                }
+                else {
+                    [[NSData data] writeToFile:safeModePath atomically:YES];
+                }
+            }];
+        }];
+    }
+}
+
+- (BOOL)isIDownloadEnabled
+{
+    __block BOOL isEnabled = NO;
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            NSDictionary *disabledDict = [NSDictionary dictionaryWithContentsOfFile:@"/var/db/com.apple.xpc.launchd/disabled.plist"];
+            NSNumber *idownloaddDisabledNum = disabledDict[@"com.opa334.Dopamine.idownloadd"];
+            if (idownloaddDisabledNum) {
+                isEnabled = ![idownloaddDisabledNum boolValue];
+            }
+            else {
+                isEnabled = NO;
+            }
+        }];
+    }];
+    return isEnabled;
+}
+
+- (void)setIDownloadEnabled:(BOOL)enabled needsUnsandbox:(BOOL)needsUnsandbox
+{
+    void (^updateBlock)(void) = ^{
+        if (enabled) {
+            exec_cmd_trusted(JBROOT_PATH("/usr/bin/launchctl"), "enable", "system/com.opa334.Dopamine.idownloadd", NULL);
+        }
+        else {
+            exec_cmd_trusted(JBROOT_PATH("/usr/bin/launchctl"), "disable", "system/com.opa334.Dopamine.idownloadd", NULL);
+        }
+    };
+
+    if (needsUnsandbox) {
+        [self runAsRoot:^{
+            [self runUnsandboxed:updateBlock];
+        }];
+    }
+    else {
+        updateBlock();
+    }
+}
+
+- (void)setIDownloadLoaded:(BOOL)loaded needsUnsandbox:(BOOL)needsUnsandbox
+{
+    if (loaded) {
+        [self setIDownloadEnabled:loaded needsUnsandbox:needsUnsandbox];
+    }
+    
+    void (^updateBlock)(void) = ^{
+        if (loaded) {
+            exec_cmd(JBROOT_PATH("/usr/bin/launchctl"), "load", JBROOT_PATH("/basebin/LaunchDaemons/com.opa334.Dopamine.idownloadd.plist"), NULL);
+        }
+        else {
+            exec_cmd(JBROOT_PATH("/usr/bin/launchctl"), "unload", JBROOT_PATH("/basebin/LaunchDaemons/com.opa334.Dopamine.idownloadd.plist"), NULL);
+        }
+    };
+    
+    if (needsUnsandbox) {
+        [self runAsRoot:^{
+            [self runUnsandboxed:updateBlock];
+        }];
+    }
+    else {
+        updateBlock();
+    }
+    
+    if (!loaded) {
+        [self setIDownloadEnabled:loaded needsUnsandbox:needsUnsandbox];
+    }
+}
+
+- (BOOL)isFakelibMounted
+{
+    struct statfs fsb;
+    if (statfs("/usr/lib", &fsb) != 0) return NO;
+    return strcmp(fsb.f_mntonname, "/usr/lib") == 0;
+}
+
+- (int)setFakelibMounted:(BOOL)mounted
+{
+    int r = 0;
+    if (mounted != [self isFakelibMounted]) {
+        NSString *arg = mounted ? @"mount" : @"unmount";
+        r = [self spawnJbctlAsRootWithArgs:@[@"internal", @"fakelib", arg]];
+    }
+    return r;
+}
+
+- (int)setPrivatePrebootProtected:(BOOL)protected
+{
+    NSString *arg = protected ? @"activate" : @"deactivate";
+    return [self spawnJbctlAsRootWithArgs:@[@"internal", @"protection", arg]];
+}
+
+- (BOOL)doAuditName:(NSString *)name matchesExact:(NSArray<NSString *> *)exact regex:(NSArray<NSString *> *)regex
+{
+    if ([exact containsObject:name]) return YES;
+    for (NSString *pattern in regex) {
+        NSRegularExpression *expression = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:nil];
+        if ([expression firstMatchInString:name options:0 range:NSMakeRange(0, name.length)]) return YES;
+    }
+    return NO;
+}
+
+- (NSString *)hideQuarantineRoot
+{
+    return @"/var/mobile/.DopamineHideQuarantine";
+}
+
+- (NSString *)hideMapPath
+{
+    return [[self hideQuarantineRoot] stringByAppendingPathComponent:@"map.plist"];
+}
+
+- (void)hideItemAtPath:(NSString *)src
+{
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *root = [self hideQuarantineRoot];
+
+    [fm createDirectoryAtPath:root
+  withIntermediateDirectories:YES
+                   attributes:nil
+                        error:nil];
+
+    NSString *dst = [root stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
+
+    NSError *err = nil;
+    if (![fm moveItemAtPath:src toPath:dst error:&err]) {
+        NSLog(@"[HideJailbreak] move failed %@ -> %@: %@", src, dst, err);
+        return;
+    }
+
+    NSMutableArray *map = [[NSArray arrayWithContentsOfFile:[self hideMapPath]] mutableCopy] ?: [NSMutableArray array];
+    [map addObject:@{ @"src": src, @"dst": dst }];
+    [map writeToFile:[self hideMapPath] atomically:YES];
+
+    NSLog(@"[HideJailbreak] hidden %@ -> %@", src, dst);
+}
+
+- (void)restoreHiddenItems
+{
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *map = [NSArray arrayWithContentsOfFile:[self hideMapPath]];
+
+    for (NSDictionary *entry in [map reverseObjectEnumerator]) {
+        NSString *src = entry[@"src"];
+        NSString *dst = entry[@"dst"];
+
+        if (!src || !dst) continue;
+        if ([fm fileExistsAtPath:src]) continue;
+
+        [fm createDirectoryAtPath:[src stringByDeletingLastPathComponent]
+      withIntermediateDirectories:YES
+                       attributes:nil
+                            error:nil];
+
+        NSError *err = nil;
+        if (![fm moveItemAtPath:dst toPath:src error:&err]) {
+            NSLog(@"[HideJailbreak] restore failed %@ -> %@: %@", dst, src, err);
+        } else {
+            NSLog(@"[HideJailbreak] restored %@", src);
+        }
+    }
+
+    [fm removeItemAtPath:[self hideMapPath] error:nil];
+}
+
+- (NSString *)hiddenSchemesFilePath
+{
+    return @"/var/mobile/Library/Preferences/.DopamineHiddenSchemes";
+}
+
+- (void)writeHiddenSchemes:(NSArray<NSString *> *)schemes
+{
+    NSString *path = [self hiddenSchemesFilePath];
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    if (schemes.count == 0) {
+        [fm removeItemAtPath:path error:nil];
+        NSLog(@"[HideURLScheme] cleared hidden schemes file");
+        return;
+    }
+
+    NSString *content = [schemes componentsJoinedByString:@"\n"];
+    NSError *writeErr = nil;
+    if (![content writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&writeErr]) {
+        NSLog(@"[HideURLScheme] write failed: %@", writeErr);
+        return;
+    }
+
+    chmod(path.fileSystemRepresentation, 0644);
+
+    NSLog(@"[HideURLScheme] wrote %lu schemes: %@", (unsigned long)schemes.count, schemes);
+}
+
+- (void)hideJailbreakURLSchemes
+{
+    [self writeHiddenSchemes:@[@"postbox", @"santander"]];
+}
+
+- (void)restoreJailbreakURLSchemes
+{
+    [self writeHiddenSchemes:@[]];
+}
+
+- (void)runJailbreakLibraryAudit
+{
+    NSString *libraryRoot = @"/var/mobile/Library";
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:libraryRoot]) {
+        NSLog(@"[HideJailbreak Audit] %@ is not accessible", libraryRoot);
+        return;
+    }
+
+    NSDictionary<NSString *, NSDictionary *> *rules = @{
+        @"/var/mobile/Library": @{
+            @"whitelist": @[@"Accessibility", @"CoreBrightness", @"Keyboard", @"Preferences", @"Voicemail", @"Accounts", @"CoreDuet", @"KeyboardServices", @"PrivacyAccounting", @"WatchConnectivity", @"AddressBook", @"CoreFollowUp", @"LASD", @"Recents", @"Weather", @"AggregateDictionary", @"CountryBundles", @"LanguageModeling", @"Reminders", @"WebClips", @"CrashReporter", @"Logs", @"ReplayKit", @"WebKit", @"Application Support", @"MediaRemote", @"Safari", @"Caches", @"SplashBoard", @"MobileInstallation", @"SoftwareUpdate", @"BulletinBoard", @"MobileContainerManager", @"TCC", @"Settings", @"Cookies", @"Passes", @"UserNotifications", @"ApplicationSync", @"DataDeliveryServices", @"MediaStream", @"SafeHarbor", @"Wallet", @"Maps", @"Phone"],
+            @"blacklist": @[@"Sileo", @"Filza", @"Flex3", @"SBSettings", @"iCleaner"]
+        },
+        @"/var/mobile/Library/Preferences": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\.", @"^systemgroup\\.com\\.apple\\."],
+            @"whitelist": @[@".GlobalPreferences.plist", @".GlobalPreferences_m.plist", @"bluetoothaudiod.plist", @"NetworkInterfaces.plist", @"OSThermalStatus.plist", @"preferences.plist", @"osanalyticshelper.plist", @"UserEventAgent.plist", @"wifid.plist", @"dprivacyd.plist", @"silhouette.plist", @"nfcd.plist", @"ptpcamerad.plist", @"mobile_storage_proxy.plist"],
+            @"blacklist": @[@"com.roothide.manager.plist", @"com.opa334.Dopamine.roothide.plist", @"com.opa334.Dopamine.plist", @"com.tigisoftware.Filza.plist", @"com.xina.jailbreak.plist", @"org.coolstar.SileoStore.plist", @"ru.domo.cocoatop64.plist", @"ws.hbang.Terminal.plist", @"xyz.willy.Zebra.plist", @"com.apple.terminal.plist"]
+        },
+        @"/var/mobile/Library/Application Support": @{
+            @"blacklist": @[@"xyz.willy.Zebra"]
+        },
+        @"/var/mobile/Library/Application Support/Containers": @{
+            @"default": @"blacklist",
+            @"blacklist": @[@"xyz.willy.Zebra", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"com.apple.Terminal"]
+        },
+        @"/var/mobile/Library/UserConfigurationProfiles/PublicInfo": @{
+            @"blacklist": @[@"Flex3Patches.plist"]
+        },
+        @"/var/mobile/Library/SplashBoard/Snapshots": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"blacklist": @[@"com.roothide.manager", @"com.opa334.Dopamine.roothide", @"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ru.domo.cocoatop64", @"ws.hbang.Terminal", @"xyz.willy.Zebra", @"com.apple.Terminal"]
+        },
+        @"/var/mobile/Library/Caches": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\.", @"^TelephonyUI-\\d+$", @"^FamilyMarquee.*Mode-.*\\.png$"],
+            @"whitelist": @[@"CloudKit", @"GameKit", @"GeoServices", @"FamilyCircle", @"PassKit", @"VoiceServices", @"VoiceTrigger", @"Backup", @"ssu"],
+            @"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.hbang.Terminal", @"xyz.willy.Zebra", @"Cephei", @"com.apple.Terminal", @"GDFileManagerCache.sqlite", @"GDFileManagerCache.sqlite-shm", @"GDFileManagerCache.sqlite-wal", @"ImageTables", @"SentryCrash", @"io.sentry", @"com.hackemist.SDImageCache"]
+        },
+        @"/var/mobile/Library/Saved Application State": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"blacklist": @[@"com.opa334.Dopamine.savedState", @"com.tigisoftware.Filza.savedState", @"org.coolstar.SileoStore.savedState", @"ws.hbang.Terminal.savedState", @"xyz.willy.Zebra.savedState", @"ru.domo.cocoatop64.savedState", @"com.apple.Terminal.savedState"]
+        },
+        @"/var/mobile/Library/WebKit": @{
+            @"whitelist": @[@"Databases", @"LocalStorage"],
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"blacklist": @[@"xyz.willy.Zebra"]
+        },
+        @"/var/mobile/Library/Cookies": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"whitelist": @[@"Cookies.binarycookies"],
+            @"blacklist": @[@"com.johncoates.Flex.binarycookies"]
+        },
+        @"/var/mobile/Library/HTTPStorages": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.hbang.Terminal", @"xyz.willy.Zebra"]
+        }
+    };
+
+    NSLog(@"[HideJailbreak Audit] begin %@", libraryRoot);
+
+    NSArray<NSString *> *paths = [rules.allKeys sortedArrayUsingSelector:@selector(compare:)];
+    for (NSString *path in paths) {
+        if (![fm fileExistsAtPath:path]) continue;
+
+        NSDictionary *rule = rules[path];
+        NSString *defaultAction = rule[@"default"];
+        NSArray *whitelist = rule[@"whitelist"] ?: @[];
+        NSArray *blacklist = rule[@"blacklist"] ?: @[];
+        NSArray *whitelistRegex = rule[@"whitelistRegex"] ?: @[];
+        NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:path error:nil];
+
+        NSLog(@"[HideJailbreak Audit] rule %@ default=%@ entries=%lu", path, defaultAction ?: @"none", (unsigned long)children.count);
+
+        for (NSString *name in children) {
+            BOOL white = [self doAuditName:name matchesExact:whitelist regex:whitelistRegex];
+            BOOL black = [blacklist containsObject:name];
+            NSString *result = nil;
+            if (black) result = @"BLACKLIST";
+            else if (white) result = @"WHITELIST";
+            else if (defaultAction) result = [defaultAction isEqualToString:@"blacklist"] ? @"DEFAULT-BLACKLIST" : @"DEFAULT-WHITELIST";
+            else result = @"UNMATCHED";
+
+            NSString *fullPath = [path stringByAppendingPathComponent:name];
+
+            BOOL shouldHide = [result isEqualToString:@"BLACKLIST"] ||
+                              [result isEqualToString:@"DEFAULT-BLACKLIST"];
+
+            if (shouldHide) {
+                [self hideItemAtPath:fullPath];
+            } else {
+                NSLog(@"[HideJailbreak] keep %@ -> %@", fullPath, result);
+            }
+        }
+    }
+
+    NSLog(@"[HideJailbreak Audit] end");
+}
+
+- (BOOL)isJailbreakHidden
+{
+    return ![[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"];
+}
+
+- (void)setJailbreakHidden:(BOOL)hidden
+{
+    if (hidden && ![self isJailbroken] && geteuid() != 0) {
+        [self runTrollStoreAction:@"hide-jailbreak"];
+        return;
+    }
+    
+    void (^actionBlock)(void) = ^{
+        BOOL alreadyHidden = [self isJailbreakHidden];
+        if (hidden != alreadyHidden) {
+            if (hidden) {
+                if ([self isJailbroken]) {
+                    NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
+                    [[NSData data] writeToFile:safeModePath atomically:YES];
+
+                    [self unregisterJailbreakApps];
+                    [self setPrivatePrebootProtected:NO];
+                    [self setFakelibMounted:NO];
+                }
+                [[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:nil];
+                [self runJailbreakLibraryAudit];
+                [self hideJailbreakURLSchemes];
+            }
+            else {
+                [self restoreHiddenItems];
+                [self restoreJailbreakURLSchemes];
+                [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb" withDestinationPath:JBROOT_PATH(@"/") error:nil];
+                if ([self isJailbroken]) {
+                    NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
+                    [[NSFileManager defaultManager] removeItemAtPath:safeModePath error:nil];
+
+                    jbclient_platform_set_systemwide_domain_enabled(true);
+                    [self setFakelibMounted:YES];
+                    [self setPrivatePrebootProtected:YES];
+                    [self refreshJailbreakApps];
+                }
+            }
+        }
+        else if (hidden) {
+            [self runJailbreakLibraryAudit];
+            [self hideJailbreakURLSchemes];
+        }
+    };
+    
+    if ([self isJailbroken]) {
+        [self runAsRoot:^{
+            [self runUnsandboxed:actionBlock];
+        }];
+    }
+    else {
+        actionBlock();
+    }
+}
+
+- (NSString *)accessibleKernelPath
+{
+    if ([self isInstalledThroughTrollStore] || getuid() == 0) {
+        NSString *kernelcachePath = [[self activePrebootPath] stringByAppendingPathComponent:@"System/Library/Caches/com.apple.kernelcaches/kernelcache"];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:kernelcachePath]) {
+            return kernelcachePath;
+        }
+        return @"/System/Library/Caches/com.apple.kernelcaches/kernelcache";
+    }
+    else {
+        NSString *kernelInApp = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"kernelcache"];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:kernelInApp]) {
+            return kernelInApp;
+        }
+        
+        [[DOUIManager sharedInstance] sendLog:@"Downloading Kernel" debug:NO];
+        NSString *kernelcachePath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/kernelcache"];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:kernelcachePath]) {
+            if (grab_images([NSHomeDirectory() stringByAppendingPathComponent:@"Documents"]) == false) return nil;
+        }
+        return kernelcachePath;
+    }
+}
+
+- (NSString *)accessibleSPTMPath
+{
+    NSString *sptmInAppPath = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"sptm.img4"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:sptmInAppPath]) {
+        return sptmInAppPath;
+    }
+    
+    NSString *sptmInDocsPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/sptm.img4"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:sptmInDocsPath]) {
+        return sptmInDocsPath;
+    }
+    
+    sptmInDocsPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/sptm.im4p"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:sptmInDocsPath]) {
+        return sptmInDocsPath;
+    }
+
+    if ([self isInstalledThroughTrollStore] || getuid() == 0) {
+        NSString *sptmPath = [[self activePrebootPath] stringByAppendingPathComponent:@"/usr/standalone/firmware/FUD/Ap,SecurePageTableMonitor.img4"];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:sptmPath]) {
+            return sptmPath;
+        }
+    }
+
+    return nil;
+}
+
+- (NSString *)accessibleTXMPath
+{
+    NSString *txmInAppPath = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"txm.img4"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:txmInAppPath]) {
+        return txmInAppPath;
+    }
+    
+    NSString *txmInDocsPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/txm.img4"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:txmInDocsPath]) {
+        return txmInDocsPath;
+    }
+    
+    txmInDocsPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/txm.im4p"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:txmInDocsPath]) {
+        return txmInDocsPath;
+    }
+
+    if ([self isInstalledThroughTrollStore] || getuid() == 0) {
+        NSString *txmPath = [[self activePrebootPath] stringByAppendingPathComponent:@"/usr/standalone/firmware/FUD/Ap,TrustedExecutionMonitor.img4"];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:txmPath]) {
+            return txmPath;
+        }
+    }
+
+    return nil;
+}
+
+
+- (BOOL)isPACBypassRequired
+{
+    if (![self isArm64e]) return NO;
+    
+    if (@available(iOS 15.2, *)) {
+        return NO;
+    }
+    return YES;
+}
+
+- (BOOL)isPPLBypassRequired
+{
+    return [self isArm64e];
+}
+
+- (BOOL)isSupported
+{
+    //cpu_subtype_t cpuFamily = 0;
+    //size_t cpuFamilySize = sizeof(cpuFamily);
+    //sysctlbyname("hw.cpufamily", &cpuFamily, &cpuFamilySize, NULL, 0);
+    //if (cpuFamily == CPUFAMILY_ARM_TYPHOON) return false; // A8X is unsupported for now (due to 4k page size)
+    
+    DOExploitManager *exploitManager = [DOExploitManager sharedManager];
+    if ([exploitManager availableExploitsForType:EXPLOIT_TYPE_KERNEL].count) {
+        if (![self isPACBypassRequired] || [exploitManager availableExploitsForType:EXPLOIT_TYPE_PAC].count) {
+            if (![self isPPLBypassRequired] || [exploitManager availableExploitsForType:EXPLOIT_TYPE_PPL].count) {
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
+- (BOOL)deviceSupportsFaceID
+{
+    if (![LAContext class]) return NO;
+
+    LAContext *myContext = [[LAContext alloc] init];
+    NSError *authError = nil;
+    if (![myContext canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics error:&authError]) {
+        NSLog(@"%@", [authError localizedDescription]);
+        return NO;
+    }
+
+    return myContext.biometryType == LABiometryTypeFaceID;
+}
+
+- (BOOL)deviceSupportsLandscapeBootLogo
+{
+    struct utsname u;
+    uname(&u);
+    const char *ipadString = "iPad";
+
+    bool isPad = strncmp(u.machine, ipadString, strlen(ipadString)) == 0;
+    return isPad && [self deviceSupportsFaceID];
+}
+
+- (NSError *)prepareBootstrap
+{
+    __block NSError *errOut;
+    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+    [_bootstrapper prepareBootstrapWithCompletion:^(NSError *error) {
+        errOut = error;
+        dispatch_semaphore_signal(sema);
+    }];
+    dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
+    return errOut;
+}
+
+- (NSError *)finalizeBootstrap
+{
+    return [_bootstrapper finalizeBootstrap];
+}
+
+- (NSError *)deleteBootstrap
+{
+    if (![self isJailbroken] && getuid() != 0) {
+        int r = [self runTrollStoreAction:@"delete-bootstrap"];
+        if (r != 0) {
+            // TODO: maybe handle error
+        }
+        return nil;
+    }
+    else if ([self isJailbroken]) {
+        __block NSError *error;
+        [self runAsRoot:^{
+            [self runUnsandboxed:^{
+                error = [self->_bootstrapper deleteBootstrap];
+            }];
+        }];
+        return error;
+    }
+    else {
+        // Let's hope for the best
+        return [_bootstrapper deleteBootstrap];
+    }
+}
+
+- (NSError *)reinstallPackageManagers
+{
+    __block NSError *error;
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            error = [self->_bootstrapper installPackageManagers];
+        }];
+    }];
+    return error;
+}
+
+- (NSError *)updateBootLogo
+{
+    const char *bootLogoPath = JBROOT_PATH("/basebin/bootlogo.jp2");
+    if ([[DOPreferenceManager sharedManager] boolPreferenceValueForKey:@"bootlogoEnabled" fallback:YES]) {
+        UIImage *bootLogoImage;
+
+        if ([[DOPreferenceManager sharedManager] boolPreferenceValueForKey:@"customBootlogoEnabled" fallback:NO]) {
+            bootLogoImage = [NSClassFromString(@"UIImage") imageWithContentsOfFile:[DOUIManager sharedInstance].bootlogoPath];
+        }
+
+        if (!bootLogoImage) {
+            bootLogoImage = [[DOUIManager sharedInstance] renderBootLogo];
+        }
+
+        [self runAsRoot:^{
+            [self runUnsandboxed:^{
+                unlink(bootLogoPath);
+                [[bootLogoImage jp2DataWithCompressionQuality:0.9] writeToFile:[NSString stringWithUTF8String:bootLogoPath] atomically:NO];
+            }];
+        }];
+
+        return nil;
+    }
+    else {
+        [self runAsRoot:^{
+            [self runUnsandboxed:^{
+                unlink(bootLogoPath);
+            }];
+        }];
+        return nil;
+    }
+}
+
+@end
