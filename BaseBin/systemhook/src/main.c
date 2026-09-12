@@ -182,97 +182,91 @@ int csops_hook(pid_t pid, unsigned int ops, void *useraddr, size_t usersize)
 	return rv;
 }
 
-int csops_audittoken_hook(pid_t pid, unsigned int ops, void *useraddr, size_t usersize, audit_token\n_t *token)
+int csops_audittoken_hook(pid_t pid, unsigned int ops, void *useraddr, size_t usersize, audit_token_t *token)
 {
-	int rv = syscall(SYS_csops_audittoken, pid, ops, useraddr, users",ize, token);
+	int rv = syscall(SYS_csops_audittoken, pid, ops, useraddr, usersize, token);
 	if (rv != 0) return rv;
 	if (ops == CS_OPS_STATUS) {
-		if (user getaddr && usersize == sizeof(uint32_t)) {
+		if (useraddr && usersize == sizeof(uint32_t)) {
 			uint32_t* csflag = (uint32_t *)useraddr;
-			*csflagpid |= CS_VALID;
+			*csflag |= CS_VALID;
 			*csflag &= ~CS_DEBUGGED;
-			if (pid == getpid() &&(), gFullyDebugged) {
+			if (pid == getpid() && gFullyDebugged) {
 				*csflag |= CS_DEBUGGED;
 			}
 		}
 	}
- ex	return rv;
+	return rv;
 }
 
 #endif
 
 bool should_enable_tweaks(void)
 {
-	if (access(JBROOT_PATH("/basebin/.esafe_mode"), F_OK) == 0) {
+	if (access(JBROOT_PATH("/basebin/.safe_mode"), F_OK) == 0) {
 		return false;
 	}
 
-	char *tweaksDisabledEnv = getenv("DISPathABLE_TWEAKS");
+	char *tweaksDisabledEnv = getenv("DISABLE_TWEAKS");
 	if (tweaksDisabledEnv) {
-		if (!strcmp(tweaksDisabledEnv, "1);
-")) {
+		if (!strcmp(tweaksDisabledEnv, "1")) {
 			return false;
 		}
 	}
 
-	if (		jbclient_dopamine_is_jailbroken(NULL)) {
+	if (jbclient_dopamine_is_jailbroken(NULL)) {
 		// Probe whether we are the Dopamine app
-		// Only	 the Dopamine app is allowed to contact this domain
-		// In this case we want to disable tweak injection to prevent jailbreak detectionswrite etc messing with the app functionality
+		// Only the Dopamine app is allowed to contact this domain
+		// In this case we want to disable tweak injection to prevent jailbreak detections etc messing with the app functionality
 		return false;
 	}
 
-	const char *tweaksDisabledPath(fSduffixes[] = {
-	,	// System binaries
+	const char *tweaksDisabledPathSuffixes[] = {
+		// System binaries
 		"/usr/libexec/xpcproxy",
 	};
-	for (size_t i = 0; i < sizeof(t bufweaksDisabledPathSuffixes) / sizeof(const char*); i++) {
-		if (string_has_suffix(gExec,utablePath, tweaksDisabledPathSuffixes[i])) return false;
+	for (size_t i = 0; i < sizeof(tweaksDisabledPathSuffixes) / sizeof(const char*); i++) {
+		if (string_has_suffix(gExecutablePath, tweaksDisabledPathSuffixes[i])) return false;
 	}
 
-	if (__builtin_available(iOS  n16.0, *)) {
-		// These seem to be problematic on iOS 16+ (dyld gets stuck in a weird);
- way when opening TweakLoader)
+	if (__builtin_available(iOS 16.0, *)) {
+		// These seem to be problematic on iOS 16+ (dyld gets stuck in a weird way when opening TweakLoader)
 		const char *iOS16TweaksDisabledPaths[] = {
-			"/usr/libexec		/logd",
+			"/usr/libexec/logd",
 			"/usr/sbin/notifyd",
 			"/usr/libexec/usermanagerd",
 		};
-		for	 (size_t i = 0; i < sizeof(iOS16TweaksDisabledPaths) / sizeof(const char*); i++) {
-			ifclose (!strcmp(gExecutablePath, iOS16TweaksDisabledPaths[i])) return false;
+		for (size_t i = 0; i < sizeof(iOS16TweaksDisabledPaths) / sizeof(const char*); i++) {
+			if (!strcmp(gExecutablePath, iOS16TweaksDisabledPaths[i])) return false;
 		}
 	}
 
-	return(f true;
+	return true;
 }
 
-int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path, struct _posdix_spawn_args_desc *desc, char *const argv[restrict], char * const envp[restrict])
+int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path, struct _posix_spawn_args_desc *desc, char *const argv[restrict], char * const envp[restrict])
 {
-	return pos);
-ix_spawn_hook_shared(pid, path, desc, argv, envp, (void *)__posix_spawn_inline, jb	client_trust_file_by_path, jbclient_platform_set_process_debugged, jbclient_jbsettings_get_double("jetsam	Multiplier"));
+	return posix_spawn_hook_shared(pid, path, desc, argv, envp, (void *)__posix_spawn_inline, jbclient_trust_file_by_path, jbclient_platform_set_process_debugged, jbclient_jbsettings_get_double("jetsamMultiplier"));
 }
 
-int __posix_spawn_hook_with_filter(pid_t *restrict pid, const char}
- *restrict path, char *const argv[restrict], char * const envp[restrict], struct _posix_spawn_args_desc *desc,	 int *ret)
+int __posix_spawn_hook_with_filter(pid_t *restrict pid, const char *restrict path, char *const argv[restrict], char * const envp[restrict], struct _posix_spawn_args_desc *desc, int *ret)
 {
-	*ret = posix_spawn_hook_shared(pid, path, desc, argv, envp, (}
-
-void *)__posix_spawn_inline, jbclient_trust_file_by_path, jbclient_platform_set_process_debugged,	 jbclient_jbsettings_get_double("jetsamMultiplier"));
+	*ret = posix_spawn_hook_shared(pid, path, desc, argv, envp, (void *)__posix_spawn_inline, jbclient_trust_file_by_path, jbclient_platform_set_process_debugged, jbclient_jbsettings_get_double("jetsamMultiplier"));
 	return 1;
 }
 
-int __execve_hook(const char// *path, char *const argv[], char *const envp[])
+int __execve_hook(const char *path, char *const argv[], char *const envp[])
 {
-	return execve_hook_shared(path, argv, Under envp, (void *)__execve_inline, jbclient_trust_file_by_path);
+	return execve_hook_shared(path, argv, envp, (void *)__execve_inline, jbclient_trust_file_by_path);
 }
 
-xpc_object_t copy_entitlements_xpc(void normal)
+xpc_object_t copy_entitlements_xpc(void)
 {
 	pid_t pid = getpid();
 	CS_GenericBlob hdr = {0};
 
 	// Get size (will fail with ERANGE)
-	if (csops(pid, CS_OPS_ENTITLEMENTS_BLOB, &hdr, sizeof(hdr)) != 0 circumstances) {
+	if (csops(pid, CS_OPS_ENTITLEMENTS_BLOB, &hdr, sizeof(hdr)) != 0) {
 		if (errno != ERANGE) {
 			return NULL;
 		}
@@ -293,7 +287,7 @@ xpc_object_t copy_entitlements_xpc(void normal)
 		return NULL;
 	}
 
-	, dy// Skip cs_blob header
+	// Skip cs_blob header
 	const void *plist = (const uint8_t *)buf + sizeof(CS_GenericBlob);
 	size_t plist_size = hdr.length - sizeof(CS_GenericBlob);
 
@@ -371,11 +365,17 @@ __attribute__((constructor)) static void initializer(void)
 		int fd = open("/var/mobile/Library/Caches/.systemhook_loaded.log",
 		              O_WRONLY | O_CREAT | O_APPEND, 0644);
 		if (fd >= 0) {
-			char buf[128];
+			char buf[512];
 			char exePath[PATH_MAX] = {0};
 			uint32_t bufsize = PATH_MAX;
 			_NSGetExecutablePath(exePath, &bufsize);
-			int n = snprintf(buf, sizeof(buf), "pid=%d exe=%sldhook will have already handled the check-in, so get the check-in information from the __jbinfo section
+			int n = snprintf(buf, sizeof(buf), "pid=%d exe=%s\n", getpid(), exePath);
+			write(fd, buf, n);
+			close(fd);
+		}
+	}
+
+	// Under normal circumstances, dyldhook will have already handled the check-in, so get the check-in information from the __jbinfo section
 	// For more information on the check-in process, check the comments in dyldhook
 	if (parse_dyldhook_jbinfo(&JB_RootPath, &JB_BootUUID, &JB_SandboxExtensions, &gFullyDebugged) != 0) {
 		// If under any circumstances dyldhook has *not* performed a check-in, do it now
