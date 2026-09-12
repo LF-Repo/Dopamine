@@ -11,6 +11,7 @@
 #include <litehook.h>
 #include "jbserver/jbserver_local.h"
 #include "hookd_provider.h"
+#import <Foundation/Foundation.h>
 extern char **environ;
 
 void abort_with_reason(uint32_t reason_namespace, uint64_t reason_code, const char *reason_string, uint64_t reason_flags);
@@ -20,6 +21,8 @@ extern int platform_set_process_debugged(uint64_t pid, bool fullyDebugged);
 extern void systemwide_domain_set_enabled(bool enabled);
 
 #define LOG_PROCESS_LAUNCHES 0
+
+#define INJECTION_RULES_PATH "/var/mobile/Library/Preferences/.DopamineInjectionRules.plist"
 
 extern bool gInEarlyBoot;
 extern bool gFreeBootLogoBeforeBackboardd;
@@ -47,6 +50,50 @@ void ensure_fakelib_mounted(void)
 		// So that after the userspace reboot, we can unmount fakelib again
 		setenv("DOPAMINE_IS_HIDDEN", "1", true);
 	}
+}
+
+static bool should_block_injection(const char *executablePath)
+{
+	if (!executablePath) return false;
+
+	@autoreleasepool {
+		NSString *path = [NSString stringWithUTF8String:executablePath];
+
+		// Only handle executables inside an App bundle (…/XXX.app/XXX)
+		NSRange appRange = [path rangeOfString:@".app/"];
+		if (appRange.location == NSNotFound) {
+			return false;
+		}
+
+		// Extract the .app directory path
+		NSString *appPath = [path substringToIndex:appRange.location + 4];
+		NSString *infoPlistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+
+		// Read Bundle ID
+		NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
+		NSString *bundleID = info[@"CFBundleIdentifier"];
+		if (!bundleID) {
+			return false;
+		}
+
+		// Read block rules
+		NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:@INJECTION_RULES_PATH];
+		if (!rules) {
+			return false;
+		}
+
+		NSDictionary *appRule = rules[bundleID];
+		if (!appRule) {
+			return false;
+		}
+
+		NSNumber *block = appRule[@"BlockInjection"];
+		if (block && [block boolValue]) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 int __posix_spawn_orig_wrapper(pid_t *restrict pid, const char *restrict path,
@@ -182,6 +229,11 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 				}
 			}
 		}
+	}
+
+	// Check whether this App is on the injection block list
+	if (path && should_block_injection(path)) {
+		return __posix_spawn_orig_wrapper(pid, path, desc, argv, envp);
 	}
 
 	return posix_spawn_hook_shared(pid, path, desc, argv, envp, __posix_spawn_orig_wrapper, systemwide_trust_file_by_path, platform_set_process_debugged, jbsetting(jetsamMultiplier));
