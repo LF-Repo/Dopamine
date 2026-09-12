@@ -8,15 +8,37 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <stdarg.h>
 
 #define HIDDEN_SCHEMES_FILE "/var/mobile/Library/Preferences/.DopamineHiddenSchemes"
+#define DEBUG_LOG_FILE      "/var/mobile/Library/Preferences/.urlscheme_debug.log"
+
+static void dbg_log(const char *fmt, ...)
+{
+    int fd = open(DEBUG_LOG_FILE, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd < 0) return;
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (n > 0) {
+        write(fd, buf, n);
+        write(fd, "\n", 1);
+    }
+    close(fd);
+}
 
 static bool scheme_is_hidden(const char *scheme)
 {
     if (!scheme || !scheme[0]) return false;
 
     FILE *fp = fopen(HIDDEN_SCHEMES_FILE, "r");
-    if (!fp) return false;
+    if (!fp) {
+        dbg_log("[URLSchemeBlock] file not readable: %s", HIDDEN_SCHEMES_FILE);
+        return false;
+    }
 
     char line[256];
     bool found = false;
@@ -55,8 +77,9 @@ static BOOL (*orig_canOpenURL)(id, SEL, id);
 static BOOL hooked_canOpenURL(id self, SEL _cmd, id url)
 {
     const char *scheme = url_scheme_cstr(url);
+    dbg_log("[URLSchemeBlock] canOpenURL called: %s", scheme ?: "(null)");
     if (scheme_is_hidden(scheme)) {
-        os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] canOpenURL blocked: %{public}s", scheme);
+        dbg_log("[URLSchemeBlock] BLOCKED canOpenURL: %s", scheme);
         return NO;
     }
     return orig_canOpenURL(self, _cmd, url);
@@ -66,8 +89,9 @@ static void (*orig_openURL_opts)(id, SEL, id, id, void (^)(BOOL));
 static void hooked_openURL_opts(id self, SEL _cmd, id url, id opts, void (^completion)(BOOL))
 {
     const char *scheme = url_scheme_cstr(url);
+    dbg_log("[URLSchemeBlock] openURL:options: called: %s", scheme ?: "(null)");
     if (scheme_is_hidden(scheme)) {
-        os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] openURL:options: blocked: %{public}s", scheme);
+        dbg_log("[URLSchemeBlock] BLOCKED openURL:options: %s", scheme);
         if (completion) completion(NO);
         return;
     }
@@ -78,8 +102,9 @@ static BOOL (*orig_openURL)(id, SEL, id);
 static BOOL hooked_openURL(id self, SEL _cmd, id url)
 {
     const char *scheme = url_scheme_cstr(url);
+    dbg_log("[URLSchemeBlock] openURL: called: %s", scheme ?: "(null)");
     if (scheme_is_hidden(scheme)) {
-        os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] openURL: blocked: %{public}s", scheme);
+        dbg_log("[URLSchemeBlock] BLOCKED openURL: %s", scheme);
         return NO;
     }
     return orig_openURL(self, _cmd, url);
@@ -89,8 +114,9 @@ static id (*orig_appsForScheme)(id, SEL, id);
 static id hooked_appsForScheme(id self, SEL _cmd, id scheme)
 {
     const char *s = nsstring_cstr(scheme);
+    dbg_log("[URLSchemeBlock] LSAppWorkspace applicationsAvailableForHandlingURLScheme: %s", s ?: "(null)");
     if (scheme_is_hidden(s)) {
-        os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] LSApplicationWorkspace blocked: %{public}s", s);
+        dbg_log("[URLSchemeBlock] BLOCKED LSAppWorkspace for scheme: %s", s);
         return nil;
     }
     return orig_appsForScheme(self, _cmd, scheme);
@@ -100,11 +126,20 @@ static id (*orig_appsForURL)(id, SEL, id);
 static id hooked_appsForURL(id self, SEL _cmd, id url)
 {
     const char *scheme = url_scheme_cstr(url);
+    dbg_log("[URLSchemeBlock] LSAppWorkspace applicationsAvailableForOpeningURL: %s", scheme ?: "(null)");
     if (scheme_is_hidden(scheme)) {
-        os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] LSApplicationWorkspace URL blocked: %{public}s", scheme);
+        dbg_log("[URLSchemeBlock] BLOCKED LSAppWorkspace URL: %s", scheme);
         return nil;
     }
     return orig_appsForURL(self, _cmd, url);
+}
+
+static BOOL (*orig_appIsInstalled)(id, SEL, id);
+static BOOL hooked_appIsInstalled(id self, SEL _cmd, id bundleId)
+{
+    const char *bid = nsstring_cstr(bundleId);
+    dbg_log("[URLSchemeBlock] LSAppWorkspace applicationIsInstalled: %s", bid ?: "(null)");
+    return orig_appIsInstalled(self, _cmd, bundleId);
 }
 
 static bool gHooksInstalled = false;
@@ -114,27 +149,34 @@ static void try_install_hooks(void)
     if (gHooksInstalled) return;
 
     Class uiApp = objc_getClass("UIApplication");
-    if (!uiApp) return;
+    if (!uiApp) {
+        dbg_log("[URLSchemeBlock] UIApplication not loaded yet");
+        return;
+    }
+
+    dbg_log("[URLSchemeBlock] installing hooks, UIApplication=%p", uiApp);
 
     Method m1 = class_getInstanceMethod(uiApp, sel_registerName("canOpenURL:"));
     if (m1) {
         orig_canOpenURL = (void *)method_getImplementation(m1);
         method_setImplementation(m1, (IMP)hooked_canOpenURL);
-        os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] hooked UIApplication canOpenURL:");
+        dbg_log("[URLSchemeBlock] hooked UIApplication canOpenURL:");
+    } else {
+        dbg_log("[URLSchemeBlock] FAILED to find canOpenURL:");
     }
 
     Method m2 = class_getInstanceMethod(uiApp, sel_registerName("openURL:options:completionHandler:"));
     if (m2) {
         orig_openURL_opts = (void *)method_getImplementation(m2);
         method_setImplementation(m2, (IMP)hooked_openURL_opts);
-        os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] hooked UIApplication openURL:options:completionHandler:");
+        dbg_log("[URLSchemeBlock] hooked UIApplication openURL:options:completionHandler:");
     }
 
     Method m3 = class_getInstanceMethod(uiApp, sel_registerName("openURL:"));
     if (m3) {
         orig_openURL = (void *)method_getImplementation(m3);
         method_setImplementation(m3, (IMP)hooked_openURL);
-        os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] hooked UIApplication openURL:");
+        dbg_log("[URLSchemeBlock] hooked UIApplication openURL:");
     }
 
     Class lsw = objc_getClass("LSApplicationWorkspace");
@@ -143,18 +185,28 @@ static void try_install_hooks(void)
         if (m4) {
             orig_appsForScheme = (void *)method_getImplementation(m4);
             method_setImplementation(m4, (IMP)hooked_appsForScheme);
-            os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] hooked LSApplicationWorkspace applicationsAvailableForHandlingURLScheme:");
+            dbg_log("[URLSchemeBlock] hooked LSAppWorkspace applicationsAvailableForHandlingURLScheme:");
         }
 
         Method m5 = class_getInstanceMethod(lsw, sel_registerName("applicationsAvailableForOpeningURL:"));
         if (m5) {
             orig_appsForURL = (void *)method_getImplementation(m5);
             method_setImplementation(m5, (IMP)hooked_appsForURL);
-            os_log(OS_LOG_DEFAULT, "[URLSchemeBlock] hooked LSApplicationWorkspace applicationsAvailableForOpeningURL:");
+            dbg_log("[URLSchemeBlock] hooked LSAppWorkspace applicationsAvailableForOpeningURL:");
         }
+
+        Method m6 = class_getInstanceMethod(lsw, sel_registerName("applicationIsInstalled:"));
+        if (m6) {
+            orig_appIsInstalled = (void *)method_getImplementation(m6);
+            method_setImplementation(m6, (IMP)hooked_appIsInstalled);
+            dbg_log("[URLSchemeBlock] hooked LSAppWorkspace applicationIsInstalled:");
+        }
+    } else {
+        dbg_log("[URLSchemeBlock] LSApplicationWorkspace not available");
     }
 
     gHooksInstalled = true;
+    dbg_log("[URLSchemeBlock] hooks installed");
 }
 
 static void dyld_image_added(const struct mach_header *mh, intptr_t vmaddr_slide)
@@ -166,9 +218,12 @@ static void dyld_image_added(const struct mach_header *mh, intptr_t vmaddr_slide
 
 void install_urlscheme_hook(void)
 {
+    dbg_log("[URLSchemeBlock] install_urlscheme_hook called, pid=%d", getpid());
+
     if (objc_getClass("UIApplication")) {
         try_install_hooks();
     } else {
         _dyld_register_func_for_add_image(dyld_image_added);
+        dbg_log("[URLSchemeBlock] registered dyld image callback");
     }
 }
