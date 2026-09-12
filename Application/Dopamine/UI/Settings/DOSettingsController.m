@@ -210,7 +210,6 @@
                     
                     NSString *pplBypassName = @"PPL Bypass";
                     if ([DOEnvironmentManager sharedManager].isSPTM) {
-                        // SPTM bypasses are also handled as PPL bypasses in the code, we just change the name of the setting in the UI
                         pplBypassName = @"SPTM Bypass";
                     }
 
@@ -277,6 +276,14 @@
                 actionsGroupSpecifier.name = DOLocalizedString(@"Section_Actions");
                 [specifiers addObject:actionsGroupSpecifier];
 
+                PSSpecifier *injectionBlockSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                [injectionBlockSpecifier setProperty:@"Block App Injection" forKey:@"title"];
+                [injectionBlockSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                [injectionBlockSpecifier setProperty:buttonHeight forKey:@"height"];
+                [injectionBlockSpecifier setProperty:@"shield.slash" forKey:@"image"];
+                [injectionBlockSpecifier setProperty:@"injectionBlockPressed" forKey:@"action"];
+                [specifiers addObject:injectionBlockSpecifier];
+
                 if (envManager.isJailbroken) {
                     PSSpecifier *refreshAppsSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
                     [refreshAppsSpecifier setProperty:@"Button_Refresh_Jailbreak_Apps" forKey:@"title"];
@@ -308,9 +315,6 @@
 
                 BOOL hideJailbreakButtonShown = (envManager.isJailbroken || (envManager.isInstalledThroughTrollStore && !envManager.isJailbreakHidden));
                 if (hideJailbreakButtonShown) {
-                    // The "Hide Jailbreak" button should be shown
-                    // - When jailbroken
-                    // - When Dopamine is installed by TrollStore and the jailbreak is not hidden yet
                     PSSpecifier *hideUnhideJailbreakSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
                     [hideUnhideJailbreakSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
                     [hideUnhideJailbreakSpecifier setProperty:buttonHeight forKey:@"height"];
@@ -327,10 +331,6 @@
                 }
 
                 if (!envManager.isJailbroken && envManager.isInstalledThroughTrollStore) {
-                    // The "Remove Jailbreak" button cannot show when being jailbroken since pressing it would kinda be russian roulette
-                    // It might work, it might not and panic your device and leave it in a half uninstalled state
-                    // So this button is only for when you're not jailbroken and have Dopamine installed with TrollStore
-                    // The only supported uninstallation flow without TrollStore is to reboot and "rejailbreak" with "Remove Jailbreak" toggle enabled
                     PSSpecifier *removeJailbreakSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
                     [removeJailbreakSpecifier setProperty:@"Button_Remove_Jailbreak" forKey:@"title"];
                     [removeJailbreakSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
@@ -619,8 +619,6 @@
         chosenImage = info[UIImagePickerControllerOriginalImage];
     }
 
-    // Force correct the orientation
-    // For some reason without rerendering the image, the stored file will have a wrong orientation for photos taken with the camera‚
     UIGraphicsBeginImageContextWithOptions(chosenImage.size, NO, 1.0);
     [chosenImage drawInRect:CGRectMake(0,0, chosenImage.size.width, chosenImage.size.height)];
     chosenImage = UIGraphicsGetImageFromCurrentImageContext();
@@ -744,5 +742,46 @@
     [self reloadSpecifiers];
 }
 
+- (void)injectionBlockPressed
+{
+    DOEnvironmentManager *env = [DOEnvironmentManager sharedManager];
+    NSArray<NSString *> *current = [env allInjectionBlockedBundleIDs];
+    NSString *currentStr = [current componentsJoinedByString:@", "];
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Block App Injection"
+                                                                   message:@"Enter bundle IDs to block injection from, separated by commas. Changes take effect after the target app is restarted."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.text = currentStr;
+        tf.placeholder = @"com.s1mplyc0de.P0stB0x, com.santander.app";
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        tf.autocorrectionType = UITextAutocorrectionTypeNo;
+        tf.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
+    }];
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        NSString *input = alert.textFields.firstObject.text ?: @"";
+        NSArray *parts = [input componentsSeparatedByString:@","];
+        NSMutableArray<NSString *> *newList = [NSMutableArray array];
+        for (NSString *part in parts) {
+            NSString *trimmed = [part stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (trimmed.length > 0) [newList addObject:trimmed];
+        }
+
+        for (NSString *bid in current) {
+            [env setInjectionBlocked:NO forBundleID:bid];
+        }
+        for (NSString *bid in newList) {
+            [env setInjectionBlocked:YES forBundleID:bid];
+        }
+
+        [self reloadSpecifiers];
+    }]];
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+
+    [self presentViewController:alert animated:YES completion:nil];
+}
 
 @end
