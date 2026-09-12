@@ -8,6 +8,7 @@
 #import <stdlib.h>
 #import <stdbool.h>
 #import <unistd.h>
+#import <mach-o/dyld.h>
 
 #define HIDDEN_SCHEMES_FILE "/var/mobile/Library/Preferences/.DopamineHiddenSchemes"
 
