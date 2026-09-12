@@ -1,3 +1,9 @@
+#include "common/common.h"
+
+#include <spawn.h>
+#include <errno.h>
+#include <libjailbreak/util.h>
+
 #include <mach-o/dyld.h>
 #include <mach-o/dyld_images.h>
 #include <mach-o/getsect.h>
