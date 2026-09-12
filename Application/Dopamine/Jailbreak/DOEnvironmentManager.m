@@ -104,7 +104,6 @@ extern char **environ;
         
         NSString *randomizedJailbreakPath;
         
-        // First attempt at finding jailbreak root, look for Dopamine 2.x path
         for (NSString *subItem in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:activePrebootPath error:nil]) {
             if (subItem.length == 15 && [subItem hasPrefix:@"dopamine-"]) {
                 randomizedJailbreakPath = [activePrebootPath stringByAppendingPathComponent:subItem];
@@ -113,9 +112,6 @@ extern char **environ;
         }
         
         if (!randomizedJailbreakPath) {
-            // Second attempt at finding jailbreak root, look for Dopamine 1.x path, but as other jailbreaks use it too, make sure it is Dopamine
-            // Some other jailbreaks also commit the sin of creating .installed_dopamine, for these we try to filter them out by checking for their installed_ file
-            // If we find this and are sure it's from Dopamine 1.x, rename it so all Dopamine 2.x users will have the same path
             for (NSString *subItem in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:activePrebootPath error:nil]) {
                 if (subItem.length == 9 && [subItem hasPrefix:@"jb-"]) {
                     NSString *candidateLegacyPath = [activePrebootPath stringByAppendingPathComponent:subItem];
@@ -123,8 +119,6 @@ extern char **environ;
                     BOOL installedDopamine = [[NSFileManager defaultManager] fileExistsAtPath:[candidateLegacyPath stringByAppendingPathComponent:@"procursus/.installed_dopamine"]];
                     
                     if (installedDopamine) {
-                        // Hopefully all other jailbreaks that use jb-<UUID>?
-                        // These checks exist because of dumb users (and jailbreak developers) creating .installed_dopamine on jailbreaks that are NOT dopamine...
                         BOOL installedNekoJB = [[NSFileManager defaultManager] fileExistsAtPath:[candidateLegacyPath stringByAppendingPathComponent:@"procursus/.installed_nekojb"]];
                         BOOL installedDefinitelyNotAGoodName = [[NSFileManager defaultManager] fileExistsAtPath:[candidateLegacyPath stringByAppendingPathComponent:@"procursus/.xia0o0o0o_jb_installed"]];
                         BOOL installedPalera1n = [[NSFileManager defaultManager] fileExistsAtPath:[candidateLegacyPath stringByAppendingPathComponent:@"procursus/.palecursus_strapped"]];
@@ -143,8 +137,6 @@ extern char **environ;
         if (randomizedJailbreakPath) {
             NSString *jailbreakRootPath = [randomizedJailbreakPath stringByAppendingPathComponent:@"procursus"];
             if ([[NSFileManager defaultManager] fileExistsAtPath:jailbreakRootPath]) {
-                // This attribute serves as the primary source of what the root path is
-                // Anything else in the jailbreak will get it from here
                 gSystemInfo.jailbreakInfo.rootPath = strdup(jailbreakRootPath.fileSystemRepresentation);
             }
         }
@@ -156,26 +148,6 @@ extern char **environ;
     NSError *error = nil;
 
     [self locateJailbreakRoot];
-
-    // DOPACLEAN logic to move a corrupted dopamine directory to a different path to at least make jailbreaking work again
-    // if (gSystemInfo.jailbreakInfo.rootPath) {
-    //     NSString *randomizedJailbreakPath = [NSString stringWithUTF8String:gSystemInfo.jailbreakInfo.rootPath].stringByDeletingLastPathComponent;
-    //     NSString *characterSet = @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    //     NSUInteger stringLen = 6;
-    //     NSMutableString *randomString = [NSMutableString stringWithCapacity:stringLen];
-    //     for (NSUInteger i = 0; i < stringLen; i++) {
-    //         NSUInteger randomIndex = arc4random_uniform((uint32_t)[characterSet length]);
-    //         unichar randomCharacter = [characterSet characterAtIndex:randomIndex];
-    //         [randomString appendFormat:@"%C", randomCharacter];
-    //     }
-        
-    //     NSString *activePrebootPath = [self activePrebootPath];
-    //     NSString *orphanedName = [NSString stringWithFormat:@"orphaned-%@", randomString];
-    //     NSString *orphanedPath = [activePrebootPath stringByAppendingPathComponent:orphanedName];
-    //     [[NSFileManager defaultManager] moveItemAtPath:randomizedJailbreakPath toPath:orphanedPath error:nil];
-    // }
-
-    // return [NSError errorWithDomain:@"Cleaned" code:1 userInfo:nil];
 
     if (!gSystemInfo.jailbreakInfo.rootPath || _bootstrapNeedsMigration) {
         [_bootstrapper ensurePrivatePrebootIsWritable];
@@ -305,10 +277,8 @@ extern char **environ;
         uint32_t csFlags = 0;
         csops(getpid(), CS_OPS_STATUS, &csFlags, sizeof(csFlags));
         
-        // Palera1n
         if (csFlags & CS_PLATFORM_BINARY) return YES;
         
-        // Older Dopamine build
         if (!access("/usr/lib/systemhook.dylib", F_OK)) return YES;
     }
     return NO;
@@ -343,7 +313,6 @@ extern char **environ;
         jbclient_root_set_mac_label(1, labelBackup, NULL);
     }
     else {
-        // Hope that we are already unsandboxed
         unsandboxBlock();
     }
 }
@@ -408,12 +377,9 @@ extern char **environ;
         [self runUnsandboxed:^{
             r = posix_spawn(&pid, argBuf[0], &act, &attr, (char *const *)argBuf, (char *const *)environ);
             if (needsLegacySolution) {
-                // Legacy solution is a gamble, which is why it was removed and superseeded by --waitfor
-                // But if jailbroken with <3.0.5, jbctl doesn't support --waitfor yet
                 kill(pid, SIGCONT);
             }
         }];
-        // We *NEED* to leave this block on iOS 17+ to avoid a panic, --waitfor ensures this always happens
     }];
 
     posix_spawnattr_destroy(&attr);
@@ -425,7 +391,6 @@ extern char **environ;
 
     if (!needsLegacySolution) {
         if (r == 0) {
-            // We left the root/unsandbox block, now resume jbctl by writing to pipe
             char w = 'w';
             write(waitPipe[1], &w, sizeof(w));
         }
@@ -635,6 +600,239 @@ extern char **environ;
     return [self spawnJbctlAsRootWithArgs:@[@"internal", @"protection", arg]];
 }
 
+- (BOOL)doAuditName:(NSString *)name matchesExact:(NSArray<NSString *> *)exact regex:(NSArray<NSString *> *)regex
+{
+    if ([exact containsObject:name]) return YES;
+    for (NSString *pattern in regex) {
+        NSRegularExpression *expression = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:nil];
+        if ([expression firstMatchInString:name options:0 range:NSMakeRange(0, name.length)]) return YES;
+    }
+    return NO;
+}
+
+- (NSString *)hideQuarantineRoot
+{
+    return @"/var/mobile/.DopamineHideQuarantine";
+}
+
+- (NSString *)hideMapPath
+{
+    return [[self hideQuarantineRoot] stringByAppendingPathComponent:@"map.plist"];
+}
+
+- (void)hideItemAtPath:(NSString *)src
+{
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *root = [self hideQuarantineRoot];
+
+    [fm createDirectoryAtPath:root
+  withIntermediateDirectories:YES
+                   attributes:nil
+                        error:nil];
+
+    NSString *dst = [root stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
+
+    NSError *err = nil;
+    if (![fm moveItemAtPath:src toPath:dst error:&err]) {
+        NSLog(@"[HideJailbreak] move failed %@ -> %@: %@", src, dst, err);
+        return;
+    }
+
+    NSMutableArray *map = [[NSArray arrayWithContentsOfFile:[self hideMapPath]] mutableCopy] ?: [NSMutableArray array];
+    [map addObject:@{ @"src": src, @"dst": dst }];
+    [map writeToFile:[self hideMapPath] atomically:YES];
+
+    NSLog(@"[HideJailbreak] hidden %@ -> %@", src, dst);
+}
+
+- (void)restoreHiddenItems
+{
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *map = [NSArray arrayWithContentsOfFile:[self hideMapPath]];
+
+    for (NSDictionary *entry in [map reverseObjectEnumerator]) {
+        NSString *src = entry[@"src"];
+        NSString *dst = entry[@"dst"];
+
+        if (!src || !dst) continue;
+        if ([fm fileExistsAtPath:src]) continue;
+
+        [fm createDirectoryAtPath:[src stringByDeletingLastPathComponent]
+      withIntermediateDirectories:YES
+                       attributes:nil
+                            error:nil];
+
+        NSError *err = nil;
+        if (![fm moveItemAtPath:dst toPath:src error:&err]) {
+            NSLog(@"[HideJailbreak] restore failed %@ -> %@: %@", dst, src, err);
+        } else {
+            NSLog(@"[HideJailbreak] restored %@", src);
+        }
+    }
+
+    [fm removeItemAtPath:[self hideMapPath] error:nil];
+}
+
+#pragma mark - Injection Blocking Rules
+
+- (NSString *)injectionRulesPath
+{
+    return @"/var/mobile/Library/Preferences/.DopamineInjectionRules.plist";
+}
+
+- (NSDictionary *)injectionRules
+{
+    NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:[self injectionRulesPath]];
+    return rules ?: @{};
+}
+
+- (BOOL)isInjectionBlockedForBundleID:(NSString *)bundleID
+{
+    if (!bundleID) return NO;
+    NSDictionary *rules = [self injectionRules];
+    NSDictionary *appRule = rules[bundleID];
+    if (appRule) {
+        return [appRule[@"BlockInjection"] boolValue];
+    }
+    return NO;
+}
+
+- (void)setInjectionBlocked:(BOOL)blocked forBundleID:(NSString *)bundleID
+{
+    if (!bundleID) return;
+
+    NSMutableDictionary *rules = [[self injectionRules] mutableCopy];
+    if (blocked) {
+        rules[bundleID] = @{@"BlockInjection": @YES};
+    } else {
+        [rules removeObjectForKey:bundleID];
+    }
+
+    NSString *path = [self injectionRulesPath];
+    [rules writeToFile:path atomically:YES];
+    chmod(path.fileSystemRepresentation, 0644);
+
+    NSLog(@"[InjectionBlock] %@ -> %@", bundleID, blocked ? @"blocked" : @"allowed");
+}
+
+- (NSArray<NSString *> *)allInjectionBlockedBundleIDs
+{
+    NSDictionary *rules = [self injectionRules];
+    NSMutableArray<NSString *> *result = [NSMutableArray array];
+    for (NSString *bundleID in rules) {
+        if ([rules[bundleID][@"BlockInjection"] boolValue]) {
+            [result addObject:bundleID];
+        }
+    }
+    return result;
+}
+
+#pragma mark - Library Audit
+
+- (void)runJailbreakLibraryAudit
+{
+    NSString *libraryRoot = @"/var/mobile/Library";
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:libraryRoot]) {
+        NSLog(@"[HideJailbreak Audit] %@ is not accessible", libraryRoot);
+        return;
+    }
+
+    NSDictionary<NSString *, NSDictionary *> *rules = @{
+        @"/var/mobile/Library": @{
+            @"whitelist": @[@"Accessibility", @"CoreBrightness", @"Keyboard", @"Preferences", @"Voicemail", @"Accounts", @"CoreDuet", @"KeyboardServices", @"PrivacyAccounting", @"WatchConnectivity", @"AddressBook", @"CoreFollowUp", @"LASD", @"Recents", @"Weather", @"AggregateDictionary", @"CountryBundles", @"LanguageModeling", @"Reminders", @"WebClips", @"CrashReporter", @"Logs", @"ReplayKit", @"WebKit", @"Application Support", @"MediaRemote", @"Safari", @"Caches", @"SplashBoard", @"MobileInstallation", @"SoftwareUpdate", @"BulletinBoard", @"MobileContainerManager", @"TCC", @"Settings", @"Cookies", @"Passes", @"UserNotifications", @"ApplicationSync", @"DataDeliveryServices", @"MediaStream", @"SafeHarbor", @"Wallet", @"Maps", @"Phone"],
+            @"blacklist": @[@"Sileo", @"Filza", @"Flex3", @"SBSettings", @"iCleaner"]
+        },
+        @"/var/mobile/Library/Preferences": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\.", @"^systemgroup\\.com\\.apple\\."],
+            @"whitelist": @[@".GlobalPreferences.plist", @".GlobalPreferences_m.plist", @"bluetoothaudiod.plist", @"NetworkInterfaces.plist", @"OSThermalStatus.plist", @"preferences.plist", @"osanalyticshelper.plist", @"UserEventAgent.plist", @"wifid.plist", @"dprivacyd.plist", @"silhouette.plist", @"nfcd.plist", @"ptpcamerad.plist", @"mobile_storage_proxy.plist"],
+            @"blacklist": @[@"com.roothide.manager.plist", @"com.opa334.Dopamine.roothide.plist", @"com.opa334.Dopamine.plist", @"com.tigisoftware.Filza.plist", @"com.xina.jailbreak.plist", @"org.coolstar.SileoStore.plist", @"ru.domo.cocoatop64.plist", @"ws.hbang.Terminal.plist", @"xyz.willy.Zebra.plist", @"com.apple.terminal.plist"]
+        },
+        @"/var/mobile/Library/Application Support": @{
+            @"blacklist": @[@"xyz.willy.Zebra"]
+        },
+        @"/var/mobile/Library/Application Support/Containers": @{
+            @"default": @"blacklist",
+            @"blacklist": @[@"xyz.willy.Zebra", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"com.apple.Terminal"]
+        },
+        @"/var/mobile/Library/UserConfigurationProfiles/PublicInfo": @{
+            @"blacklist": @[@"Flex3Patches.plist"]
+        },
+        @"/var/mobile/Library/SplashBoard/Snapshots": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"blacklist": @[@"com.roothide.manager", @"com.opa334.Dopamine.roothide", @"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ru.domo.cocoatop64", @"ws.hbang.Terminal", @"xyz.willy.Zebra", @"com.apple.Terminal"]
+        },
+        @"/var/mobile/Library/Caches": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\.", @"^TelephonyUI-\\d+$", @"^FamilyMarquee.*Mode-.*\\.png$"],
+            @"whitelist": @[@"CloudKit", @"GameKit", @"GeoServices", @"FamilyCircle", @"PassKit", @"VoiceServices", @"VoiceTrigger", @"Backup", @"ssu"],
+            @"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.hbang.Terminal", @"xyz.willy.Zebra", @"Cephei", @"com.apple.Terminal", @"GDFileManagerCache.sqlite", @"GDFileManagerCache.sqlite-shm", @"GDFileManagerCache.sqlite-wal", @"ImageTables", @"SentryCrash", @"io.sentry", @"com.hackemist.SDImageCache"]
+        },
+        @"/var/mobile/Library/Saved Application State": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"blacklist": @[@"com.opa334.Dopamine.savedState", @"com.tigisoftware.Filza.savedState", @"org.coolstar.SileoStore.savedState", @"ws.hbang.Terminal.savedState", @"xyz.willy.Zebra.savedState", @"ru.domo.cocoatop64.savedState", @"com.apple.Terminal.savedState"]
+        },
+        @"/var/mobile/Library/WebKit": @{
+            @"whitelist": @[@"Databases", @"LocalStorage"],
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"blacklist": @[@"xyz.willy.Zebra"]
+        },
+        @"/var/mobile/Library/Cookies": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"whitelist": @[@"Cookies.binarycookies"],
+            @"blacklist": @[@"com.johncoates.Flex.binarycookies"]
+        },
+        @"/var/mobile/Library/HTTPStorages": @{
+            @"default": @"blacklist",
+            @"whitelistRegex": @[@"^com\\.apple\\."],
+            @"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.hbang.Terminal", @"xyz.willy.Zebra"]
+        }
+    };
+
+    NSLog(@"[HideJailbreak Audit] begin %@", libraryRoot);
+
+    NSArray<NSString *> *paths = [rules.allKeys sortedArrayUsingSelector:@selector(compare:)];
+    for (NSString *path in paths) {
+        if (![fm fileExistsAtPath:path]) continue;
+
+        NSDictionary *rule = rules[path];
+        NSString *defaultAction = rule[@"default"];
+        NSArray *whitelist = rule[@"whitelist"] ?: @[];
+        NSArray *blacklist = rule[@"blacklist"] ?: @[];
+        NSArray *whitelistRegex = rule[@"whitelistRegex"] ?: @[];
+        NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:path error:nil];
+
+        NSLog(@"[HideJailbreak Audit] rule %@ default=%@ entries=%lu", path, defaultAction ?: @"none", (unsigned long)children.count);
+
+        for (NSString *name in children) {
+            BOOL white = [self doAuditName:name matchesExact:whitelist regex:whitelistRegex];
+            BOOL black = [blacklist containsObject:name];
+            NSString *result = nil;
+            if (black) result = @"BLACKLIST";
+            else if (white) result = @"WHITELIST";
+            else if (defaultAction) result = [defaultAction isEqualToString:@"blacklist"] ? @"DEFAULT-BLACKLIST" : @"DEFAULT-WHITELIST";
+            else result = @"UNMATCHED";
+
+            NSString *fullPath = [path stringByAppendingPathComponent:name];
+
+            BOOL shouldHide = [result isEqualToString:@"BLACKLIST"] ||
+                              [result isEqualToString:@"DEFAULT-BLACKLIST"];
+
+            if (shouldHide) {
+                [self hideItemAtPath:fullPath];
+            } else {
+                NSLog(@"[HideJailbreak] keep %@ -> %@", fullPath, result);
+            }
+        }
+    }
+
+    NSLog(@"[HideJailbreak Audit] end");
+}
+
 - (BOOL)isJailbreakHidden
 {
     return ![[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"];
@@ -652,22 +850,32 @@ extern char **environ;
         if (hidden != alreadyHidden) {
             if (hidden) {
                 if ([self isJailbroken]) {
+                    NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
+                    [[NSData data] writeToFile:safeModePath atomically:YES];
+
                     [self unregisterJailbreakApps];
                     [self setPrivatePrebootProtected:NO];
                     [self setFakelibMounted:NO];
-                    jbclient_platform_set_systemwide_domain_enabled(false);
                 }
                 [[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:nil];
+                [self runJailbreakLibraryAudit];
             }
             else {
+                [self restoreHiddenItems];
                 [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb" withDestinationPath:JBROOT_PATH(@"/") error:nil];
                 if ([self isJailbroken]) {
+                    NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
+                    [[NSFileManager defaultManager] removeItemAtPath:safeModePath error:nil];
+
                     jbclient_platform_set_systemwide_domain_enabled(true);
                     [self setFakelibMounted:YES];
                     [self setPrivatePrebootProtected:YES];
                     [self refreshJailbreakApps];
                 }
             }
+        }
+        else if (hidden) {
+            [self runJailbreakLibraryAudit];
         }
     };
     
@@ -777,11 +985,6 @@ extern char **environ;
 
 - (BOOL)isSupported
 {
-    //cpu_subtype_t cpuFamily = 0;
-    //size_t cpuFamilySize = sizeof(cpuFamily);
-    //sysctlbyname("hw.cpufamily", &cpuFamily, &cpuFamilySize, NULL, 0);
-    //if (cpuFamily == CPUFAMILY_ARM_TYPHOON) return false; // A8X is unsupported for now (due to 4k page size)
-    
     DOExploitManager *exploitManager = [DOExploitManager sharedManager];
     if ([exploitManager availableExploitsForType:EXPLOIT_TYPE_KERNEL].count) {
         if (![self isPACBypassRequired] || [exploitManager availableExploitsForType:EXPLOIT_TYPE_PAC].count) {
@@ -840,7 +1043,6 @@ extern char **environ;
     if (![self isJailbroken] && getuid() != 0) {
         int r = [self runTrollStoreAction:@"delete-bootstrap"];
         if (r != 0) {
-            // TODO: maybe handle error
         }
         return nil;
     }
@@ -854,7 +1056,6 @@ extern char **environ;
         return error;
     }
     else {
-        // Let's hope for the best
         return [_bootstrapper deleteBootstrap];
     }
 }
