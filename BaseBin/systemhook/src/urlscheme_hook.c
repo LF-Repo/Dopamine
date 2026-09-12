@@ -11,8 +11,8 @@
 #include <fcntl.h>
 #include <stdarg.h>
 
-#define HIDDEN_SCHEMES_FILE "/var/mobile/Library/Preferences/.DopamineHiddenSchemes"
-#define DEBUG_LOG_FILE      "/var/mobile/Library/Preferences/.urlscheme_debug.log"
+#define HIDDEN_SCHEMES_FILE "/var/mobile/Library/Caches/.DopamineHiddenSchemes"
+#define DEBUG_LOG_FILE      "/var/mobile/Library/Caches/.urlscheme_debug.log"
 
 static void dbg_log(const char *fmt, ...)
 {
