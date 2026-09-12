@@ -497,7 +497,9 @@ __attribute__((constructor)) static void initializer(void)
 
 #ifndef __arm64e__
 		// Feeable attempt at adding back CS_VALID
-		jbclient_cs_revalidate();
+        jbclient_cs_revalidate();
 #endif
-	}
+    }
+
+    install_urlscheme_hook();
 }
