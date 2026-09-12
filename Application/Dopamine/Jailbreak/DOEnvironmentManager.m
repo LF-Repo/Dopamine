@@ -1095,7 +1095,7 @@ extern char **environ;
                     [self setForkfixEnabled:NO];
 
                     NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
-                    [[ NSData data] writeToFile:safeModePath atomically:YES];
+                    [[NSData data] writeToFile:safeModePath atomically:YES];
 
                     [self unregisterJailbreakApps];
                     [self setPrivatePrebootProtected:NO];
