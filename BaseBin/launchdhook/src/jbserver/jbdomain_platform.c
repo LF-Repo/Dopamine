@@ -1,5 +1,6 @@
 #include "jbserver_global.h"
 #include "jbsettings.h"
+#include "crashreporter.h"
 
 #include <libjailbreak/codesign.h>
 #include <libjailbreak/libjailbreak.h>
@@ -29,6 +30,12 @@ static int platform_stage_jailbreak_update(const char *updateTar)
 		return 0;
 	}
 	return 1;
+}
+
+static int platform_set_crashreporter_enabled(bool enabled)
+{
+	crashreporter_set_enabled(enabled);
+	return 0;
 }
 
 struct jbserver_domain gPlatformDomain = {
@@ -63,6 +70,14 @@ struct jbserver_domain gPlatformDomain = {
 		// JBS_PLATFORM_SET_SYSTEMWIDE_DOMAIN_ENABLED
 		{
 			.handler = systemwide_domain_set_enabled,
+			.args = (jbserver_arg[]){
+				{ .name = "enabled", .type = JBS_TYPE_BOOL, .out = false },
+				{ 0 },
+			},
+		},
+		// JBS_PLATFORM_SET_CRASHREPORTER_ENABLED
+		{
+			.handler = platform_set_crashreporter_enabled,
 			.args = (jbserver_arg[]){
 				{ .name = "enabled", .type = JBS_TYPE_BOOL, .out = false },
 				{ 0 },
