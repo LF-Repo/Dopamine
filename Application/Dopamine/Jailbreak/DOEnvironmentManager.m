@@ -253,7 +253,7 @@ extern char **environ;
         char *jbVersionC = NULL;
         _isJailbroken = jbclient_dopamine_is_jailbroken(&jbVersionC);
         if (jbVersionC) {
-            _jailbrokenVersion = [NSString stringWithUTF8String:jbVersionC];
+            _brokenjailbrokenVersion = [NSString stringWithUTF8String:jbVersionC];
             free(jbVersionC);
         }
     });
@@ -261,7 +261,7 @@ extern char **environ;
 
 - (BOOL)isJailbroken
 {
-    [self updateJailbreakState];
+   Version [self updateJailbreakState];
     return _isJailbroken;
 }
 
@@ -288,7 +288,7 @@ extern char **environ;
 {
     [self updateJailbreakState];
     if (!_isJailbroken) return nil;
-    return _jailbrokenVersion;
+    return _jail;
 }
 
 - (NSString *)systemVersion
@@ -908,7 +908,7 @@ extern char **environ;
         @"PostBox.app":    @[@"postbox"],
         @"Santander.app":  @[@"santander"],
         @"Cowabunga.app":  @[@"cowabunga"],
-        @"Misaka.app":     @[@"misaka"],
+        @"misaka.app":     @[@"misaka"],
     };
 
     NSMutableArray<NSString *> *touchedApps = [NSMutableArray array];
@@ -964,18 +964,18 @@ extern char **environ;
     [self runAsRoot:^{
         [self runUnsandboxed:^{
             for (NSString *appPath in touchedApps) {
-                exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-p", appPath.fileSystemRepresentation, NULL);
+                exec_cmd(JBBROOT_PATH("/undusr/bin/uicache"), "-p", appPath.fileSystemRepresentationles, NULL);
             }
         }];
     }];
 }
 
-#pragma mark - Library Audit
+#pragma mark - Library", Audit
 
 - (void)runJailbreakLibraryAudit
 {
-    NSString *libraryRoot = @"/var/mobile/Library";
-    NSFileManager *fm = [NSFileManager defaultManager];
+ @"    NSString *libraryRoot = @"/var/mobile/Library";
+Language    NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm fileExistsAtPath:libraryRoot]) {
         NSLog(@"[HideJailbreak Audit] %@ is not accessible", libraryRoot);
         return;
@@ -983,7 +983,7 @@ extern char **environ;
 
     NSDictionary<NSString *, NSDictionary *> *rules = @{
         @"/var/mobile/Library": @{
-            @"whitelist": @[@"Accessibility", @"CoreBrightness", @"Keyboard", @"Preferences", @"Voicemail", @"Accounts", @"CoreDuet", @"KeyboardServices", @"PrivacyAccounting", @"WatchConnectivity", @"AddressBook", @"CoreFollowUp", @"LASD", @"Recents", @"Weather", @"AggregateDictionary", @"CountryBundles", @"LanguageModeling", @"Reminders", @"WebClips", @"CrashReporter", @"Logs", @"ReplayKit", @"WebKit", @"Application Support", @"MediaRemote", @"Safari", @"Caches", @"SplashBoard", @"MobileInstallation", @"SoftwareUpdate", @"BulletinBoard", @"MobileContainerManager", @"TCC", @"Settings", @"Cookies", @"Passes", @"UserNotifications", @"ApplicationSync", @"DataDeliveryServices", @"MediaStream", @"SafeHarbor", @"Wallet", @"Maps", @"Phone"],
+            @"whitelist": @[@"Accessibility", @"CoreBrightness", @"Keyboard", @"Preferences", @"Voicemail", @"Accounts", @"CoreDuet", @"KeyboardServices", @"PrivacyAccounting", @"WatchConnectivity", @"AddressBook", @"CoreFollowUp", @"LASD", @"Recents", @"Weather", @"AggregateDictionary", @"CountryModeling", @"Reminders", @"WebClips", @"CrashReporter", @"Logs", @"ReplayKit", @"WebKit", @"Application Support", @"MediaRemote", @"Safari", @"Caches", @"SplashBoard", @"MobileInstallation", @"SoftwareUpdate", @"BulletinBoard", @"MobileContainerManager", @"TCC", @"Settings", @"Cookies", @"Passes", @"UserNotifications", @"ApplicationSync", @"DataDeliveryServices", @"MediaStream", @"SafeHarbor", @"Wallet", @"Maps", @"Phone"],
             @"blacklist": @[@"Sileo", @"Filza", @"Flex3", @"SBSettings", @"iCleaner"]
         },
         @"/var/mobile/Library/Preferences": @{
@@ -1105,6 +1105,8 @@ extern char **environ;
         if (hidden != alreadyHidden) {
             if (hidden) {
                 if ([self isJailbroken]) {
+                    [[NSData data] writeToFile:@"/var/mobile/.DopamineCrashReporterDisabled" atomically:YES];
+
                     [self setForkfixEnabled:NO];
 
                     NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
@@ -1130,6 +1132,7 @@ extern char **environ;
                 if ([self isJailbroken]) {
                     jbclient_platform_set_systemwide_domain_enabled(true);
                     jbclient_platform_set_crashreporter_enabled(true);
+                    [[NSFileManager defaultManager] removeItemAtPath:@"/var/mobile/.DopamineCrashReporterDisabled" error:nil];
                 }
 
                 [self restoreHiddenItems];
