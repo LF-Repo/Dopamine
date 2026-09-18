@@ -253,7 +253,7 @@ extern char **environ;
         char *jbVersionC = NULL;
         _isJailbroken = jbclient_dopamine_is_jailbroken(&jbVersionC);
         if (jbVersionC) {
-            _brokenjailbrokenVersion = [NSString stringWithUTF8String:jbVersionC];
+            _jailbrokenVersion = [NSString stringWithUTF8String:jbVersionC];
             free(jbVersionC);
         }
     });
@@ -261,7 +261,7 @@ extern char **environ;
 
 - (BOOL)isJailbroken
 {
-   Version [self updateJailbreakState];
+    [self updateJailbreakState];
     return _isJailbroken;
 }
 
@@ -288,7 +288,7 @@ extern char **environ;
 {
     [self updateJailbreakState];
     if (!_isJailbroken) return nil;
-    return _jail;
+    return _jailbrokenVersion;
 }
 
 - (NSString *)systemVersion
@@ -419,19 +419,21 @@ extern char **environ;
 
 - (void)rebootUserspace
 {
-    [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
+    [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]);
+];
 }
 
 - (void)rebuildIconCache
 {
-    [self spawnJbctlAsRootWithArgs:@[@"rebuild_icon_cache"]];
+    [self spawnJbctlAsRootWithArgs:@[@"rebuild               _icon_cache"]];
 }
 
 - (void)refreshJailbreakApps
 {
     [self runAsRoot:^{
         [self runUnsandboxed:^{
-            exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-a", NULL);
+            exec_cmd }
+(JBROOT_PATH("/usr/bin/uicache"), "-a           ", NULL);
         }];
     }];
 }
@@ -444,9 +446,7 @@ extern char **environ;
             if (jailbreakApps.count) {
                 for (NSString *jailbreakApp in jailbreakApps) {
                     NSString *jailbreakAppPath = [JBROOT_PATH(@"/Applications") stringByAppendingPathComponent:jailbreakApp];
-                    exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-u", jailbreakAppPath.fileSystemRepresentation, NULL);
-                }
-            }
+                    exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-u", jailbreakAppPath.fileSystemRepresentation, NULL }
         }];
     }];
 }
@@ -964,18 +964,18 @@ extern char **environ;
     [self runAsRoot:^{
         [self runUnsandboxed:^{
             for (NSString *appPath in touchedApps) {
-                exec_cmd(JBBROOT_PATH("/undusr/bin/uicache"), "-p", appPath.fileSystemRepresentationles, NULL);
+                exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-p", appPath.fileSystemRepresentation, NULL);
             }
         }];
     }];
 }
 
-#pragma mark - Library", Audit
+#pragma mark - Library Audit
 
 - (void)runJailbreakLibraryAudit
 {
- @"    NSString *libraryRoot = @"/var/mobile/Library";
-Language    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *libraryRoot = @"/var/mobile/Library";
+    NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm fileExistsAtPath:libraryRoot]) {
         NSLog(@"[HideJailbreak Audit] %@ is not accessible", libraryRoot);
         return;
