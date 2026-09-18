@@ -736,7 +736,12 @@ extern char **environ;
 
 - (NSString *)forkfixDisabledPath
 {
-    return [[self forkfixPath] stringByAppendingString:@".disabled"];
+    return [NSString stringWithUTF8String:JBROOT_PATH("/basebin/forkfix.dylib.disabled")];
+}
+
+- (NSString *)forkfixQuarantinePath
+{
+    return [[self hideQuarantineRoot] stringByAppendingPathComponent:@".ffx"];
 }
 
 - (void)setForkfixEnabled:(BOOL)enabled
@@ -744,16 +749,32 @@ extern char **environ;
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *enabledPath = [self forkfixPath];
     NSString *disabledPath = [self forkfixDisabledPath];
+    NSString *quarantinePath = [self forkfixQuarantinePath];
 
     if (enabled) {
-        if ([fm fileExistsAtPath:disabledPath] && ![fm fileExistsAtPath:enabledPath]) {
+        if ([fm fileExistsAtPath:quarantinePath] && ![fm fileExistsAtPath:enabledPath]) {
+            [fm moveItemAtPath:quarantinePath toPath:enabledPath error:nil];
+            NSLog(@"[HideJailbreak] forkfix restored from quarantine");
+        }
+        else if ([fm fileExistsAtPath:disabledPath] && ![fm fileExistsAtPath:enabledPath]) {
             [fm moveItemAtPath:disabledPath toPath:enabledPath error:nil];
             NSLog(@"[HideJailbreak] forkfix enabled");
         }
     } else {
-        if ([fm fileExistsAtPath:enabledPath] && ![fm fileExistsAtPath:disabledPath]) {
-            [fm moveItemAtPath:enabledPath toPath:disabledPath error:nil];
-            NSLog(@"[HideJailbreak] forkfix disabled");
+
+        [fm createDirectoryAtPath:[self hideQuarantineRoot]
+      withIntermediateDirectories:YES
+                       attributes:nil
+                            error:nil];
+
+        if ([fm fileExistsAtPath:enabledPath]) {
+            [fm removeItemAtPath:quarantinePath error:nil];
+            [fm moveItemAtPath:enabledPath toPath:quarantinePath error:nil];
+            NSLog(@"[HideJailbreak] forkfix hidden to quarantine");
+        } else if ([fm fileExistsAtPath:disabledPath]) {
+            [fm removeItemAtPath:quarantinePath error:nil];
+            [fm moveItemAtPath:disabledPath toPath:quarantinePath error:nil];
+            NSLog(@"[HideJailbreak] forkfix .disabled moved to quarantine");
         }
     }
 }
