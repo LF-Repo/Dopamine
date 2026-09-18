@@ -14,6 +14,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach-o/dyld.h>
 #include <libjailbreak/util.h>
+#include <signal.h>
 extern CFStringRef CFCopySystemVersionString(void);
 
 void abort_with_reason(uint32_t reason_namespace, uint64_t reason_code, const char *reason_string, uint64_t reason_flags);
@@ -372,15 +373,27 @@ void *crashreporter_listen(void *arg)
 
 void crashreporter_pause(void)
 {
-	if (@available(iOS 17.0, *)) {}
-	else {
-		if (gCrashReporterState == kCrashReporterStateActive) {
-			task_set_exception_ports(mach_task_self_, EXC_MASK_CRASH_RELATED, 0, EXCEPTION_DEFAULT, ARM_THREAD_STATE64);
-			NSSetUncaughtExceptionHandler(defaultNSExceptionHandler);
-			defaultNSExceptionHandler = nil;
-			gCrashReporterState = kCrashReporterStatePaused;
-		}
-	}
+    if (@available(iOS 17.0, *)) {}
+    else {
+        if (gCrashReporterState == kCrashReporterStateActive) {
+            task_set_exception_ports(mach_task_self_, EXC_MASK_CRASH_RELATED, 0, EXCEPTION_DEFAULT, ARM_THREAD_STATE64);
+            NSSetUncaughtExceptionHandler(defaultNSExceptionHandler);
+            defaultNSExceptionHandler = nil;
+
+            struct sigaction sa = {0};
+            sa.sa_handler = SIG_DFL;
+            sigemptyset(&sa.sa_mask);
+            sigaction(SIGSEGV, &sa, NULL);
+            sigaction(SIGBUS,  &sa, NULL);
+            sigaction(SIGILL,  &sa, NULL);
+            sigaction(SIGFPE,  &sa, NULL);
+            sigaction(SIGABRT, &sa, NULL);
+            sigaction(SIGTRAP, &sa, NULL);
+            sigaction(SIGSYS,  &sa, NULL);
+
+            gCrashReporterState = kCrashReporterStatePaused;
+        }
+    }
 }
 
 void crashreporter_resume(void)
