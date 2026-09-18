@@ -419,8 +419,7 @@ extern char **environ;
 
 - (void)rebootUserspace
 {
-    [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]);
-];
+    [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
 }
 
 - (void)rebuildIconCache
@@ -432,8 +431,7 @@ extern char **environ;
 {
     [self runAsRoot:^{
         [self runUnsandboxed:^{
-            exec_cmd }
-(JBROOT_PATH("/usr/bin/uicache"), "-a           ", NULL);
+            exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-a", NULL);
         }];
     }];
 }
@@ -446,7 +444,9 @@ extern char **environ;
             if (jailbreakApps.count) {
                 for (NSString *jailbreakApp in jailbreakApps) {
                     NSString *jailbreakAppPath = [JBROOT_PATH(@"/Applications") stringByAppendingPathComponent:jailbreakApp];
-                    exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-u", jailbreakAppPath.fileSystemRepresentation, NULL }
+                    exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-u", jailbreakAppPath.fileSystemRepresentation, NULL);
+                }
+            }
         }];
     }];
 }
