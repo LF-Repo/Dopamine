@@ -48,12 +48,9 @@ static void pthread_backtrace(pthread_t pthread, vm_address_t *buffer, unsigned 
 
 	*nb = 0;
 
-	// Rely on the fact that our caller has an empty stackframe (no local vars)
-	// to determine the minimum size of a stackframe (frame ptr & return addr)
 	frame = startfp;
 	next = (void*)pthread_stack_frame_decode_np((uintptr_t)frame, NULL);
 
-	/* make sure return address is never out of bounds */
 	stacktop -= (next - frame);
 
 	if(!INSTACK(frame) || !ISALIGNED(frame))
@@ -413,3 +410,15 @@ void crashreporter_start(void)
 	}
 }
 
+void crashreporter_set_enabled(bool enabled)
+{
+	if (@available(iOS 17.0, *)) {}
+	else {
+		if (enabled) {
+			crashreporter_resume();
+		}
+		else {
+			crashreporter_pause();
+		}
+	}
+}
