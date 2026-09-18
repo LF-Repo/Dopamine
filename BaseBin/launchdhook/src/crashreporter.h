@@ -41,6 +41,7 @@ typedef enum {
 void crashreporter_start(void);
 void crashreporter_pause(void);
 void crashreporter_resume(void);
+void crashreporter_set_enabled(bool enabled);
 
 FILE *crashreporter_open_outfile(const char *source, char **nameOut);
 void crashreporter_save_outfile(FILE *f);
