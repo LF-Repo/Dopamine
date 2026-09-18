@@ -1089,31 +1089,22 @@ extern char **environ;
         if (hidden != alreadyHidden) {
             if (hidden) {
                 if ([self isJailbroken]) {
-
+                    jbclient_platform_set_crashreporter_enabled(false);
+                    jbclient_platform_set_systemwide_domain_enabled(false);
 
                     [self setForkfixEnabled:NO];
 
-
                     NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
                     [[NSData data] writeToFile:safeModePath atomically:YES];
-
 
                     [self unregisterJailbreakApps];
                     [self setPrivatePrebootProtected:NO];
                     [self setFakelibMounted:NO];
                 }
 
-
                 [self hideJailbreakURLSchemes];
 
-
                 [[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:nil];
-
-
-
-                if ([self isJailbroken]) {
-                    jbclient_platform_set_systemwide_domain_enabled(false);
-                }
 
                 [self runJailbreakLibraryAudit];
             }
@@ -1126,16 +1117,13 @@ extern char **environ;
                                                                    error:nil];
 
                 if ([self isJailbroken]) {
-
                     jbclient_platform_set_systemwide_domain_enabled(true);
-
+                    jbclient_platform_set_crashreporter_enabled(true);
 
                     NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
                     [[NSFileManager defaultManager] removeItemAtPath:safeModePath error:nil];
 
-
                     [self setForkfixEnabled:YES];
-
 
                     [self setFakelibMounted:YES];
                     [self setPrivatePrebootProtected:YES];
