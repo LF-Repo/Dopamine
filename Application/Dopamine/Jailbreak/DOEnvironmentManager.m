@@ -762,19 +762,21 @@ extern char **environ;
 
 - (NSString *)findAppPathForBundleName:(NSString *)appName
 {
-    NSString *appContainerRoot = @"/var/containers/Bundle/Application";
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *uuids = [fm contentsOfDirectoryAtPath:appContainerRoot error:nil];
-    for (NSString *uuid in uuids) {
-        NSString *uuidPath = [appContainerRoot stringByAppendingPathComponent:uuid];
-        NSArray *contents = [fm contentsOfDirectoryAtPath:uuidPath error:nil];
-        for (NSString *item in contents) {
-            if ([item isEqualToString:appName]) {
-                NSString *fullPath = [uuidPath stringByAppendingPathComponent:item];
-                BOOL isDir = NO;
-                if ([fm fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
-                    NSLog(@"[HideURLScheme] found %@", fullPath);
-                    return fullPath;
+    NSArray<NSString *> *roots = @[@"/var/containers/Bundle/Application", @"/Applications"];
+    for (NSString *root in roots) {
+        NSArray *uuids = [fm contentsOfDirectoryAtPath:root error:nil];
+        for (NSString *uuid in uuids) {
+            NSString *uuidPath = [root stringByAppendingPathComponent:uuid];
+            NSArray *contents = [fm contentsOfDirectoryAtPath:uuidPath error:nil];
+            for (NSString *item in contents) {
+                if ([item isEqualToString:appName]) {
+                    NSString *fullPath = [uuidPath stringByAppendingPathComponent:item];
+                    BOOL isDir = NO;
+                    if ([fm fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
+                        NSLog(@"[HideURLScheme] found %@", fullPath);
+                        return fullPath;
+                    }
                 }
             }
         }
@@ -902,9 +904,11 @@ extern char **environ;
 - (void)hideJailbreakURLSchemes
 {
     NSDictionary<NSString *, NSArray<NSString *> *> *targets = @{
-        @"Reveil.app":   @[@"reveil", @"82flex"],
-        @"PostBox.app":  @[@"postbox"],
-        @"Santander.app":@[@"santander"],
+        @"Reveil.app":     @[@"reveil", @"82flex"],
+        @"PostBox.app":    @[@"postbox"],
+        @"Santander.app":  @[@"santander"],
+        @"Cowabunga.app":  @[@"cowabunga"],
+        @"Misaka.app":     @[@"misaka"],
     };
 
     NSMutableArray<NSString *> *touchedApps = [NSMutableArray array];
@@ -942,7 +946,7 @@ extern char **environ;
 
 - (void)restoreJailbreakURLSchemes
 {
-    NSArray<NSString *> *appNames = @[@"Reveil.app", @"PostBox.app", @"Santander.app"];
+    NSArray<NSString *> *appNames = @[@"Reveil.app", @"PostBox.app", @"Santander.app", @"Cowabunga.app", @"Misaka.app"];
     NSMutableArray<NSString *> *touchedApps = [NSMutableArray array];
 
     for (NSString *appName in appNames) {
@@ -1029,6 +1033,9 @@ extern char **environ;
             @"default": @"blacklist",
             @"whitelistRegex": @[@"^com\\.apple\\."],
             @"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.hbang.Terminal", @"xyz.willy.Zebra"]
+        },
+        @"/var/mobile/Documents": @{
+            @"blacklist": @[@"DumpDecrypter", @"Dumplpa"]
         }
     };
 
@@ -1069,6 +1076,15 @@ extern char **environ;
         }
     }
 
+    NSString *docsPath = @"/var/mobile/Documents";
+    NSArray<NSString *> *hiddenDocs = @[@".misaka"];
+    for (NSString *name in hiddenDocs) {
+        NSString *fullPath = [docsPath stringByAppendingPathComponent:name];
+        if ([fm fileExistsAtPath:fullPath]) {
+            [self hideItemAtPath:fullPath];
+        }
+    }
+
     NSLog(@"[HideJailbreak Audit] end");
 }
 
@@ -1089,27 +1105,21 @@ extern char **environ;
         if (hidden != alreadyHidden) {
             if (hidden) {
                 if ([self isJailbroken]) {
-
                     [self setForkfixEnabled:NO];
-
 
                     NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
                     [[NSData data] writeToFile:safeModePath atomically:YES];
-
 
                     [self unregisterJailbreakApps];
                     [self setPrivatePrebootProtected:NO];
                     [self setFakelibMounted:NO];
                 }
 
-
                 [self hideJailbreakURLSchemes];
-
 
                 [[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:nil];
 
                 [self runJailbreakLibraryAudit];
-
 
                 if ([self isJailbroken]) {
                     jbclient_platform_set_systemwide_domain_enabled(false);
@@ -1122,23 +1132,18 @@ extern char **environ;
                     jbclient_platform_set_crashreporter_enabled(true);
                 }
 
-
                 [self restoreHiddenItems];
                 [self restoreJailbreakURLSchemes];
-
 
                 [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb"
                                                      withDestinationPath:JBROOT_PATH(@"/")
                                                                    error:nil];
 
                 if ([self isJailbroken]) {
-
                     NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
                     [[NSFileManager defaultManager] removeItemAtPath:safeModePath error:nil];
 
-
                     [self setForkfixEnabled:YES];
-
 
                     [self setFakelibMounted:YES];
                     [self setPrivatePrebootProtected:YES];
