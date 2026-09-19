@@ -9,13 +9,20 @@
 #include <time.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <errno.h>
+
+#import <libjailbreak/jbroot.h>
+#import "jbserver/jbserver_local.h"
 
 extern int proc_listallpids(void *buffer, int buffersize);
 extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
+extern void systemwide_domain_set_enabled(bool enabled);
+extern int jbctl_earlyboot(mach_port_t serverPort, const char *arg0, ...);
 
-#define APP_HIDE_RULES_PATH "/var/mobile/Library/Preferences/.DopamineAppHideRules.plist"
-#define APP_HIDE_LOG_PATH   "/var/mobile/Documents/DopamineAppHide.log"
-#define APP_HIDE_LOG_MAX_SIZE (512 * 1024)
+#define APP_HIDE_RULES_PATH    "/var/mobile/Library/Preferences/.DopamineAppHideRules.plist"
+#define APP_HIDE_LOG_PATH      "/var/mobile/Documents/DopamineAppHide.log"
+#define APP_HIDE_LOG_MAX_SIZE  (512 * 1024)
+#define HIDE_QUARANTINE        "/var/mobile/.DopamineAppHideQuarantine"
 
 static void hide_log(NSString *format, ...)
 {
@@ -46,6 +53,8 @@ static void hide_log(NSString *format, ...)
     fprintf(fp, "[%s] %s\n", timebuf, msg.UTF8String);
     fclose(fp);
 }
+
+#pragma mark - 进程扫描
 
 static NSArray<NSString *> *target_bundle_ids(void)
 {
@@ -109,14 +118,143 @@ static BOOL any_target_running(void)
     return NO;
 }
 
+#pragma mark - 隔离区
+
+static void quarantine_move(const char *path)
+{
+    if (access(path, F_OK) != 0) return;
+
+    mkdir(HIDE_QUARANTINE, 0755);
+
+    const char *name = strrchr(path, '/');
+    if (!name) return;
+    name++;
+
+    char dst[512];
+    snprintf(dst, sizeof(dst), HIDE_QUARANTINE "/%s", name);
+
+    if (rename(path, dst) == 0) {
+        hide_log(@"quarantined: %s", path);
+    } else {
+        hide_log(@"quarantine failed: %s (errno=%d)", path, errno);
+    }
+}
+
+static void quarantine_restore(const char *path)
+{
+    const char *name = strrchr(path, '/');
+    if (!name) return;
+    name++;
+
+    char src[512];
+    snprintf(src, sizeof(src), HIDE_QUARANTINE "/%s", name);
+
+    if (access(src, F_OK) != 0) return;
+
+    if (rename(src, path) == 0) {
+        hide_log(@"restored: %s", path);
+    } else {
+        hide_log(@"restore failed: %s (errno=%d)", path, errno);
+    }
+}
+
+#pragma mark - jbctl 调用
+
+static void run_jbctl_internal(const char *cmd1, const char *cmd2)
+{
+    mach_port_t port = jbserver_local_start();
+    jbctl_earlyboot(port, "internal", cmd1, cmd2, NULL);
+    jbserver_local_stop();
+}
+
+#pragma mark - 隐藏/恢复
+
+static const char *kPlistsToHide[] = {
+    "/var/mobile/Library/Preferences/com.opa334.Dopamine.plist",
+    "/var/mobile/Library/Preferences/com.opa334.Dopamine.roothide.plist",
+    "/var/mobile/Library/Preferences/com.tigisoftware.Filza.plist",
+    "/var/mobile/Library/Preferences/com.xina.jailbreak.plist",
+    "/var/mobile/Library/Preferences/org.coolstar.SileoStore.plist",
+    "/var/mobile/Library/Preferences/ws.hbang.Terminal.plist",
+    "/var/mobile/Library/Preferences/xyz.willy.Zebra.plist",
+    NULL
+};
+
+static void perform_hide(void)
+{
+    hide_log(@"perform_hide begin");
+
+    run_jbctl_internal("fakelib", "unmount");
+    hide_log(@"fakelib unmounted");
+
+    run_jbctl_internal("protection", "deactivate");
+    hide_log(@"protection deactivated");
+
+    for (int i = 0; kPlistsToHide[i]; i++) {
+        quarantine_move(kPlistsToHide[i]);
+    }
+
+    if (unlink("/var/jb") == 0) hide_log(@"/var/jb removed");
+
+    systemwide_domain_set_enabled(false);
+    hide_log(@"systemwide domain disabled");
+
+    hide_log(@"perform_hide complete");
+}
+
+static void perform_unhide(void)
+{
+    hide_log(@"perform_unhide begin");
+
+    systemwide_domain_set_enabled(true);
+    hide_log(@"systemwide domain enabled");
+
+    const char *jbroot = JBROOT_PATH("/");
+    if (jbroot && access(jbroot, F_OK) == 0) {
+        if (symlink(jbroot, "/var/jb") == 0) hide_log(@"/var/jb restored");
+    }
+
+    for (int i = 0; kPlistsToHide[i]; i++) {
+        quarantine_restore(kPlistsToHide[i]);
+    }
+
+    run_jbctl_internal("protection", "activate");
+    hide_log(@"protection activated");
+
+    run_jbctl_internal("fakelib", "mount");
+    hide_log(@"fakelib mounted");
+
+    hide_log(@"perform_unhide complete");
+}
+
+#pragma mark - 监控线程
+
+static bool gIsHidden = false;
+static bool gActionInProgress = false;
+
 static void *monitor_thread(void *arg)
 {
     hide_log(@"monitor thread running");
 
+    gIsHidden = (access("/var/jb", F_OK) != 0);
+    hide_log(@"initial state: isHidden=%d", gIsHidden);
+
     while (1) {
         @autoreleasepool {
             BOOL shouldHide = any_target_running();
-            hide_log(@"shouldHide=%d", shouldHide);
+
+            if (shouldHide && !gIsHidden && !gActionInProgress) {
+                gActionInProgress = true;
+                hide_log(@"triggering HIDE");
+                perform_hide();
+                gActionInProgress = false;
+            }
+            else if (!shouldHide && gIsHidden && !gActionInProgress) {
+                gActionInProgress = true;
+                hide_log(@"triggering UNHIDE");
+                perform_unhide();
+                gActionInProgress = false;
+            }
         }
         sleep(2);
     }
