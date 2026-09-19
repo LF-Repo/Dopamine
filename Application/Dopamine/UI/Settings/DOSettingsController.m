@@ -29,6 +29,8 @@
 @property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *allApps;
 @property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *filteredApps;
 @property (nonatomic, strong) UISearchController *searchController;
+@property (nonatomic, strong) NSCache<NSString *, UIImage *> *iconCache;
+- (UIImage *)iconForBundleID:(NSString *)bundleID;
 @end
 
 @implementation DOSettingsController
@@ -811,20 +813,36 @@
 - (void)viewDidLoad
 {
     [super viewDidLoad];
+
     self.title = @"按应用隐藏";
-    self.tableView.rowHeight = 56;
+    self.tableView.rowHeight = 60;
+    self.tableView.backgroundColor = [UIColor systemGroupedBackgroundColor];
+    self.tableView.separatorInset = UIEdgeInsetsMake(0, 68, 0, 0);
+    self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
 
     self.allApps = [NSMutableArray array];
     self.filteredApps = [NSMutableArray array];
+    self.iconCache = [[NSCache alloc] init];
+    self.iconCache.countLimit = 200;
 
     [self loadInstalledApps];
 
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
+    self.searchController.searchBar.placeholder = @"搜索应用";
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.definesPresentationContext = YES;
+
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                                                                                          target:self
+                                                                                          action:@selector(donePressed)];
+}
+
+- (void)donePressed
+{
+    [self.navigationController popViewControllerAnimated:YES];
 }
 
 - (void)loadInstalledApps
@@ -840,6 +858,7 @@
         NSString *bundleID = [app valueForKey:@"applicationIdentifier"];
         NSString *name = [app valueForKey:@"localizedName"];
         if (!bundleID || !name) continue;
+        if ([bundleID hasPrefix:@"com.apple."]) continue;
 
         BOOL hidden = [env isEnvironmentHiddenForBundleID:bundleID];
         [self.allApps addObject:[@{
@@ -857,6 +876,52 @@
     [self.tableView reloadData];
 }
 
+- (UIImage *)iconForBundleID:(NSString *)bundleID
+{
+    if (!bundleID) return nil;
+    UIImage *cached = [self.iconCache objectForKey:bundleID];
+    if (cached) return cached;
+
+    UIImage *icon = nil;
+
+    SEL iconSel = NSSelectorFromString(@"_applicationIconImageForBundleIdentifier:format:scale:");
+    if ([UIImage respondsToSelector:iconSel]) {
+        NSMethodSignature *sig = [UIImage methodSignatureForSelector:iconSel];
+        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+        inv.target = [UIImage class];
+        inv.selector = iconSel;
+        NSString *bid = bundleID;
+        NSNumber *format = @(2);
+        CGFloat scale = [UIScreen mainScreen].scale;
+        [inv setArgument:&bid atIndex:2];
+        [inv setArgument:&format atIndex:3];
+        [inv setArgument:&scale atIndex:4];
+        [inv invoke];
+        __unsafe_unretained UIImage *result = nil;
+        [inv getReturnValue:&result];
+        icon = result;
+    }
+
+    if (!icon) {
+        Class LSApplicationProxy = objc_getClass("LSApplicationProxy");
+        if (LSApplicationProxy) {
+            id proxy = [LSApplicationProxy performSelector:NSSelectorFromString(@"applicationProxyForIdentifier:") withObject:bundleID];
+            if (proxy) {
+                SEL dataSel = NSSelectorFromString(@"iconDataForVariant:");
+                if ([proxy respondsToSelector:dataSel]) {
+                    NSData *data = [proxy performSelector:dataSel withObject:@2];
+                    if (data) icon = [UIImage imageWithData:data];
+                }
+            }
+        }
+    }
+
+    if (icon) [self.iconCache setObject:icon forKey:bundleID];
+    return icon;
+}
+
+#pragma mark - Search
+
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController
 {
     NSString *text = searchController.searchBar.text ?: @"";
@@ -868,6 +933,23 @@
         [self.filteredApps setArray:filtered];
     }
     [self.tableView reloadData];
+}
+
+#pragma mark - Table
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
+{
+    return 1;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
+{
+    return @"选择需要隐藏越狱环境的应用";
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
+{
+    return @"开启后，该应用将看不到 /var/jb、越狱相关文件及路径。修改后需要重启目标应用才能生效。";
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
@@ -882,18 +964,39 @@
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cellId];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+        cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
+        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     }
 
     NSDictionary *appInfo = self.filteredApps[indexPath.row];
+    NSString *bundleID = appInfo[@"bundleID"];
+
     cell.textLabel.text = appInfo[@"name"];
-    cell.detailTextLabel.text = appInfo[@"bundleID"];
-    cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-    cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
+    cell.detailTextLabel.text = bundleID;
+
+    UIImage *icon = [self iconForBundleID:bundleID];
+    if (icon) {
+        cell.imageView.image = icon;
+        cell.imageView.layer.cornerRadius = 10;
+        cell.imageView.layer.masksToBounds = YES;
+        cell.imageView.layer.borderWidth = 0.5;
+        cell.imageView.layer.borderColor = [[UIColor separatorColor] CGColor];
+        CGSize size = CGSizeMake(40, 40);
+        UIGraphicsBeginImageContextWithOptions(size, NO, 0);
+        [icon drawInRect:CGRectMake(0, 0, size.width, size.height)];
+        UIImage *resized = UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+        cell.imageView.image = resized;
+    } else {
+        cell.imageView.image = [UIImage systemImageNamed:@"app"];
+    }
 
     UISwitch *toggle = [[UISwitch alloc] init];
     toggle.on = [appInfo[@"hidden"] boolValue];
     toggle.tag = indexPath.row;
     [toggle addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
+    toggle.transform = CGAffineTransformMakeScale(0.85, 0.85);
     cell.accessoryView = toggle;
 
     return cell;
@@ -913,6 +1016,9 @@
             break;
         }
     }
+
+    UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+    [fb impactOccurred];
 }
 
 @end
