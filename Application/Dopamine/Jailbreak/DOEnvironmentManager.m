@@ -1113,7 +1113,14 @@ extern char **environ;
             @"blacklist": @[@"DumpDecrypter", @"Dumplpa"]
         },
         @"/var/mobile": @{
-            @"blacklist": @[@".DO-NOT-DELETE-Cowabunga", @".Derootifier", @"Helix",@".ssh"]
+            @"blacklist": @[
+                @".DO-NOT-DELETE-Cowabunga",
+                @".Derootifier",
+                @"Helix",
+                @".ssh",
+                @".cache"
+            ]
+        }
     };
 
     NSLog(@"[HideJailbreak Audit] begin %@", libraryRoot);
