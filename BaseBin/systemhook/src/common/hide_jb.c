@@ -190,6 +190,8 @@ static DIR *opendir_hook(const char *path)
     return d;
 }
 
+#include <dlfcn.h>
+
 void hide_jb_enable(void)
 {
     if (gHideJb) return;
@@ -197,4 +199,19 @@ void hide_jb_enable(void)
 
     litehook_hook_function(open,   open_hook);
     litehook_hook_function(openat, openat_hook);
+
+    void *real_access = dlsym(RTLD_DEFAULT, "access");
+    if (real_access) litehook_hook_function(real_access, access_hook);
+
+
+    // void *real_stat     = dlsym(RTLD_DEFAULT, "stat");
+    // void *real_lstat    = dlsym(RTLD_DEFAULT, "lstat");
+    // void *real_fstatat  = dlsym(RTLD_DEFAULT, "fstatat");
+    // void *real_statfs   = dlsym(RTLD_DEFAULT, "statfs");
+    // void *real_readlink = dlsym(RTLD_DEFAULT, "readlink");
+    // if (real_stat)     litehook_hook_function(real_stat,     stat_hook);
+    // if (real_lstat)    litehook_hook_function(real_lstat,    lstat_hook);
+    // if (real_fstatat)  litehook_hook_function(real_fstatat,  fstatat_hook);
+    // if (real_statfs)   litehook_hook_function(real_statfs,   statfs_hook);
+    // if (real_readlink) litehook_hook_function(real_readlink, readlink_hook);
 }
