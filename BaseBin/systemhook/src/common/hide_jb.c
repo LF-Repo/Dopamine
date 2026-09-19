@@ -32,9 +32,9 @@ static int open_hook(const char *path, int oflag, ...)
 {
     if (should_hide_path(path)) { errno = ENOENT; return -1; }
     mode_t mode = 0;
-    if (oflag & (O_CREAT | O_TMPFILE)) {
+    if (oflag & O_CREAT) {
         va_list ap; va_start(ap, oflag);
-        mode = va_arg(ap, mode_t);
+        mode = (mode_t)va_arg(ap, int);
         va_end(ap);
     }
     return syscall(SYS_open, path, oflag, mode);
@@ -45,9 +45,9 @@ static int openat_hook(int fd, const char *path, int oflag, ...)
 {
     if (should_hide_path(path)) { errno = ENOENT; return -1; }
     mode_t mode = 0;
-    if (oflag & (O_CREAT | O_TMPFILE)) {
+    if (oflag & O_CREAT) {
         va_list ap; va_start(ap, oflag);
-        mode = va_arg(ap, mode_t);
+        mode = (mode_t)va_arg(ap, int);
         va_end(ap);
     }
     return syscall(SYS_openat, fd, path, oflag, mode);
