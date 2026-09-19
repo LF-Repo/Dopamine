@@ -818,9 +818,9 @@
     self.tableView.rowHeight = 64;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.tableView.separatorInset = UIEdgeInsetsMake(0, 68, 0, 0);
-    self.tableView.separatorColor = [[UIColor whiteColor] colorWithAlphaComponent:0.08];
+    self.tableView.separatorColor = [[UIColor whiteColor] colorWithAlphaComponent:0.06];
     if (@available(iOS 15.0, *)) {
-        self.tableView.sectionHeaderTopPadding = 0;
+        self.tableView.sectionHeaderTopPadding = 12;
     }
 
 
