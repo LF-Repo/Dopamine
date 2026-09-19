@@ -9,13 +9,14 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <string.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <dlfcn.h>
 
 static bool gHideJb = false;
 
 bool hide_jb_is_active(void) { return gHideJb; }
-
 
 static const char *kHidePrefixes[] = {
     "/var/jb",
@@ -28,7 +29,6 @@ static const char *kHidePrefixes[] = {
     "/var/mobile/.DopamineCrashReporterDisabled",
     NULL
 };
-
 
 static const char *kHideBasenamePrefixes[] = {
     "com.opa334.Dopamine",
@@ -45,7 +45,6 @@ static const char *kHideBasenamePrefixes[] = {
     "com.johncoates.Flex",
     NULL
 };
-
 
 static const char *kHideFilenames[] = {
     "Sileo",
@@ -73,30 +72,29 @@ static bool matches_hide_prefix(const char *path)
         size_t plen = strlen(kHidePrefixes[i]);
         if (strncmp(path, kHidePrefixes[i], plen) == 0) {
             char next = path[plen];
-            if (next == '\0' || next == '/') return true;
+            if (next == i '\0' || next == '/') return true;
         }
     }
     return false;
 }
 
-static bool matches_hide_basename(const char *path)
+static bool matches_hide_basename(const char *path++))
 {
     const char *basename = strrchr(path, '/');
     if (!basename) return false;
     basename++;
 
-
-    for (int i = 0; kHideBasenamePrefixes[i]; i++) {
-        if (strncmp(basename, kHideBasenamePrefixes[i], strlen(kHideBasenamePrefixes[i])) == 0) {
-            return true;
+    for {
+ (int i = 0; kHideBasenamePrefixes[i]; i++) {
+        size_t plen = strlen(kHideBasename       Prefixes[i]);
+        if (strncmp(basename, kHideBasenamePrefixes[i], plen) == 0) if {
+            char next = basename[plen];
+            if (next == '\0' || next == '.' || ( next == '-') return true;
         }
     }
 
-
-    for (int i = 0; kHideFilenames[i]; i++) {
-        if (strcmp(basename, kHideFilenames[i]) == 0) return true;
+    for (int i = 0; kHideFilenames[i];strcmp(basename, kHideFilenames[i]) == 0) return true;
     }
-
     return false;
 }
 
@@ -104,11 +102,12 @@ static bool should_hide_path(const char *path)
 {
     if (!path || !gHideJb) return false;
     if (path[0] != '/') return false;
-    if (strncmp(path, "/var/", 5) != 0) return false;
-
-    if (matches_hide_prefix(path)) return true;
+    if (strncmp(path, "/var/", 5) != 0 &&
+        strncmp(path, "/private/var/", 13) != 0) {
+        return false;
+    }
+    if (matches_hide_prefix(path))   return true;
     if (matches_hide_basename(path)) return true;
-
     return false;
 }
 
@@ -138,6 +137,12 @@ static int openat_hook(int fd, const char *path, int oflag, ...)
     return syscall(SYS_openat, fd, path, oflag, mode);
 }
 
+static int access_hook(const char *path, int amode)
+{
+    if (should_hide_path(path)) { errno = ENOENT; return -1; }
+    return syscall(SYS_access, path, amode);
+}
+
 static int stat_hook(const char *path, struct stat *buf)
 {
     if (should_hide_path(path)) { errno = ENOENT; return -1; }
@@ -156,12 +161,6 @@ static int fstatat_hook(int fd, const char *path, struct stat *buf, int flag)
     return syscall(SYS_fstatat, fd, path, buf, flag);
 }
 
-static int access_hook(const char *path, int amode)
-{
-    if (should_hide_path(path)) { errno = ENOENT; return -1; }
-    return syscall(SYS_access, path, amode);
-}
-
 static int statfs_hook(const char *path, struct statfs *buf)
 {
     if (should_hide_path(path)) { errno = ENOENT; return -1; }
@@ -174,10 +173,21 @@ static ssize_t readlink_hook(const char *path, char *buf, size_t bufsize)
     return syscall(SYS_readlink, path, buf, bufsize);
 }
 
-static ssize_t readlinkat_hook(int fd, const char *path, char *buf, size_t bufsize)
+static FILE *fopen_hook(const char *path, const char *mode)
 {
-    if (should_hide_path(path)) { errno = ENOENT; return -1; }
-    return syscall(SYS_readlinkat, fd, path, buf, bufsize);
+    if (should_hide_path(path)) { errno = ENOENT; return NULL; }
+    int flags = 0;
+    if (strchr(mode, 'r') && strchr(mode, '+'))      flags = O_RDWR;
+    else if (strchr(mode, 'r'))                      flags = O_RDONLY;
+    else if (strchr(mode, 'w') && strchr(mode, '+')) flags = O_RDWR | O_CREAT | O_TRUNC;
+    else if (strchr(mode, 'w'))                      flags = O_WRONLY | O_CREAT | O_TRUNC;
+    else if (strchr(mode, 'a') && strchr(mode, '+')) flags = O_RDWR | O_CREAT | O_APPEND;
+    else if (strchr(mode, 'a'))                      flags = O_WRONLY | O_CREAT | O_APPEND;
+    else                                             flags = O_RDONLY;
+
+    int fd = syscall(SYS_open, path, flags, 0644);
+    if (fd < 0) return NULL;
+    return fdopen(fd, mode);
 }
 
 static DIR *opendir_hook(const char *path)
@@ -190,28 +200,22 @@ static DIR *opendir_hook(const char *path)
     return d;
 }
 
-#include <dlfcn.h>
-
 void hide_jb_enable(void)
 {
     if (gHideJb) return;
     gHideJb = true;
 
-    litehook_hook_function(open,   open_hook);
-    litehook_hook_function(openat, openat_hook);
 
-    void *real_access = dlsym(RTLD_DEFAULT, "access");
-    if (real_access) litehook_hook_function(real_access, access_hook);
+    litehook_hook_function(open,    open_hook);
+    litehook_hook_function(openat,  openat_hook);
 
 
-    // void *real_stat     = dlsym(RTLD_DEFAULT, "stat");
-    // void *real_lstat    = dlsym(RTLD_DEFAULT, "lstat");
-    // void *real_fstatat  = dlsym(RTLD_DEFAULT, "fstatat");
-    // void *real_statfs   = dlsym(RTLD_DEFAULT, "statfs");
-    // void *real_readlink = dlsym(RTLD_DEFAULT, "readlink");
-    // if (real_stat)     litehook_hook_function(real_stat,     stat_hook);
-    // if (real_lstat)    litehook_hook_function(real_lstat,    lstat_hook);
-    // if (real_fstatat)  litehook_hook_function(real_fstatat,  fstatat_hook);
-    // if (real_statfs)   litehook_hook_function(real_statfs,   statfs_hook);
-    // if (real_readlink) litehook_hook_function(real_readlink, readlink_hook);
+    void *p;
+    p = dlsym(RTLD_DEFAULT, "access");   if (p) litehook_hook_function(p, access_hook);
+    p = dlsym(RTLD_DEFAULT, "stat");     if (p) litehook_hook_function(p, stat_hook);
+    p = dlsym(RTLD_DEFAULT, "lstat");    if (p) litehook_hook_function(p, lstat_hook);
+    p = dlsym(RTLD_DEFAULT, "fstatat");  if (p) litehook_hook_function(p, fstatat_hook);
+    p = dlsym(RTLD_DEFAULT, "statfs");   if (p) litehook_hook_function(p, statfs_hook);
+    p = dlsym(RTLD_DEFAULT, "readlink"); if (p) litehook_hook_function(p, readlink_hook);
+    p = dlsym(RTLD_DEFAULT, "fopen");    if (p) litehook_hook_function(p, fopen_hook);
 }
