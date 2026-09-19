@@ -1,4 +1,4 @@
-#import "DOAppHidePickerViewController.h *"
+#import "DOAppHidePickerViewController.h"
 #import "DOEnvironmentManager.h"
 #import <objc/runtime.h>
 
