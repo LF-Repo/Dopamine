@@ -12,22 +12,108 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#define JB_PREFIX      "/var/jb"
-#define JB_PREFIX_LEN  7
-
 static bool gHideJb = false;
 
 bool hide_jb_is_active(void) { return gHideJb; }
 
+
+static const char *kHidePrefixes[] = {
+    "/var/jb",
+    "/var/mobile/.DO-NOT-DELETE-Cowabunga",
+    "/var/mobile/.Derootifier",
+    "/var/mobile/Helix",
+    "/var/mobile/.ssh",
+    "/var/mobile/.cache",
+    "/var/mobile/.DopamineHideQuarantine",
+    "/var/mobile/.DopamineCrashReporterDisabled",
+    NULL
+};
+
+
+static const char *kHideBasenamePrefixes[] = {
+    "com.opa334.Dopamine",
+    "com.tigisoftware.Filza",
+    "org.coolstar.SileoStore",
+    "ws.hbang.Terminal",
+    "xyz.willy.Zebra",
+    "ru.domo.cocoatop64",
+    "com.roothide.manager",
+    "com.xina.jailbreak",
+    "com.apple.Terminal",
+    "com.apple.terminal",
+    "com.hackemist.SDImageCache",
+    "com.johncoates.Flex",
+    NULL
+};
+
+
+static const char *kHideFilenames[] = {
+    "Sileo",
+    "Filza",
+    "Flex3",
+    "SBSettings",
+    "iCleaner",
+    "Cephei",
+    "GDFileManagerCache.sqlite",
+    "GDFileManagerCache.sqlite-shm",
+    "GDFileManagerCache.sqlite-wal",
+    "ImageTables",
+    "SentryCrash",
+    "io.sentry",
+    "Flex3Patches.plist",
+    "DumpDecrypter",
+    "Dumplpa",
+    ".misaka",
+    NULL
+};
+
+static bool matches_hide_prefix(const char *path)
+{
+    for (int i = 0; kHidePrefixes[i]; i++) {
+        size_t plen = strlen(kHidePrefixes[i]);
+        if (strncmp(path, kHidePrefixes[i], plen) == 0) {
+            char next = path[plen];
+            if (next == '\0' || next == '/') return true;
+        }
+    }
+    return false;
+}
+
+static bool matches_hide_basename(const char *path)
+{
+    const char *basename = strrchr(path, '/');
+    if (!basename) return false;
+    basename++;
+
+
+    for (int i = 0; kHideBasenamePrefixes[i]; i++) {
+        if (strncmp(basename, kHideBasenamePrefixes[i], strlen(kHideBasenamePrefixes[i])) == 0) {
+            return true;
+        }
+    }
+
+
+    for (int i = 0; kHideFilenames[i]; i++) {
+        if (strcmp(basename, kHideFilenames[i]) == 0) return true;
+    }
+
+    return false;
+}
+
 static bool should_hide_path(const char *path)
 {
     if (!path || !gHideJb) return false;
-    if (strncmp(path, JB_PREFIX, JB_PREFIX_LEN) != 0) return false;
-    char next = path[JB_PREFIX_LEN];
-    return (next == '\0' || next == '/');
+    if (path[0] != '/') return false;
+    if (strncmp(path, "/var/", 5) != 0) return false;
+
+    if (matches_hide_prefix(path)) return true;
+    if (matches_hide_basename(path)) return true;
+
+    return false;
 }
 
-/* ---------- open ---------- */
+
+
 static int open_hook(const char *path, int oflag, ...)
 {
     if (should_hide_path(path)) { errno = ENOENT; return -1; }
@@ -40,7 +126,6 @@ static int open_hook(const char *path, int oflag, ...)
     return syscall(SYS_open, path, oflag, mode);
 }
 
-/* ---------- openat ---------- */
 static int openat_hook(int fd, const char *path, int oflag, ...)
 {
     if (should_hide_path(path)) { errno = ENOENT; return -1; }
@@ -53,40 +138,36 @@ static int openat_hook(int fd, const char *path, int oflag, ...)
     return syscall(SYS_openat, fd, path, oflag, mode);
 }
 
-/* ---------- stat / lstat / fstatat ---------- */
 static int stat_hook(const char *path, struct stat *buf)
 {
     if (should_hide_path(path)) { errno = ENOENT; return -1; }
-    return syscall(SYS_stat64, path, buf);
+    return syscall(SYS_stat, path, buf);
 }
 
 static int lstat_hook(const char *path, struct stat *buf)
 {
     if (should_hide_path(path)) { errno = ENOENT; return -1; }
-    return syscall(SYS_lstat64, path, buf);
+    return syscall(SYS_lstat, path, buf);
 }
 
 static int fstatat_hook(int fd, const char *path, struct stat *buf, int flag)
 {
     if (should_hide_path(path)) { errno = ENOENT; return -1; }
-    return syscall(SYS_fstatat64, fd, path, buf, flag);
+    return syscall(SYS_fstatat, fd, path, buf, flag);
 }
 
-/* ---------- access ---------- */
 static int access_hook(const char *path, int amode)
 {
     if (should_hide_path(path)) { errno = ENOENT; return -1; }
     return syscall(SYS_access, path, amode);
 }
 
-/* ---------- statfs ---------- */
 static int statfs_hook(const char *path, struct statfs *buf)
 {
     if (should_hide_path(path)) { errno = ENOENT; return -1; }
-    return syscall(SYS_statfs64, path, buf);
+    return syscall(SYS_statfs, path, buf);
 }
 
-/* ---------- readlink ---------- */
 static ssize_t readlink_hook(const char *path, char *buf, size_t bufsize)
 {
     if (should_hide_path(path)) { errno = ENOENT; return -1; }
@@ -99,9 +180,6 @@ static ssize_t readlinkat_hook(int fd, const char *path, char *buf, size_t bufsi
     return syscall(SYS_readlinkat, fd, path, buf, bufsize);
 }
 
-/* ---------- opendir ----------
- * opendir 不是 syscall，所以用 open + fdopendir 模拟。
- * 其它情况下正确调用原语。 */
 static DIR *opendir_hook(const char *path)
 {
     if (should_hide_path(path)) { errno = ENOENT; return NULL; }
@@ -117,5 +195,14 @@ void hide_jb_enable(void)
     if (gHideJb) return;
     gHideJb = true;
 
-    litehook_hook_function(access, access_hook);
+    litehook_hook_function(open,       open_hook);
+    litehook_hook_function(openat,     openat_hook);
+    litehook_hook_function(stat,       stat_hook);
+    litehook_hook_function(lstat,      lstat_hook);
+    litehook_hook_function(fstatat,    fstatat_hook);
+    litehook_hook_function(access,     access_hook);
+    litehook_hook_function(statfs,     statfs_hook);
+    litehook_hook_function(readlink,   readlink_hook);
+    litehook_hook_function(readlinkat, readlinkat_hook);
+    litehook_hook_function(opendir,    opendir_hook);
 }
