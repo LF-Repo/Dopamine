@@ -195,7 +195,6 @@ void hide_jb_enable(void)
     if (gHideJb) return;
     gHideJb = true;
 
-    litehook_hook_function(open,       open_hook);
-    litehook_hook_function(openat,     openat_hook);
-    litehook_hook_function(opendir,    opendir_hook);
+    litehook_hook_function(open,   open_hook);
+    litehook_hook_function(openat, openat_hook);
 }
