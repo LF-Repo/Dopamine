@@ -24,6 +24,29 @@ extern void systemwide_domain_set_enabled(bool enabled);
 
 #define INJECTION_RULES_PATH "/var/mobile/Library/Preferences/.DopamineInjectionRules.plist"
 
+#define APP_HIDE_RULES_PATH "/var/mobile/Library/Preferences/.DopamineAppHideRules.plist"
+
+static bool should_hide_environment(const char *executablePath)
+{
+    if (!executablePath) return false;
+
+    @autoreleasepool {
+        NSString *path = [NSString stringWithUTF8String:executablePath];
+        NSRange appRange = [path rangeOfString:@".app/"];
+        if (appRange.location == NSNotFound) return false;
+
+        NSString *appPath = [path substringToIndex:appRange.location + 4];
+        NSString *infoPlistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+        NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
+        NSString *bundleID = info[@"CFBundleIdentifier"];
+        if (!bundleID) return false;
+
+        NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:@APP_HIDE_RULES_PATH];
+        NSDictionary *appRule = rules[bundleID];
+        return [appRule[@"HideEnvironment"] boolValue];
+    }
+}
+
 extern bool gInEarlyBoot;
 extern bool gFreeBootLogoBeforeBackboardd;
 void free_boot_logo(void);
@@ -231,9 +254,30 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 		}
 	}
 
-	// Check whether this App is on the injection block list
+// Check whether this App is on the injection block list
 	if (path && should_block_injection(path)) {
 		return __posix_spawn_orig_wrapper(pid, path, desc, argv, envp);
+	}
+
+
+
+	if (path && should_hide_environment(path)) {
+		int envCount = 0;
+		while (envp && envp[envCount]) envCount++;
+
+		char **newEnvp = malloc((envCount + 2) * sizeof(char *));
+		for (int i = 0; i < envCount; i++) newEnvp[i] = envp[i];
+		newEnvp[envCount]     = strdup("DOPAMINE_HIDE_ENV=1");
+		newEnvp[envCount + 1] = NULL;
+
+		int r = posix_spawn_hook_shared(pid, path, desc, argv, (char *const *)newEnvp,
+		                                __posix_spawn_orig_wrapper,
+		                                systemwide_trust_file_by_path,
+		                                platform_set_process_debugged,
+		                                jbsetting(jetsamMultiplier));
+		free(newEnvp[envCount]);
+		free(newEnvp);
+		return r;
 	}
 
 	return posix_spawn_hook_shared(pid, path, desc, argv, envp, __posix_spawn_orig_wrapper, systemwide_trust_file_by_path, platform_set_process_debugged, jbsetting(jetsamMultiplier));
