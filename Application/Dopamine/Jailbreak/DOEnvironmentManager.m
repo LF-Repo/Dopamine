@@ -727,6 +727,60 @@ extern char **environ;
     return result;
 }
 
+#pragma mark - App Hide Rules
+
+- (NSString *)appHideRulesPath
+{
+    return @"/var/mobile/Library/Preferences/.DopamineAppHideRules.plist";
+}
+
+- (NSDictionary *)appHideRules
+{
+    NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:[self appHideRulesPath]];
+    return rules ?: @{};
+}
+
+- (BOOL)isEnvironmentHiddenForBundleID:(NSString *)bundleID
+{
+    if (!bundleID) return NO;
+    NSDictionary *appRule = [self appHideRules][bundleID];
+    if (appRule) {
+        return [appRule[@"HideEnvironment"] boolValue];
+    }
+    return NO;
+}
+
+- (void)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID
+{
+    if (!bundleID) return;
+
+    NSMutableDictionary *rules = [[self appHideRules] mutableCopy];
+    if (hidden) {
+        rules[bundleID] = @{@"HideEnvironment": @YES};
+    } else {
+        [rules removeObjectForKey:bundleID];
+    }
+
+    NSString *path = [self appHideRulesPath];
+    [rules writeToFile:path atomically:YES];
+    chmod(path.fileSystemRepresentation, 0644);
+
+    NSLog(@"[AppHide] %@ -> %@", bundleID, hidden ? @"hidden" : @"visible");
+}
+
+- (NSArray<NSString *> *)allEnvironmentHiddenBundleIDs
+{
+    NSDictionary *rules = [self appHideRules];
+    NSMutableArray<NSString *> *result = [NSMutableArray array];
+    for (NSString *bundleID in rules) {
+        if ([rules[bundleID][@"HideEnvironment"] boolValue]) {
+            [result addObject:bundleID];
+        }
+    }
+    return result;
+}
+
+
 #pragma mark - forkfix
 
 - (NSString *)forkfixPath
