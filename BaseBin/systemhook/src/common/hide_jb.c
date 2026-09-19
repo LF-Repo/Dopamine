@@ -206,17 +206,13 @@ void hide_jb_enable(void)
     if (gHideJb) return;
     gHideJb = true;
 
-
+    /* 稳定组（已验证） */
     litehook_hook_function(open,    open_hook);
     litehook_hook_function(openat,  openat_hook);
 
 
-    void *p;
-    p = dlsym(RTLD_DEFAULT, "access");   if (p) litehook_hook_function(p, access_hook);
-    p = dlsym(RTLD_DEFAULT, "stat");     if (p) litehook_hook_function(p, stat_hook);
-    p = dlsym(RTLD_DEFAULT, "lstat");    if (p) litehook_hook_function(p, lstat_hook);
-    p = dlsym(RTLD_DEFAULT, "fstatat");  if (p) litehook_hook_function(p, fstatat_hook);
-    p = dlsym(RTLD_DEFAULT, "statfs");   if (p) litehook_hook_function(p, statfs_hook);
-    p = dlsym(RTLD_DEFAULT, "readlink"); if (p) litehook_hook_function(p, readlink_hook);
-    p = dlsym(RTLD_DEFAULT, "fopen");    if (p) litehook_hook_function(p, fopen_hook);
+    void *real_access = dlsym(RTLD_DEFAULT, "access");
+    if (real_access) {
+        litehook_hook_function(real_access, access_hook);
+    }
 }
