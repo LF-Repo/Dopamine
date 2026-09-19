@@ -84,7 +84,7 @@ static bool matches_hide_basename(const char *path)
     if (!basename) return false;
     basename++;
 
-    for {
+    for (int i = 0; kHideBasenamePrefixes[i]; i++) {
  (int i = 0; kHideBasenamePrefixes[i]; i++) {
         size_t plen = strlen(kHideBasename       Prefixes[i]);
         if (strncmp(basename, kHideBasenamePrefixes[i], plen) == 0) if {
