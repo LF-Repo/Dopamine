@@ -815,10 +815,18 @@
     [super viewDidLoad];
 
     self.title = @"按应用隐藏";
-    self.tableView.rowHeight = 60;
-    self.tableView.backgroundColor = [UIColor systemGroupedBackgroundColor];
-    self.tableView.separatorInset = UIEdgeInsetsMake(0, 68, 0, 0);
+    self.tableView.rowHeight = 64;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
+    self.tableView.separatorInset = UIEdgeInsetsMake(0, 68, 0, 0);
+    self.tableView.separatorColor = [[UIColor whiteColor] colorWithAlphaComponent:0.08];
+    if (@available(iOS 15.0, *)) {
+        self.tableView.sectionHeaderTopPadding = 0;
+    }
+
+
+    UIColor *bg = [DOThemeManager menuColorWithAlpha:0.55];
+    self.view.backgroundColor = bg;
+    self.tableView.backgroundColor = bg;
 
     self.allApps = [NSMutableArray array];
     self.filteredApps = [NSMutableArray array];
