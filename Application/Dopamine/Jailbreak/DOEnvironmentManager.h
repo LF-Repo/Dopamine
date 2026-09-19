@@ -88,6 +88,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSString *)forkfixPath;
 - (NSString *)forkfixDisabledPath;
 - (void)setForkfixEnabled:(BOOL)enabled;
+- (NSString *)appHideRulesPath;
+- (NSDictionary *)appHideRules;
+- (BOOL)isEnvironmentHiddenForBundleID:(NSString *)bundleID;
+- (void)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID;
+- (NSArray<NSString *> *)allEnvironmentHiddenBundleIDs;
 @end
 
 NS_ASSUME_NONNULL_END
