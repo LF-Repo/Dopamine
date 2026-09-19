@@ -54,7 +54,7 @@ static NSArray<NSString *> *target_bundle_ids(void)
 
 static NSString *bundle_id_for_pid(pid_t pid)
 {
-    char pathbuf[PROC_PIDPATHINFO_MAXSIZE];
+    char pathbuf[4096];
     if (proc_pidpath(pid, pathbuf, sizeof(pathbuf)) <= 0) return nil;
 
     NSString *path = [NSString stringWithUTF8String:pathbuf];
