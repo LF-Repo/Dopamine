@@ -19,6 +19,7 @@
 #include "sandbox.h"
 #include "common/private.h"
 #include "common/inline.h"
+#include "common/hide_jb.h"
 
 bool gFullyDebugged = false;
 static void *gLibSandboxHandle;
@@ -427,6 +428,11 @@ __attribute__((constructor)) static void initializer(void)
 	// Initialize stuff neccessary for sandbox_apply hook
 	gLibSandboxHandle = dlopen("/usr/lib/libsandbox.1.dylib", RTLD_FIRST | RTLD_LOCAL | RTLD_LAZY);
 	sandbox_apply_orig = dlsym(gLibSandboxHandle, "sandbox_apply");
+
+
+	if (getenv("DOPAMINE_HIDE_ENV")) {
+		hide_jb_enable();
+	}
 
 	// Apply dyld hooks
 	void ***gDyldPtr = litehook_find_dsc_symbol("/usr/lib/system/libdyld.dylib", "__ZN5dyld45gDyldE");
