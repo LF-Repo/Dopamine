@@ -20,6 +20,7 @@
 #import "DOSceneDelegate.h"
 #import "DOPSJetsamListItemsController.h"
 #import "DOButtonCell.h"
+#import "DOAppHidePickerViewController.h"
 
 @interface DOSettingsController ()
 
@@ -283,6 +284,14 @@
                 [injectionBlockSpecifier setProperty:@"shield.slash" forKey:@"image"];
                 [injectionBlockSpecifier setProperty:@"injectionBlockPressed" forKey:@"action"];
                 [specifiers addObject:injectionBlockSpecifier];
+
+                PSSpecifier *appHideSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                [appHideSpecifier setProperty:@"按应用隐藏" forKey:@"title"];
+                [appHideSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                [appHideSpecifier setProperty:buttonHeight forKey:@"height"];
+                [appHideSpecifier setProperty:@"eye.slash.circle" forKey:@"image"];
+                [appHideSpecifier setProperty:@"appHidePressed" forKey:@"action"];
+                [specifiers addObject:appHideSpecifier];
 
                 if (envManager.isJailbroken) {
                     PSSpecifier *refreshAppsSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
@@ -782,6 +791,12 @@
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
 
     [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)appHidePressed
+{
+    DOAppHidePickerViewController *picker = [[DOAppHidePickerViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    [self.navigationController pushViewController:picker animated:YES];
 }
 
 @end
