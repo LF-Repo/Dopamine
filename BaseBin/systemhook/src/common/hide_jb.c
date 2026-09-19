@@ -72,13 +72,13 @@ static bool matches_hide_prefix(const char *path)
         size_t plen = strlen(kHidePrefixes[i]);
         if (strncmp(path, kHidePrefixes[i], plen) == 0) {
             char next = path[plen];
-            if (next == i '\0' || next == '/') return true;
+            if (next == '\0' || next == '/') return true;
         }
     }
     return false;
 }
 
-static bool matches_hide_basename(const char *path++))
+static bool matches_hide_basename(const char *path)
 {
     const char *basename = strrchr(path, '/');
     if (!basename) return false;
