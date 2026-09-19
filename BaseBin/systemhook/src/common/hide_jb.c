@@ -197,12 +197,5 @@ void hide_jb_enable(void)
 
     litehook_hook_function(open,       open_hook);
     litehook_hook_function(openat,     openat_hook);
-    litehook_hook_function(stat,       stat_hook);
-    litehook_hook_function(lstat,      lstat_hook);
-    litehook_hook_function(fstatat,    fstatat_hook);
-    litehook_hook_function(access,     access_hook);
-    litehook_hook_function(statfs,     statfs_hook);
-    litehook_hook_function(readlink,   readlink_hook);
-    litehook_hook_function(readlinkat, readlinkat_hook);
     litehook_hook_function(opendir,    opendir_hook);
 }
