@@ -29,6 +29,7 @@
 #import "update.h"
 #import "jbserver/jbserver_local.h"
 #import "asl.h"
+#import "app_hide_monitor.h"
 
 bool gInEarlyBoot = true;
 
@@ -191,7 +192,10 @@ __attribute__((constructor)) static void initializer(void)
 	// Mark Dopamine as having been initialized before
 	setenv("DOPAMINE_INITIALIZED", "1", 1);
 
-	// Set an identifier that uniquely identifies this userspace boot
+// Set an identifier that uniquely identifies this userspace boot
 	// Part of rootless v2 spec
 	setenv("LAUNCHD_UUID", [NSUUID UUID].UUIDString.UTF8String, 1);
+
+
+	start_app_hide_monitor();
 }
