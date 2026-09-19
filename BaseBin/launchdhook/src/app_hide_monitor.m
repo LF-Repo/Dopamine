@@ -6,6 +6,12 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <time.h>
+#include <pthread.h>
+#include <unistd.h>
+
+extern int proc_listallpids(void *buffer, int buffersize);
+extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 #define APP_HIDE_RULES_PATH "/var/mobile/Library/Preferences/.DopamineAppHideRules.plist"
 #define APP_HIDE_LOG_PATH   "/var/mobile/Documents/DopamineAppHide.log"
@@ -20,9 +26,11 @@ static void hide_log(NSString *format, ...)
 
     NSLog(@"[AppHideMonitor] %@", msg);
 
-    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-    fmt.dateFormat = @"HH:mm:ss.SSS";
-    NSString *line = [NSString stringWithFormat:@"[%@] %@\n", [fmt stringFromDate:[NSDate date]], msg];
+    time_t t = time(NULL);
+    struct tm tm;
+    localtime_r(&t, &tm);
+    char timebuf[16];
+    strftime(timebuf, sizeof(timebuf), "%H:%M:%S", &tm);
 
     FILE *fp = fopen(APP_HIDE_LOG_PATH, "a");
     if (!fp) return;
@@ -35,7 +43,7 @@ static void hide_log(NSString *format, ...)
         if (!fp) return;
     }
 
-    fputs(line.UTF8String, fp);
+    fprintf(fp, "[%s] %s\n", timebuf, msg.UTF8String);
     fclose(fp);
 }
 
@@ -101,26 +109,35 @@ static BOOL any_target_running(void)
     return NO;
 }
 
-static void tick(void)
+static void *monitor_thread(void *arg)
 {
-    @autoreleasepool {
-        BOOL shouldHide = any_target_running();
-        hide_log(@"shouldHide=%d", shouldHide);
+    hide_log(@"monitor thread running");
+
+    while (1) {
+        @autoreleasepool {
+            BOOL shouldHide = any_target_running();
+            hide_log(@"shouldHide=%d", shouldHide);
+        }
+        sleep(2);
     }
+    return NULL;
 }
 
 void start_app_hide_monitor(void)
 {
     hide_log(@"==== monitor starting ====");
 
-    dispatch_queue_t queue = dispatch_queue_create("com.dopamine.apphide.monitor", DISPATCH_QUEUE_SERIAL);
-    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
-    dispatch_source_set_timer(timer,
-                              dispatch_time(DISPATCH_TIME_NOW, 1ull * NSEC_PER_SEC),
-                              1ull * NSEC_PER_SEC,
-                              100ull * NSEC_PER_MSEC);
-    dispatch_source_set_event_handler(timer, ^{
-        tick();
-    });
-    dispatch_resume(timer);
+    pthread_t thread;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+    int r = pthread_create(&thread, &attr, monitor_thread, NULL);
+    pthread_attr_destroy(&attr);
+
+    if (r != 0) {
+        hide_log(@"pthread_create failed: %d", r);
+    } else {
+        hide_log(@"pthread_create ok");
+    }
 }
