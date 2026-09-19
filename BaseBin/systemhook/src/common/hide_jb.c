@@ -85,16 +85,17 @@ static bool matches_hide_basename(const char *path)
     basename++;
 
     for (int i = 0; kHideBasenamePrefixes[i]; i++) {
- (int i = 0; kHideBasenamePrefixes[i]; i++) {
-        size_t plen = strlen(kHideBasename       Prefixes[i]);
-        if (strncmp(basename, kHideBasenamePrefixes[i], plen) == 0) if {
+        size_t plen = strlen(kHideBasenamePrefixes[i]);
+        if (strncmp(basename, kHideBasenamePrefixes[i], plen) == 0) {
             char next = basename[plen];
-            if (next == '\0' || next == '.' || ( next == '-') return true;
+            if (next == '\0' || next == '.' || next == '-') return true;
         }
     }
 
-    for (int i = 0; kHideFilenames[i];strcmp(basename, kHideFilenames[i]) == 0) return true;
+    for (int i = 0; kHideFilenames[i]; i++) {
+        if (strcmp(basename, kHideFilenames[i]) == 0) return true;
     }
+
     return false;
 }
 
