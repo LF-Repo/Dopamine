@@ -550,6 +550,9 @@ static void perform_unhide(void)
 
 static bool gActionInProgress = false;
 
+static time_t gLastTargetSeen = 0;
+static const int UNHIDE_GRACE_SECONDS = 60;
+
 static void *monitor_thread(void *arg)
 {
     hide_log(@"monitor thread running");
@@ -557,7 +560,16 @@ static void *monitor_thread(void *arg)
     while (1) {
         @autoreleasepool {
             BOOL shouldHide = any_target_running();
+            time_t now = time(NULL);
+
+            if (shouldHide) {
+                gLastTargetSeen = now;
+            }
+
             BOOL actuallyHidden = (access("/var/jb", F_OK) != 0);
+
+            // 只有超过 60 秒没检测到目标 App，才允许恢复
+            BOOL graceElapsed = (gLastTargetSeen == 0) || ((now - gLastTargetSeen) > UNHIDE_GRACE_SECONDS);
 
             if (shouldHide && !actuallyHidden && !gActionInProgress) {
                 gActionInProgress = true;
@@ -565,7 +577,7 @@ static void *monitor_thread(void *arg)
                 perform_hide();
                 gActionInProgress = false;
             }
-            else if (!shouldHide && actuallyHidden && !gActionInProgress) {
+            else if (graceElapsed && !shouldHide && actuallyHidden && !gActionInProgress) {
                 gActionInProgress = true;
                 hide_log(@"triggering UNHIDE");
                 perform_unhide();
