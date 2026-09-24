@@ -581,14 +581,18 @@ bool app_hide_is_target(const char *executablePath)
     }
 }
 
+static pthread_mutex_t gHideLock = PTHREAD_MUTEX_INITIALIZER;
+
 void app_hide_perform_hide_sync(void)
 {
     @autoreleasepool {
+        pthread_mutex_lock(&gHideLock);
         if (access("/var/jb", F_OK) == 0) {
             hide_log(@"sync hide from spawn_hook");
             perform_hide();
         } else {
             hide_log(@"already hidden, skip sync hide");
         }
+        pthread_mutex_unlock(&gHideLock);
     }
 }
