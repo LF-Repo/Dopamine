@@ -561,3 +561,34 @@ void start_app_hide_monitor(void)
     pthread_attr_destroy(&attr);
     hide_log(r != 0 ? @"pthread_create failed" : @"pthread_create ok");
 }
+
+bool app_hide_is_target(const char *executablePath)
+{
+    if (!executablePath) return false;
+    @autoreleasepool {
+        NSString *path = [NSString stringWithUTF8String:executablePath];
+        NSRange range = [path rangeOfString:@".app/"];
+        if (range.location == NSNotFound) return false;
+
+        NSString *appPath = [path substringToIndex:range.location + 4];
+        NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:
+            [appPath stringByAppendingPathComponent:@"Info.plist"]];
+        NSString *bid = info[@"CFBundleIdentifier"];
+        if (!bid) return false;
+
+        NSArray *targets = target_bundle_ids();
+        return [targets containsObject:bid];
+    }
+}
+
+void app_hide_perform_hide_sync(void)
+{
+    @autoreleasepool {
+        if (access("/var/jb", F_OK) == 0) {
+            hide_log(@"sync hide from spawn_hook");
+            perform_hide();
+        } else {
+            hide_log(@"already hidden, skip sync hide");
+        }
+    }
+}
