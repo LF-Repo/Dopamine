@@ -19,7 +19,6 @@
 extern int proc_listallpids(void *buffer, int buffersize);
 extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 extern void systemwide_domain_set_enabled(bool enabled);
-extern int jbctl_earlyboot(mach_port_t serverPort, const char *arg0, ...);
 extern char **environ;
 
 #define APP_HIDE_RULES_PATH    "/var/mobile/Library/Preferences/.DopamineAppHideRules.plist"
