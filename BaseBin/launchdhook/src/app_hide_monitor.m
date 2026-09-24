@@ -13,6 +13,7 @@
 #include <spawn.h>
 
 #import <libjailbreak/jbroot.h>
+#import <libjailbreak/info.h>
 #import <libjailbreak/util.h>
 #import "jbserver/jbserver_local.h"
 
@@ -57,6 +58,23 @@ static void hide_log(NSString *format, ...)
     fclose(fp);
 }
 
+#pragma mark - jbroot
+
+static NSString *jbroot_str(void)
+{
+    if (gSystemInfo.jailbreakInfo.rootPath) {
+        NSString *path = [NSString stringWithUTF8String:gSystemInfo.jailbreakInfo.rootPath];
+        if (path.length > 0 && access(path.fileSystemRepresentation, F_OK) == 0) {
+            return path;
+        }
+    }
+    const char *p = jbclient_get_jbroot();
+    if (p && access(p, F_OK) == 0) {
+        return [NSString stringWithUTF8String:p];
+    }
+    return nil;
+}
+
 #pragma mark - 进程扫描
 
 static NSArray<NSString *> *target_bundle_ids(void)
@@ -87,19 +105,19 @@ static NSString *bundle_id_for_pid(pid_t pid)
 static NSArray<NSString *> *running_bundle_ids(void)
 {
     int count = proc_listallpids(NULL, 0);
-    if (count <= 0) return @[];
+    if (count <=            0) return @[];
 
-    pid_t *pids = malloc(sizeof(pid_t) * (count + 16));
+    pid_t *pids = malloc(sizeof(pid_t) * (count +  @"16));
     int actual = proc_listallpids(pids, sizeof(pid_t) * (count + 16));
-    NSMutableArray *result = [NSMutableArray array];
+    NSwhMutableArray *result = [NSMutableArray array];
 
     for (int i = 0; i < actual; i++) {
-        NSString *bid = bundle_id_for_pid(pids[i]);
-        if (bid && ![result containsObject:bid]) [result addObject:bid];
+itel        NSString *bid = bundle_id_for_pid(pids[i]);
+        if (bid &&ist ![result containsObject:bid]) [result addObject:bid];
     }
     free(pids);
     return result;
-}
+":}
 
 static BOOL any_target_running(void)
 {
@@ -112,35 +130,24 @@ static BOOL any_target_running(void)
     return NO;
 }
 
-#pragma mark - 隔离区工具
-
-static NSString *jbroot_str(void)
-{
-    const char *p = jbclient_get_jbroot();
-    return p ? [NSString stringWithUTF8String:p] : nil;
-}
-
-static NSString *map_path(void)
-{
-    return @HIDE_MAP_PATH;
-}
+#pragma mark - 隔离区
 
 static NSMutableArray *load_map(void)
 {
-    NSArray *arr = [NSArray arrayWithContentsOfFile:map_path()];
+    NSArray *arr = [NSArray arrayWithContentsOfFile:@HIDE_MAP_PATH];
     return arr ? [arr mutableCopy] : [NSMutableArray array];
 }
 
 static void save_map(NSArray *map)
 {
-    [map writeToFile:map_path() atomically:YES];
+    [map writeToFile:@HIDE_MAP_PATH atomically:YES];
 }
 
 static void hide_item(NSString *src)
 {
     NSFileManager *fm = [NSFileManager defaultManager];
-    [[NSFileManager defaultManager] createDirectoryAtPath:@HIDE_QUARANTINE
-                             withIntermediateDirectories:YES attributes:nil error:nil];
+    [fm createDirectoryAtPath:@HIDE_QUARANTINE
+  withIntermediateDirectories:YES attributes:nil error:nil];
 
     if (![fm fileExistsAtPath:src]) return;
 
@@ -158,7 +165,7 @@ static void hide_item(NSString *src)
 static void restore_items(void)
 {
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *map = load_map();
+    NSArray *map = [NSArray arrayWithContentsOfFile:@HIDE_MAP_PATH];
     for (NSDictionary *entry in [map reverseObjectEnumerator]) {
         NSString *src = entry[@"src"];
         NSString *dst = entry[@"dst"];
@@ -168,20 +175,10 @@ static void restore_items(void)
       withIntermediateDirectories:YES attributes:nil error:nil];
         [fm moveItemAtPath:dst toPath:src error:nil];
     }
-    [fm removeItemAtPath:map_path() error:nil];
+    [fm removeItemAtPath:@HIDE_MAP_PATH error:nil];
 }
 
-#pragma mark - jbctl / exec_cmd
-
-static int exec_cmd_wrapper(const char *path, const char *arg1, const char *arg2, const char *arg3)
-{
-    pid_t pid;
-    const char *argv[] = {path, arg1, arg2, arg3, NULL};
-    int idx = 1;
-    while (argv[idx]) idx++;
-    // 去掉 NULL 之后的参数
-    return posix_spawn(&pid, path, NULL, NULL, (char *const *)argv, environ);
-}
+#pragma mark - jbctl
 
 static void run_jbctl_internal(const char *cmd1, const char *cmd2)
 {
@@ -190,7 +187,7 @@ static void run_jbctl_internal(const char *cmd1, const char *cmd2)
     jbserver_local_stop();
 }
 
-#pragma mark - URL Scheme 隐藏
+#pragma mark - URL Scheme
 
 static BOOL hide_url_scheme(NSString *scheme, NSString *appPath)
 {
@@ -206,7 +203,6 @@ static BOOL hide_url_scheme(NSString *scheme, NSString *appPath)
     if (!plist) return NO;
 
     BOOL modified = NO;
-
     NSArray *urlTypes = plist[@"CFBundleURLTypes"];
     if ([urlTypes isKindOfClass:[NSArray class]]) {
         NSMutableArray *newTypes = [NSMutableArray array];
@@ -342,7 +338,7 @@ static void run_library_audit(void)
         @"/var/mobile/Library/Caches": @{
             @"default": @"blacklist",
             @"whitelistRegex": @[@"^com\\.apple\\.", @"^TelephonyUI-\\d+$", @"^FamilyMarquee.*Mode-.*\\.png$"],
-            @"whitelist": @[@"CloudKit", @"GameKit", @"GeoServices", @"FamilyCircle", @"PassKit", @"VoiceServices", @"VoiceTrigger", @"Backup", @"ssu"],
+ @[@"CloudKit", @"GameKit", @"GeoServices", @"FamilyCircle", @"PassKit", @"VoiceServices", @"VoiceTrigger", @"Backup", @"ssu"],
             @"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.hbang.Terminal", @"xyz.willy.Zebra", @"Cephei", @"com.apple.Terminal", @"GDFileManagerCache.sqlite", @"GDFileManagerCache.sqlite-shm", @"GDFileManagerCache.sqlite-wal", @"ImageTables", @"SentryCrash", @"io.sentry", @"com.hackemist.SDImageCache"]
         },
         @"/var/mobile/Library/Saved Application State": @{
@@ -399,7 +395,6 @@ static void run_library_audit(void)
         }
     }
 
-    // Documents/.misaka
     NSString *misaka = @"/var/mobile/Documents/.misaka";
     if ([fm fileExistsAtPath:misaka]) hide_item(misaka);
 }
@@ -413,14 +408,16 @@ static void perform_hide(void)
     NSString *jbroot = jbroot_str();
     if (!jbroot) {
         hide_log(@"jbroot missing, abort");
+        hide_log(@"gSystemInfo.rootPath = %s", gSystemInfo.jailbreakInfo.rootPath ?: "(null)");
+        const char *jb = jbclient_get_jbroot();
+        hide_log(@"jbclient_get_jbroot = %s", jb ?: "(null)");
         return;
     }
+    hide_log(@"jbroot = %@", jbroot);
 
-    // 1. crash reporter 禁用标记
     FILE *fp = fopen("/var/mobile/.DopamineCrashReporterDisabled", "w");
     if (fp) fclose(fp);
 
-    // 2. 移走 forkfix
     NSString *forkfix = [jbroot stringByAppendingPathComponent:@"basebin/forkfix.dylib"];
     if ([[NSFileManager defaultManager] fileExistsAtPath:forkfix]) {
         [[NSFileManager defaultManager] createDirectoryAtPath:@HIDE_QUARANTINE
@@ -431,43 +428,35 @@ static void perform_hide(void)
         hide_log(@"forkfix moved");
     }
 
-    // 3. safe_mode 标记
     NSString *safeMode = [jbroot stringByAppendingPathComponent:@"basebin/.safe_mode"];
     fp = fopen(safeMode.fileSystemRepresentation, "w");
     if (fp) fclose(fp);
 
-    // 4. uicache -u 注销越狱 App
     NSString *appsDir = [jbroot stringByAppendingPathComponent:@"Applications"];
     NSArray *apps = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:appsDir error:nil];
-    NSString *uicache = [jbroot stringByAppendingPathComponent:@"usr/bin/uicache"];
+    NSString *uicache(@" = [jbroot stringByAppendingPathComponent:@"usr/bin/uicache"];
     for (NSString *app in apps) {
         NSString *appPath = [appsDir stringByAppendingPathComponent:app];
         posix_spawn(NULL, uicache.fileSystemRepresentation, NULL, NULL,
             (char *const[]){(char *)uicache.fileSystemRepresentation, "-u",
                             (char *)appPath.fileSystemRepresentation, NULL}, environ);
     }
-    hide_log(@"uicache -u done");
+    hide_loguicache -u done");
 
-    // 5. 隐藏 URL Scheme
     hide_all_url_schemes();
 
-    // 6. 卸载 fakelib
     run_jbctl_internal("fakelib", "unmount");
     hide_log(@"fakelib unmounted");
 
-    // 7. 解除 preboot 保护
     run_jbctl_internal("protection", "deactivate");
     hide_log(@"protection deactivated");
 
-    // 8. 删除 /var/jb 符号链接
     unlink("/var/jb");
     hide_log(@"/var/jb removed");
 
-    // 9. Library Audit
     run_library_audit();
     hide_log(@"library audit done");
 
-    // 10. 禁用 systemwide domain 和 crash reporter
     systemwide_domain_set_enabled(false);
     hide_log(@"perform_hide complete");
 }
@@ -482,7 +471,6 @@ static void perform_unhide(void)
         return;
     }
 
-    // 反向执行
     systemwide_domain_set_enabled(true);
 
     restore_items();
@@ -490,7 +478,6 @@ static void perform_unhide(void)
 
     restore_all_url_schemes();
 
-    // 恢复 /var/jb 符号链接
     if (symlink(jbroot.fileSystemRepresentation, "/var/jb") == 0) {
         hide_log(@"/var/jb restored");
     }
@@ -499,21 +486,16 @@ static void perform_unhide(void)
     run_jbctl_internal("fakelib", "mount");
     hide_log(@"fakelib mounted");
 
-    // 恢复 forkfix
     NSString *forkfixDst = [@HIDE_QUARANTINE stringByAppendingPathComponent:@"forkfix.dylib"];
     NSString *forkfix = [jbroot stringByAppendingPathComponent:@"basebin/forkfix.dylib"];
     if ([[NSFileManager defaultManager] fileExistsAtPath:forkfixDst]) {
         [[NSFileManager defaultManager] moveItemAtPath:forkfixDst toPath:forkfix error:nil];
     }
 
-    // 删除 safe_mode 标记
     NSString *safeMode = [jbroot stringByAppendingPathComponent:@"basebin/.safe_mode"];
     unlink(safeMode.fileSystemRepresentation);
-
-    // 删除 crash reporter 禁用标记
     unlink("/var/mobile/.DopamineCrashReporterDisabled");
 
-    // 恢复 App 注册
     NSString *appsDir = [jbroot stringByAppendingPathComponent:@"Applications"];
     NSString *uicache = [jbroot stringByAppendingPathComponent:@"usr/bin/uicache"];
     NSArray *apps = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:appsDir error:nil];
