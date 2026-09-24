@@ -17,6 +17,7 @@
 #import <libjailbreak/util.h>
 #import "jbserver/jbserver_local.h"
 
+
 extern int proc_listallpids(void *buffer, int buffersize);
 extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 extern void systemwide_domain_set_enabled(bool enabled);
@@ -113,14 +114,14 @@ static BOOL any_target_running(void)
     return NO;
 }
 
-#pragma mark - jbroot
+#pragma mark - 隔离区工具
 
 static NSString *jbroot_str(void)
 {
     // 优先从 gSystemInfo 拿（launchdhook initializer 里已设置）
     if (gSystemInfo.jailbreakInfo.rootPath) {
         NSString *path = [NSString stringWithUTF8String:gSystemInfo.jailbreakInfo.rootPath];
-        if (path.length > 0 && access(path.fileSystemRepresentation, F_OK) == 0) {
+        if (path.length > 0 && !access(path.fileSystemRepresentation, F_OK)) {
             return path;
         }
     }
@@ -132,24 +133,27 @@ static NSString *jbroot_str(void)
     return nil;
 }
 
-#pragma mark - 隔离区
+static NSString *map_path(void)
+{
+    return @HIDE_MAP_PATH;
+}
 
 static NSMutableArray *load_map(void)
 {
-    NSArray *arr = [NSArray arrayWithContentsOfFile:@HIDE_MAP_PATH];
+    NSArray *arr = [NSArray arrayWithContentsOfFile:map_path()];
     return arr ? [arr mutableCopy] : [NSMutableArray array];
 }
 
 static void save_map(NSArray *map)
 {
-    [map writeToFile:@HIDE_MAP_PATH atomically:YES];
+    [map writeToFile:map_path() atomically:YES];
 }
 
 static void hide_item(NSString *src)
 {
     NSFileManager *fm = [NSFileManager defaultManager];
-    [fm createDirectoryAtPath:@HIDE_QUARANTINE
-  withIntermediateDirectories:YES attributes:nil error:nil];
+    [[NSFileManager defaultManager] createDirectoryAtPath:@HIDE_QUARANTINE
+                             withIntermediateDirectories:YES attributes:nil error:nil];
 
     if (![fm fileExistsAtPath:src]) return;
 
@@ -177,10 +181,20 @@ static void restore_items(void)
       withIntermediateDirectories:YES attributes:nil error:nil];
         [fm moveItemAtPath:dst toPath:src error:nil];
     }
-    [fm removeItemAtPath:@HIDE_MAP_PATH error:nil];
+    [fm removeItemAtPath:map_path() error:nil];
 }
 
-#pragma mark - jbctl
+#pragma mark - jbctl / exec_cmd
+
+static int exec_cmd_wrapper(const char *path, const char *arg1, const char *arg2, const char *arg3)
+{
+    pid_t pid;
+    const char *argv[] = {path, arg1, arg2, arg3, NULL};
+    int idx = 1;
+    while (argv[idx]) idx++;
+    // 去掉 NULL 之后的参数
+    return posix_spawn(&pid, path, NULL, NULL, (char *const *)argv, environ);
+}
 
 static void run_jbctl_internal(const char *cmd1, const char *cmd2)
 {
@@ -189,7 +203,7 @@ static void run_jbctl_internal(const char *cmd1, const char *cmd2)
     jbserver_local_stop();
 }
 
-#pragma mark - URL Scheme
+#pragma mark - URL Scheme 隐藏
 
 static BOOL hide_url_scheme(NSString *scheme, NSString *appPath)
 {
@@ -342,11 +356,11 @@ static void run_library_audit(void)
             @"default": @"blacklist",
             @"whitelistRegex": @[@"^com\\.apple\\.", @"^TelephonyUI-\\d+$", @"^FamilyMarquee.*Mode-.*\\.png$"],
             @"whitelist": @[@"CloudKit", @"GameKit", @"GeoServices", @"FamilyCircle", @"PassKit", @"VoiceServices", @"VoiceTrigger", @"Backup", @"ssu"],
-            @"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.h\bang.Terminal", @"xyz.willy.Zebra", @"Cephei", @"com.apple.T\.erminal", @"GDFileManagerCache.sqlite", @"GDFileManagerCache.sqlite-shm", @"GDFileManagerCache.sqlite-wal", @"ImageTables", @"SentryCrash", @"io.sentry", @"com.hackemist.SDImageCache"]
+            @"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.hbang.Terminal", @"xyz.willy.Zebra", @"Cephei", @"com.apple.Terminal", @"GDFileManagerCache.sqlite", @"GDFileManagerCache.sqlite-shm", @"GDFileManagerCache.sqlite-wal", @"ImageTables", @"SentryCrash", @"io.sentry", @"com.hackemist.SDImageCache"]
         },
         @"/var/mobile/Library/Saved Application State": @{
             @"default": @"blacklist",
-            @"whitelistRegex": @[@"^comapple\\."],
+            @"whitelistRegex": @[@"^com\\.apple\\."],
             @"blacklist": @[@"com.opa334.Dopamine.savedState", @"com.tigisoftware.Filza.savedState", @"org.coolstar.SileoStore.savedState", @"ws.hbang.Terminal.savedState", @"xyz.willy.Zebra.savedState", @"ru.domo.cocoatop64.savedState", @"com.apple.Terminal.savedState"]
         },
         @"/var/mobile/Library/WebKit": @{
@@ -398,6 +412,7 @@ static void run_library_audit(void)
         }
     }
 
+    // Documents/.misaka
     NSString *misaka = @"/var/mobile/Documents/.misaka";
     if ([fm fileExistsAtPath:misaka]) hide_item(misaka);
 }
@@ -411,6 +426,7 @@ static void perform_hide(void)
     NSString *jbroot = jbroot_str();
     if (!jbroot) {
         hide_log(@"jbroot missing, abort");
+        // 额外诊断
         hide_log(@"gSystemInfo.rootPath = %s",
                  gSystemInfo.jailbreakInfo.rootPath ?: "(null)");
         const char *jb = jbclient_get_jbroot();
@@ -418,7 +434,6 @@ static void perform_hide(void)
         return;
     }
 
-    hide_log(@"jbroot = %@", jbroot);
 
     // 1. crash reporter 禁用标记
     FILE *fp = fopen("/var/mobile/.DopamineCrashReporterDisabled", "w");
@@ -471,7 +486,7 @@ static void perform_hide(void)
     run_library_audit();
     hide_log(@"library audit done");
 
-    // 10. 禁用 systemwide domain
+    // 10. 禁用 systemwide domain 和 crash reporter
     systemwide_domain_set_enabled(false);
     hide_log(@"perform_hide complete");
 }
@@ -486,8 +501,7 @@ static void perform_unhide(void)
         return;
     }
 
-    hide_log(@"jbroot = %@", jbroot);
-
+    // 反向执行
     systemwide_domain_set_enabled(true);
 
     restore_items();
