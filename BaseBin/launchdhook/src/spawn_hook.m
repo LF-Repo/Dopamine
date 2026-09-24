@@ -261,22 +261,34 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 
 
-	if (path && should_hide_environment(path)) {
-		int envCount = 0;
-		while (envp && envp[envCount]) envCount++;
+  if (path && should_hide_environment(path)) {
+		// 目标 App：先挂起它
+		bool didSuspend = false;
+		if (desc && desc->attrp) {
+			short flags = 0;
+			if (posix_spawnattr_getflags(&desc->attrp, &flags) == 0) {
+				if (!(flags & POSIX_SPAWN_START_SUSPENDED)) {
+					posix_spawnattr_setflags(&desc->attrp, flags | POSIX_SPAWN_START_SUSPENDED);
+					didSuspend = true;
+				}
+			}
+		}
 
-		char **newEnvp = malloc((envCount + 2) * sizeof(char *));
-		for (int i = 0; i < envCount; i++) newEnvp[i] = envp[i];
-		newEnvp[envCount]     = strdup("DOPAMINE_HIDE_ENV=1");
-		newEnvp[envCount + 1] = NULL;
-
-		int r = posix_spawn_hook_shared(pid, path, desc, argv, (char *const *)newEnvp,
+		int r = posix_spawn_hook_shared(pid, path, desc, argv, envp,
 		                                __posix_spawn_orig_wrapper,
 		                                systemwide_trust_file_by_path,
 		                                platform_set_process_debugged,
 		                                jbsetting(jetsamMultiplier));
-		free(newEnvp[envCount]);
-		free(newEnvp);
+
+		if (r == 0 && pid && *pid > 0) {
+			pid_t childPid = *pid;
+			dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+				app_hide_perform_hide_sync();
+				if (didSuspend) {
+					kill(childPid, SIGCONT);
+				}
+			});
+		}
 		return r;
 	}
 
