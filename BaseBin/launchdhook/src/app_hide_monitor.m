@@ -229,27 +229,25 @@ static void perform_unhide(void)
 
 #pragma mark - 监控线程
 
-static bool gIsHidden = false;
+
 static bool gActionInProgress = false;
 
 static void *monitor_thread(void *arg)
 {
     hide_log(@"monitor thread running");
 
-    gIsHidden = (access("/var/jb", F_OK) != 0);
-    hide_log(@"initial state: isHidden=%d", gIsHidden);
-
     while (1) {
         @autoreleasepool {
             BOOL shouldHide = any_target_running();
+            BOOL actuallyHidden = (access("/var/jb", F_OK) != 0);
 
-            if (shouldHide && !gIsHidden && !gActionInProgress) {
+            if (shouldHide && !actuallyHidden && !gActionInProgress) {
                 gActionInProgress = true;
                 hide_log(@"triggering HIDE");
                 perform_hide();
                 gActionInProgress = false;
             }
-            else if (!shouldHide && gIsHidden && !gActionInProgress) {
+            else if (!shouldHide && actuallyHidden && !gActionInProgress) {
                 gActionInProgress = true;
                 hide_log(@"triggering UNHIDE");
                 perform_unhide();
