@@ -426,14 +426,8 @@ static void perform_hide(void)
     NSString *jbroot = jbroot_str();
     if (!jbroot) {
         hide_log(@"jbroot missing, abort");
-        // 额外诊断
-        hide_log(@"gSystemInfo.rootPath = %s",
-                 gSystemInfo.jailbreakInfo.rootPath ?: "(null)");
-        const char *jb = jbclient_get_jbroot();
-        hide_log(@"jbclient_get_jbroot = %s", jb ?: "(null)");
         return;
     }
-
 
     // 1. crash reporter 禁用标记
     FILE *fp = fopen("/var/mobile/.DopamineCrashReporterDisabled", "w");
@@ -455,39 +449,20 @@ static void perform_hide(void)
     fp = fopen(safeMode.fileSystemRepresentation, "w");
     if (fp) fclose(fp);
 
-    // 4. uicache -u 注销越狱 App
-    NSString *appsDir = [jbroot stringByAppendingPathComponent:@"Applications"];
-    NSArray *apps = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:appsDir error:nil];
-    NSString *uicache = [jbroot stringByAppendingPathComponent:@"usr/bin/uicache"];
-    for (NSString *app in apps) {
-        NSString *appPath = [appsDir stringByAppendingPathComponent:app];
-        posix_spawn(NULL, uicache.fileSystemRepresentation, NULL, NULL,
-            (char *const[]){(char *)uicache.fileSystemRepresentation, "-u",
-                            (char *)appPath.fileSystemRepresentation, NULL}, environ);
-    }
-    hide_log(@"uicache -u done");
-
-    // 5. 隐藏 URL Scheme
+    // 4. 隐藏 URL Scheme
     hide_all_url_schemes();
 
-    // 6. 卸载 fakelib
-    run_jbctl_internal("fakelib", "unmount");
-    hide_log(@"fakelib unmounted");
-
-    // 7. 解除 preboot 保护
-    run_jbctl_internal("protection", "deactivate");
-    hide_log(@"protection deactivated");
-
-    // 8. 删除 /var/jb 符号链接
+    // 5. 删除 /var/jb 符号链接
     unlink("/var/jb");
     hide_log(@"/var/jb removed");
 
-    // 9. Library Audit
+    // 6. Library Audit
     run_library_audit();
     hide_log(@"library audit done");
 
-    // 10. 禁用 systemwide domain 和 crash reporter
+    // 7. 禁用 systemwide domain
     systemwide_domain_set_enabled(false);
+
     hide_log(@"perform_hide complete");
 }
 
@@ -501,22 +476,19 @@ static void perform_unhide(void)
         return;
     }
 
-    // 反向执行
     systemwide_domain_set_enabled(true);
-
-    restore_items();
-    hide_log(@"library restored");
-
-    restore_all_url_schemes();
 
     // 恢复 /var/jb 符号链接
     if (symlink(jbroot.fileSystemRepresentation, "/var/jb") == 0) {
         hide_log(@"/var/jb restored");
     }
 
-    run_jbctl_internal("protection", "activate");
-    run_jbctl_internal("fakelib", "mount");
-    hide_log(@"fakelib mounted");
+    // 恢复被移走的文件
+    restore_items();
+    hide_log(@"library restored");
+
+    // 恢复 URL Scheme
+    restore_all_url_schemes();
 
     // 恢复 forkfix
     NSString *forkfixDst = [@HIDE_QUARANTINE stringByAppendingPathComponent:@"forkfix.dylib"];
@@ -531,17 +503,6 @@ static void perform_unhide(void)
 
     // 删除 crash reporter 禁用标记
     unlink("/var/mobile/.DopamineCrashReporterDisabled");
-
-    // 恢复 App 注册
-    NSString *appsDir = [jbroot stringByAppendingPathComponent:@"Applications"];
-    NSString *uicache = [jbroot stringByAppendingPathComponent:@"usr/bin/uicache"];
-    NSArray *apps = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:appsDir error:nil];
-    for (NSString *app in apps) {
-        NSString *appPath = [appsDir stringByAppendingPathComponent:app];
-        posix_spawn(NULL, uicache.fileSystemRepresentation, NULL, NULL,
-            (char *const[]){(char *)uicache.fileSystemRepresentation, "-p",
-                            (char *)appPath.fileSystemRepresentation, NULL}, environ);
-    }
 
     hide_log(@"perform_unhide complete");
 }
