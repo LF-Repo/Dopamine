@@ -464,14 +464,22 @@ static void perform_hide(void)
     // 7. 禁用 systemwide domain
     systemwide_domain_set_enabled(false);
 
-    // 8. 异步刷新 LaunchServices（App 图标）
+    // 逐个 register 越狱 App
     NSString *uicache = [jbroot stringByAppendingPathComponent:@"usr/bin/uicache"];
+    NSString *appsDir = [jbroot stringByAppendingPathComponent:@"Applications"];
     if ([[NSFileManager defaultManager] fileExistsAtPath:uicache]) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-            posix_spawn(NULL, uicache.fileSystemRepresentation, NULL, NULL,
-                        (char *const[]){(char *)uicache.fileSystemRepresentation, "-a", NULL},
-                        environ);
-            hide_log(@"uicache -a issued");
+            NSArray *apps = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:appsDir error:nil];
+            for (NSString *app in apps) {
+                NSString *appPath = [appsDir stringByAppendingPathComponent:app];
+                posix_spawn(NULL, uicache.fileSystemRepresentation, NULL, NULL,
+                            (char *const[]){(char *)uicache.fileSystemRepresentation,
+                                            "-p",
+                                            (char *)appPath.fileSystemRepresentation,
+                                            NULL},
+                            environ);
+            }
+            hide_log(@"uicache -p issued for %lu apps", (unsigned long)apps.count);
         });
     }
 
@@ -560,8 +568,7 @@ static void *monitor_thread(void *arg)
             BOOL actuallyHidden = (access("/var/jb", F_OK) != 0);
 
             // 只有超过 60 秒没检测到目标 App，才允许恢复
-            BOOL graceElapsed = (gLastTargetSeen == 0) || ((now - gLastTargetSeen) > UNHIDE_GRACE_SECONDS);
-
+            BOOL graceElapsed = (gLastTargetSeen != 0) && ((now - gLastTargetSeen) > UNHIDE_GRACE_SECONDS);
             if (shouldHide && !actuallyHidden && !gActionInProgress) {
                 gActionInProgress = true;
                 hide_log(@"triggering HIDE");
@@ -622,6 +629,7 @@ void app_hide_perform_hide_sync(void)
         if (access("/var/jb", F_OK) == 0) {
             hide_log(@"sync hide from spawn_hook");
             perform_hide();
+            gLastTargetSeen = time(NULL);
         } else {
             hide_log(@"already hidden, skip sync hide");
         }
