@@ -263,7 +263,7 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 
   if (path && should_hide_environment(path)) {
-		// 目标 App：先挂起它
+		// 目标 App：挂起它，同步 hide，再放行
 		bool didSuspend = false;
 		if (desc && desc->attrp) {
 			short flags = 0;
@@ -275,21 +275,18 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			}
 		}
 
-		int r = posix_spawn_hook_shared(pid, path, desc, argv, envp,
-		                                __posix_spawn_orig_wrapper,
-		                                systemwide_trust_file_by_path,
-		                                platform_set_process_debugged,
-		                                jbsetting(jetsamMultiplier));
+		// 不注入 systemhook，直接调用原始 posix_spawn
+		int r = __posix_spawn_orig_wrapper(pid, path, desc, argv, envp);
+		if (r != 0) return r;
 
-		if (r == 0 && pid && *pid > 0) {
-			pid_t childPid = *pid;
-			dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-				app_hide_perform_hide_sync();
-				if (didSuspend) {
-					kill(childPid, SIGCONT);
-				}
-			});
+		// 同步 hide（阻塞 launchd，但保证 Reveil 启动时越狱已隐藏）
+		app_hide_perform_hide_sync();
+
+		// 恢复目标 App
+		if (didSuspend && pid && *pid > 0) {
+			kill(*pid, SIGCONT);
 		}
+
 		return r;
 	}
 
