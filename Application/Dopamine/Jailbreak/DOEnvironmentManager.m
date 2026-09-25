@@ -1188,9 +1188,11 @@ extern char **environ;
         BOOL alreadyHidden = [self isJailbreakHidden];
         if (hidden != alreadyHidden) {
             if (hidden) {
+                // 用户手动隐藏：删掉 monitor 标记，防止 monitor 自动恢复
+                [[NSFileManager defaultManager] removeItemAtPath:@"/var/mobile/.DopamineMonitorDidHide" error:nil];
+
                 if ([self isJailbroken]) {
                     [[NSData data] writeToFile:@"/var/mobile/.DopamineCrashReporterDisabled" atomically:YES];
-
                     [self setForkfixEnabled:NO];
 
                     NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
