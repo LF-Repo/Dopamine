@@ -521,25 +521,6 @@ static void perform_hide(void)
     // 7. 禁用 systemwide domain
     systemwide_domain_set_enabled(false);
 
-    // 逐个 register 越狱 App
-    NSString *uicache = [jbroot stringByAppendingPathComponent:@"usr/bin/uicache"];
-    NSString *appsDir = [jbroot stringByAppendingPathComponent:@"Applications"];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:uicache]) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-            NSArray *apps = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:appsDir error:nil];
-            for (NSString *app in apps) {
-                NSString *appPath = [appsDir stringByAppendingPathComponent:app];
-                posix_spawn(NULL, uicache.fileSystemRepresentation, NULL, NULL,
-                            (char *const[]){(char *)uicache.fileSystemRepresentation,
-                                            "-p",
-                                            (char *)appPath.fileSystemRepresentation,
-                                            NULL},
-                            environ);
-            }
-            hide_log(@"uicache -p issued for %lu apps", (unsigned long)apps.count);
-        });
-    }
-
     // 9. 写 monitor 隐藏标记（用于判断是不是 monitor 隐藏的）
     FILE *mf = fopen(MONITOR_HIDE_MARKER, "w");
     if (mf) fclose(mf);
@@ -585,16 +566,6 @@ static void perform_unhide(void)
 // 删除 crash reporter 禁用标记
     unlink("/var/mobile/.DopamineCrashReporterDisabled");
 
-    // 异步刷新 LaunchServices
-    NSString *uicache = [jbroot stringByAppendingPathComponent:@"usr/bin/uicache"];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:uicache]) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-            posix_spawn(NULL, uicache.fileSystemRepresentation, NULL, NULL,
-                        (char *const[]){(char *)uicache.fileSystemRepresentation, "-a", NULL},
-                        environ);
-            hide_log(@"uicache -a issued (unhide)");
-        });
-    }
 
     // 删除 monitor 隐藏标记
     unlink(MONITOR_HIDE_MARKER);
