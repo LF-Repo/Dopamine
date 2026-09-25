@@ -498,8 +498,8 @@ static void perform_hide(void)
 
     // 立即禁用 crashreporter（不只是写标记文件）
     // 让目标 App 不再继承异常端口
-    jbclient_platform_set_crashreporter_enabled(false);
-    hide_log(@"crashreporter disabled immediately");
+    // jbclient_platform_set_crashreporter_enabled(false);
+    // hide_log(@"crashreporter disabled immediately");
 
     // 2. 移走 forkfix
     NSString *forkfix = [jbroot stringByAppendingPathComponent:@"basebin/forkfix.dylib"];
@@ -580,8 +580,8 @@ static void perform_unhide(void)
     unlink("/var/mobile/.DopamineCrashReporterDisabled");
 
     // 恢复 crashreporter
-    jbclient_platform_set_crashreporter_enabled(true);
-    hide_log(@"crashreporter re-enabled");
+    // jbclient_platform_set_crashreporter_enabled(true);
+    // hide_log(@"crashreporter re-enabled");
 
     // 删除 monitor 隐藏标记
     unlink(MONITOR_HIDE_MARKER);
