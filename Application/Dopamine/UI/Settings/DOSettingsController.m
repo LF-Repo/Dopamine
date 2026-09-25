@@ -555,7 +555,7 @@
 
 - (id)readCrashReporterDisabled:(PSSpecifier *)specifier
 {
-    return @[[NSFileManager defaultManager] fileExistsAtPath:@"/var/mobile/.DopamineCrashReporterDisabled"];
+    return @([[NSFileManager defaultManager] fileExistsAtPath:@"/var/mobile/.DopamineCrashReporterDisabled"]);
 }
 
 - (void)setCrashReporterDisabled:(id)value specifier:(PSSpecifier *)specifier
