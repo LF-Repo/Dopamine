@@ -12,6 +12,7 @@
 #include "jbserver/jbserver_local.h"
 #include "hookd_provider.h"
 #import <Foundation/Foundation.h>
+#import "app_hide_monitor.h"
 extern char **environ;
 
 void abort_with_reason(uint32_t reason_namespace, uint64_t reason_code, const char *reason_string, uint64_t reason_flags);
