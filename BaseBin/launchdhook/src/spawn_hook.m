@@ -265,7 +265,7 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 
   if (path && should_hide_environment(path)) {
-		// 目标 App：挂起它，同步 hide，再放行
+		// 目标 App：挂起它
 		bool didSuspend = false;
 		short originalFlags = 0;
 		if (desc && desc->attrp) {
@@ -277,44 +277,28 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			}
 		}
 
-		// ★ 关键：在 spawn 之前清空 launchd 自己的异常端口
-		// 这样目标 App 从 fork 那一刻起就不会继承 crashreporter 的端口
-		exception_mask_t savedMasks[EXC_TYPES_COUNT];
-		mach_port_t savedPorts[EXC_TYPES_COUNT];
-		exception_behavior_t savedBehaviors[EXC_TYPES_COUNT];
-		thread_state_flavor_t savedFlavors[EXC_TYPES_COUNT];
-		mach_msg_type_number_t savedCount = EXC_TYPES_COUNT;
+		// ★ 关键：spawn 之前就先禁用 crashreporter
+		// 这样 crashreporter 不会在 fork 那一刻抓取目标 App 的 task port
+		jbclient_platform_set_crashreporter_enabled(false);
 
-		kern_return_t kr = task_get_exception_ports(mach_task_self(),
-			EXC_MASK_ALL, savedMasks, &savedCount, savedPorts, savedBehaviors, savedFlavors);
-
-		bool restoreNeeded = false;
-		if (kr == KERN_SUCCESS && savedCount > 0) {
-			task_set_exception_ports(mach_task_self(), EXC_MASK_ALL,
-				MACH_PORT_NULL, EXCEPTION_DEFAULT, 0);
-			restoreNeeded = true;
-		}
-
-		// 不注入 systemhook，直接调用原始 posix_spawn
+		// spawn
 		int r = __posix_spawn_orig_wrapper(pid, path, desc, argv, envp);
 
-		// 恢复 launchd 自己的异常端口
-		if (restoreNeeded) {
-			for (mach_msg_type_number_t i = 0; i < savedCount; i++) {
-				task_set_exception_ports(mach_task_self(), savedMasks[i],
-					savedPorts[i], savedBehaviors[i], savedFlavors[i]);
-			}
-		}
+		// 立即恢复 crashreporter（在 hide 之前）
+		// 因为 hide 不需要 crashreporter 禁用，且其他 App 需要监控
+		jbclient_platform_set_crashreporter_enabled(true);
 
-		// 恢复 attr 原始 flags
+		// 恢复 attr 的原始 flags
 		if (didSuspend) {
 			posix_spawnattr_setflags(&desc->attrp, originalFlags);
 		}
 
 		if (r != 0) return r;
 
+		// hide（不含 crashreporter 操作）
 		app_hide_perform_hide_sync();
 
+		// 放行目标 App
 		if (didSuspend && pid && *pid > 0) {
 			kill(*pid, SIGCONT);
 		}
