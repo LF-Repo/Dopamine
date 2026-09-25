@@ -287,19 +287,51 @@ static void hide_all_url_schemes(void)
         @"misaka.app":    @[@"misaka"],
     };
 
+    NSMutableArray<NSString *> *modifiedApps = [NSMutableArray array];
+
     for (NSString *appName in targets) {
         NSString *appPath = find_app_path(appName);
         if (!appPath) continue;
+        BOOL anyModified = NO;
         for (NSString *scheme in targets[appName]) {
-            hide_url_scheme(scheme, appPath);
+            if (hide_url_scheme(scheme, appPath)) anyModified = YES;
         }
+        if (anyModified) [modifiedApps addObject:appPath];
     }
+
+    if (modifiedApps.count == 0) return;
+
+    // 通知 LaunchServices 重新读取这些 App 的 Info.plist
+    NSString *jbroot = jbroot_str();
+    NSString *uicache = [jbroot stringByAppendingPathComponent:@"usr/bin/uicache"];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:uicache]) return;
+
+    for (NSString *appPath in modifiedApps) {
+        const char *uicachePath = uicache.fileSystemRepresentation;
+        const char *appPathC = appPath.fileSystemRepresentation;
+
+        pid_t pid;
+        posix_spawn(&pid, uicachePath, NULL, NULL,
+                    (char *const[]){(char *)uicachePath, "-u", (char *)appPathC, NULL},
+                    environ);
+        waitpid(pid, NULL, 0);
+
+        posix_spawn(&pid, uicachePath, NULL, NULL,
+                    (char *const[]){(char *)uicachePath, "-p", (char *)appPathC, NULL},
+                    environ);
+        waitpid(pid, NULL, 0);
+    }
+
+    hide_log(@"refreshed %lu apps after URL scheme modification", (unsigned long)modifiedApps.count);
 }
 
 static void restore_all_url_schemes(void)
 {
     NSArray *apps = @[@"Reveil.app", @"PostBox.app", @"Santander.app",
                       @"Cowabunga.app", @"misaka.app"];
+
+    NSMutableArray<NSString *> *modifiedApps = [NSMutableArray array];
+
     for (NSString *appName in apps) {
         NSString *appPath = find_app_path(appName);
         if (!appPath) continue;
@@ -309,8 +341,33 @@ static void restore_all_url_schemes(void)
             [[NSFileManager defaultManager] removeItemAtPath:infoPath error:nil];
             [[NSFileManager defaultManager] copyItemAtPath:backup toPath:infoPath error:nil];
             [[NSFileManager defaultManager] removeItemAtPath:backup error:nil];
+            [modifiedApps addObject:appPath];
         }
     }
+
+    if (modifiedApps.count == 0) return;
+
+    NSString *jbroot = jbroot_str();
+    NSString *uicache = [jbroot stringByAppendingPathComponent:@"usr/bin/uicache"];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:uicache]) return;
+
+    for (NSString *appPath in modifiedApps) {
+        const char *uicachePath = uicache.fileSystemRepresentation;
+        const char *appPathC = appPath.fileSystemRepresentation;
+
+        pid_t pid;
+        posix_spawn(&pid, uicachePath, NULL, NULL,
+                    (char *const[]){(char *)uicachePath, "-u", (char *)appPathC, NULL},
+                    environ);
+        waitpid(pid, NULL, 0);
+
+        posix_spawn(&pid, uicachePath, NULL, NULL,
+                    (char *const[]){(char *)uicachePath, "-p", (char *)appPathC, NULL},
+                    environ);
+        waitpid(pid, NULL, 0);
+    }
+
+    hide_log(@"restored %lu apps after URL scheme restoration", (unsigned long)modifiedApps.count);
 }
 
 #pragma mark - Library Audit
@@ -550,7 +607,7 @@ static void perform_unhide(void)
 static bool gActionInProgress = false;
 
 static time_t gLastTargetSeen = 0;
-static const int UNHIDE_GRACE_SECONDS = 60;
+static const int UNHIDE_GRACE_SECONDS = 10;
 
 static void *monitor_thread(void *arg)
 {
