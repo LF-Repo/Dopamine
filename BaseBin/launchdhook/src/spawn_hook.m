@@ -4,6 +4,7 @@
 #include "crashreporter.h"
 #include "update.h"
 #include <libjailbreak/util.h>
+#import <libjailbreak/jbclient_xpc.h>
 #include <substrate.h>
 #include <mach-o/dyld.h>
 #include <sys/param.h>
