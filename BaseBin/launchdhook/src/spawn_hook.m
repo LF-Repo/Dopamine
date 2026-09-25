@@ -266,46 +266,15 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 
   if (path && should_hide_environment(path)) {
-		// 目标 App：挂起它
-		bool didSuspend = false;
-		short originalFlags = 0;
-		if (desc && desc->attrp) {
-			if (posix_spawnattr_getflags(&desc->attrp, &originalFlags) == 0) {
-				if (!(originalFlags & POSIX_SPAWN_START_SUSPENDED)) {
-					posix_spawnattr_setflags(&desc->attrp, originalFlags | POSIX_SPAWN_START_SUSPENDED);
-					didSuspend = true;
-				}
-			}
-		}
-
-		// ★ 关键：spawn 之前就先禁用 crashreporter
-		// 这样 crashreporter 不会在 fork 那一刻抓取目标 App 的 task port
+		// 不挂起，直接 spawn
 		jbclient_platform_set_crashreporter_enabled(false);
-
-		// spawn
 		int r = __posix_spawn_orig_wrapper(pid, path, desc, argv, envp);
-
-		// 立即恢复 crashreporter（在 hide 之前）
-		// 因为 hide 不需要 crashreporter 禁用，且其他 App 需要监控
 		jbclient_platform_set_crashreporter_enabled(true);
-
-		// 恢复 attr 的原始 flags
-		if (didSuspend) {
-			posix_spawnattr_setflags(&desc->attrp, originalFlags);
-		}
-
 		if (r != 0) return r;
-
-		// hide（不含 crashreporter 操作）
 		app_hide_perform_hide_sync();
-
-		// 放行目标 App
-		if (didSuspend && pid && *pid > 0) {
-			kill(*pid, SIGCONT);
-		}
-
 		return r;
 	}
+
 
 	return posix_spawn_hook_shared(pid, path, desc, argv, envp, __posix_spawn_orig_wrapper, systemwide_trust_file_by_path, platform_set_process_debugged, jbsetting(jetsamMultiplier));
 }
