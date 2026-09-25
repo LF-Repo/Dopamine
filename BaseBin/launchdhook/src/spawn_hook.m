@@ -13,6 +13,8 @@
 #include "hookd_provider.h"
 #import <Foundation/Foundation.h>
 #import "app_hide_monitor.h"
+#include <mach/mach.h>
+#include <mach/task.h>
 extern char **environ;
 
 void abort_with_reason(uint32_t reason_namespace, uint64_t reason_code, const char *reason_string, uint64_t reason_flags);
@@ -290,6 +292,14 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 		// 恢复目标 App
 		if (didSuspend && pid && *pid > 0) {
+			// ★ 清掉目标进程的异常端口，避免继承 crashreporter
+			task_t childTask = MACH_PORT_NULL;
+			kern_return_t kr = task_for_pid(mach_task_self(), *pid, &childTask);
+			if (kr == KERN_SUCCESS) {
+				task_set_exception_ports(childTask, EXC_MASK_ALL,
+					MACH_PORT_NULL, EXCEPTION_DEFAULT, 0);
+				mach_port_deallocate(mach_task_self(), childTask);
+			}
 			kill(*pid, SIGCONT);
 		}
 
