@@ -9,6 +9,7 @@
 #import <objc/runtime.h>
 #import <Photos/Photos.h>
 #import <libjailbreak/util.h>
+#import <libjailbreak/jbclient_xpc.h>
 #import "DOUIManager.h"
 #import "DOPkgManagerPickerViewController.h"
 #import "DOHeaderCell.h"
@@ -271,6 +272,12 @@
             [jetsamSpecifier setProperty:@"jetsamOptionNumbers" forKey:@"valuesDataSource"];
             [jetsamSpecifier setProperty:@"jetsamOptionTitles" forKey:@"titlesDataSource"];
             [specifiers addObject:jetsamSpecifier];
+
+            PSSpecifier *disableCrashReporterSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Disable Crash Reporter" target:self set:@selector(setCrashReporterDisabled:specifier:) get:@selector(readCrashReporterDisabled:) detail:nil cell:PSSwitchCell edit:nil];
+            [disableCrashReporterSpecifier setProperty:@YES forKey:@"enabled"];
+            [disableCrashReporterSpecifier setProperty:@"crashReporterDisabled" forKey:@"key"];
+            [disableCrashReporterSpecifier setProperty:@NO forKey:@"default"];
+            [specifiers addObject:disableCrashReporterSpecifier];
             
             if (!envManager.isJailbroken && !envManager.isInstalledThroughTrollStore) {
                 PSSpecifier *removeJailbreakSwitchSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Button_Remove_Jailbreak") target:self set:@selector(setRemoveJailbreakEnabled:specifier:) get:defGetter detail:nil cell:PSSwitchCell edit:nil];
@@ -293,7 +300,7 @@
                 [specifiers addObject:injectionBlockSpecifier];
 
                 PSSpecifier *appHideSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
-                [appHideSpecifier setProperty:@"按应用隐藏" forKey:@"title"];
+                [appHideSpecifier setProperty:@"Hide for App" forKey:@"title"];
                 [appHideSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
                 [appHideSpecifier setProperty:buttonHeight forKey:@"height"];
                 [appHideSpecifier setProperty:@"eye.slash.circle" forKey:@"image"];
@@ -345,6 +352,14 @@
                     [hideUnhideJailbreakSpecifier setProperty:@"hideUnhideJailbreakPressed" forKey:@"action"];
                     [specifiers addObject:hideUnhideJailbreakSpecifier];
                 }
+
+                PSSpecifier *rebootSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                [rebootSpecifier setProperty:@"Reboot Device" forKey:@"title"];
+                [rebootSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                [rebootSpecifier setProperty:buttonHeight forKey:@"height"];
+                [rebootSpecifier setProperty:@"power" forKey:@"image"];
+                [rebootSpecifier setProperty:@"rebootPressed" forKey:@"action"];
+                [specifiers addObject:rebootSpecifier];
 
                 if (!envManager.isJailbroken && envManager.isInstalledThroughTrollStore) {
                     PSSpecifier *removeJailbreakSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
@@ -535,6 +550,23 @@
     DOEnvironmentManager *envManager = [DOEnvironmentManager sharedManager];
     if (envManager.isJailbroken) {
         jbclient_platform_jbsettings_set_double("jetsamMultiplier", ((NSNumber *)value).doubleValue / 2);
+    }
+}
+
+- (id)readCrashReporterDisabled:(PSSpecifier *)specifier
+{
+    return @[[NSFileManager defaultManager] fileExistsAtPath:@"/var/mobile/.DopamineCrashReporterDisabled"];
+}
+
+- (void)setCrashReporterDisabled:(id)value specifier:(PSSpecifier *)specifier
+{
+    BOOL disabled = ((NSNumber *)value).boolValue;
+    if (disabled) {
+        [[NSData data] writeToFile:@"/var/mobile/.DopamineCrashReporterDisabled" atomically:YES];
+        jbclient_platform_set_crashreporter_enabled(false);
+    } else {
+        [[NSFileManager defaultManager] removeItemAtPath:@"/var/mobile/.DopamineCrashReporterDisabled" error:nil];
+        jbclient_platform_set_crashreporter_enabled(true);
     }
 }
 
@@ -806,6 +838,18 @@
     [self.navigationController pushViewController:picker animated:YES];
 }
 
+- (void)rebootPressed
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Reboot Device"
+                                                                   message:@"Are you sure you want to reboot the device?"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Reboot" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        [[DOEnvironmentManager sharedManager] reboot];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 @end
 
 @implementation DOAppHidePickerViewController
@@ -814,7 +858,7 @@
 {
     [super viewDidLoad];
 
-    self.title = @"按应用隐藏";
+    self.title = @"Hide for App";
     self.tableView.rowHeight = 64;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.tableView.separatorInset = UIEdgeInsetsMake(0, 68, 0, 0);
@@ -822,7 +866,6 @@
     if (@available(iOS 15.0, *)) {
         self.tableView.sectionHeaderTopPadding = 12;
     }
-
 
     UIColor *bg = [DOThemeManager menuColorWithAlpha:0.55];
     self.view.backgroundColor = bg;
@@ -838,7 +881,7 @@
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
-    self.searchController.searchBar.placeholder = @"搜索应用";
+    self.searchController.searchBar.placeholder = @"Search apps";
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.definesPresentationContext = YES;
@@ -928,6 +971,22 @@
     return icon;
 }
 
+- (UIImage *)roundedIcon:(UIImage *)icon size:(CGSize)size cornerRadius:(CGFloat)radius
+{
+    if (!icon) return nil;
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
+    format.scale = [UIScreen mainScreen].scale;
+    format.opaque = NO;
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size format:format];
+
+    return [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        CGRect rect = CGRectMake(0, 0, size.width, size.height);
+        UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:rect cornerRadius:radius];
+        [path addClip];
+        [icon drawInRect:rect];
+    }];
+}
+
 #pragma mark - Search
 
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController
@@ -952,12 +1011,12 @@
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
-    return @"选择需要隐藏越狱环境的应用";
+    return @"Select apps to hide jailbreak environment";
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
-    return @"开启后，该应用将看不到 /var/jb、越狱相关文件及路径。修改后需要重启目标应用才能生效。";
+    return @"When enabled, the selected app will not see /var/jb or any jailbreak-related files. Changes take effect after restarting the app.";
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
@@ -985,17 +1044,7 @@
 
     UIImage *icon = [self iconForBundleID:bundleID];
     if (icon) {
-        cell.imageView.image = icon;
-        cell.imageView.layer.cornerRadius = 10;
-        cell.imageView.layer.masksToBounds = YES;
-        cell.imageView.layer.borderWidth = 0.5;
-        cell.imageView.layer.borderColor = [[UIColor separatorColor] CGColor];
-        CGSize size = CGSizeMake(40, 40);
-        UIGraphicsBeginImageContextWithOptions(size, NO, 0);
-        [icon drawInRect:CGRectMake(0, 0, size.width, size.height)];
-        UIImage *resized = UIGraphicsGetImageFromCurrentImageContext();
-        UIGraphicsEndImageContext();
-        cell.imageView.image = resized;
+        cell.imageView.image = [self roundedIcon:icon size:CGSizeMake(42, 42) cornerRadius:9];
     } else {
         cell.imageView.image = [UIImage systemImageNamed:@"app"];
     }
@@ -1004,7 +1053,6 @@
     toggle.on = [appInfo[@"hidden"] boolValue];
     toggle.tag = indexPath.row;
     [toggle addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
-    toggle.transform = CGAffineTransformMakeScale(0.85, 0.85);
     cell.accessoryView = toggle;
 
     return cell;
