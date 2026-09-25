@@ -523,7 +523,7 @@ static void perform_hide(void)
     hide_log(@"library audit done");
 
     // 7. 禁用 systemwide domain
-    systemwide_domain_set_enabled(false);
+    // systemwide_domain_set_enabled(false);
 
     // 8. 写 monitor 隐藏标记
     FILE *mf = fopen(MONITOR_HIDE_MARKER, "w");
@@ -545,7 +545,7 @@ static void perform_unhide(void)
         return;
     }
 
-    systemwide_domain_set_enabled(true);
+    // systemwide_domain_set_enabled(true);
 
     // 恢复 /var/jb 符号链接
     if (symlink(jbroot.fileSystemRepresentation, "/var/jb") == 0) {
