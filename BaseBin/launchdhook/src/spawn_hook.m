@@ -265,11 +265,11 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
   if (path && should_hide_environment(path)) {
 		// 目标 App：挂起它，同步 hide，再放行
 		bool didSuspend = false;
+		short originalFlags = 0;
 		if (desc && desc->attrp) {
-			short flags = 0;
-			if (posix_spawnattr_getflags(&desc->attrp, &flags) == 0) {
-				if (!(flags & POSIX_SPAWN_START_SUSPENDED)) {
-					posix_spawnattr_setflags(&desc->attrp, flags | POSIX_SPAWN_START_SUSPENDED);
+			if (posix_spawnattr_getflags(&desc->attrp, &originalFlags) == 0) {
+				if (!(originalFlags & POSIX_SPAWN_START_SUSPENDED)) {
+					posix_spawnattr_setflags(&desc->attrp, originalFlags | POSIX_SPAWN_START_SUSPENDED);
 					didSuspend = true;
 				}
 			}
@@ -277,6 +277,12 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 		// 不注入 systemhook，直接调用原始 posix_spawn
 		int r = __posix_spawn_orig_wrapper(pid, path, desc, argv, envp);
+
+		// ★ 关键修复：立即恢复原始 flags，避免污染 launchd 后续 spawn
+		if (didSuspend) {
+			posix_spawnattr_setflags(&desc->attrp, originalFlags);
+		}
+
 		if (r != 0) return r;
 
 		// 同步 hide（阻塞 launchd，但保证 Reveil 启动时越狱已隐藏）
