@@ -477,13 +477,17 @@ static void run_library_audit(void)
 
 #pragma mark - Hide / Unhide
 
+static pthread_mutex_t gHideLock = PTHREAD_MUTEX_INITIALIZER;
+
 static void perform_hide(void)
 {
+    pthread_mutex_lock(&gHideLock);
     hide_log(@"perform_hide begin");
 
     NSString *jbroot = jbroot_str();
     if (!jbroot) {
         hide_log(@"jbroot missing, abort");
+        pthread_mutex_unlock(&gHideLock);
         return;
     }
 
@@ -521,20 +525,23 @@ static void perform_hide(void)
     // 7. 禁用 systemwide domain
     systemwide_domain_set_enabled(false);
 
-    // 9. 写 monitor 隐藏标记（用于判断是不是 monitor 隐藏的）
+    // 8. 写 monitor 隐藏标记
     FILE *mf = fopen(MONITOR_HIDE_MARKER, "w");
     if (mf) fclose(mf);
 
     hide_log(@"perform_hide complete");
+    pthread_mutex_unlock(&gHideLock);
 }
 
 static void perform_unhide(void)
 {
+    pthread_mutex_lock(&gHideLock);
     hide_log(@"perform_unhide begin");
 
     NSString *jbroot = jbroot_str();
     if (!jbroot) {
         hide_log(@"jbroot missing, abort");
+        pthread_mutex_unlock(&gHideLock);
         return;
     }
 
@@ -563,14 +570,14 @@ static void perform_unhide(void)
     NSString *safeMode = [jbroot stringByAppendingPathComponent:@"basebin/.safe_mode"];
     unlink(safeMode.fileSystemRepresentation);
 
-// 删除 crash reporter 禁用标记
+    // 删除 crash reporter 禁用标记
     unlink("/var/mobile/.DopamineCrashReporterDisabled");
-
 
     // 删除 monitor 隐藏标记
     unlink(MONITOR_HIDE_MARKER);
 
     hide_log(@"perform_unhide complete");
+    pthread_mutex_unlock(&gHideLock);
 }
 
 #pragma mark - 监控线程
@@ -578,7 +585,7 @@ static void perform_unhide(void)
 static bool gActionInProgress = false;
 
 static time_t gLastTargetSeen = 0;
-static const int UNHIDE_GRACE_SECONDS = 10;
+static const int UNHIDE_GRACE_SECONDS = 20;
 
 static void *monitor_thread(void *arg)
 {
@@ -648,12 +655,11 @@ bool app_hide_is_target(const char *executablePath)
     }
 }
 
-static pthread_mutex_t gHideLock = PTHREAD_MUTEX_INITIALIZER;
+
 
 void app_hide_perform_hide_sync(void)
 {
     @autoreleasepool {
-        pthread_mutex_lock(&gHideLock);
         if (access("/var/jb", F_OK) == 0) {
             hide_log(@"sync hide from spawn_hook");
             perform_hide();
@@ -661,6 +667,5 @@ void app_hide_perform_hide_sync(void)
         } else {
             hide_log(@"already hidden, skip sync hide");
         }
-        pthread_mutex_unlock(&gHideLock);
     }
 }
