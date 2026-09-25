@@ -15,6 +15,7 @@
 #import <libjailbreak/jbroot.h>
 #import <libjailbreak/info.h>
 #import <libjailbreak/util.h>
+#import <libjailbreak/jbclient_xpc.h>
 #import "jbserver/jbserver_local.h"
 
 
@@ -495,6 +496,11 @@ static void perform_hide(void)
     FILE *fp = fopen("/var/mobile/.DopamineCrashReporterDisabled", "w");
     if (fp) fclose(fp);
 
+    // 立即禁用 crashreporter（不只是写标记文件）
+    // 让目标 App 不再继承异常端口
+    jbclient_platform_set_crashreporter_enabled(false);
+    hide_log(@"crashreporter disabled immediately");
+
     // 2. 移走 forkfix
     NSString *forkfix = [jbroot stringByAppendingPathComponent:@"basebin/forkfix.dylib"];
     if ([[NSFileManager defaultManager] fileExistsAtPath:forkfix]) {
@@ -512,7 +518,7 @@ static void perform_hide(void)
     if (fp) fclose(fp);
 
     // 4. 隐藏 URL Scheme
-    hide_all_url_schemes();
+    // hide_all_url_schemes();
 
     // 5. 删除 /var/jb 符号链接
     unlink("/var/jb");
@@ -557,7 +563,7 @@ static void perform_unhide(void)
     hide_log(@"library restored");
 
     // 恢复 URL Scheme
-    restore_all_url_schemes();
+    // restore_all_url_schemes();
 
     // 恢复 forkfix
     NSString *forkfixDst = [@HIDE_QUARANTINE stringByAppendingPathComponent:@"forkfix.dylib"];
@@ -572,6 +578,10 @@ static void perform_unhide(void)
 
     // 删除 crash reporter 禁用标记
     unlink("/var/mobile/.DopamineCrashReporterDisabled");
+
+    // 恢复 crashreporter
+    jbclient_platform_set_crashreporter_enabled(true);
+    hide_log(@"crashreporter re-enabled");
 
     // 删除 monitor 隐藏标记
     unlink(MONITOR_HIDE_MARKER);
