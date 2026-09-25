@@ -277,29 +277,45 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			}
 		}
 
+		// ★ 关键：在 spawn 之前清空 launchd 自己的异常端口
+		// 这样目标 App 从 fork 那一刻起就不会继承 crashreporter 的端口
+		exception_mask_t savedMasks[EXC_TYPES_COUNT];
+		mach_port_t savedPorts[EXC_TYPES_COUNT];
+		exception_behavior_t savedBehaviors[EXC_TYPES_COUNT];
+		thread_state_flavor_t savedFlavors[EXC_TYPES_COUNT];
+		mach_msg_type_number_t savedCount = EXC_TYPES_COUNT;
+
+		kern_return_t kr = task_get_exception_ports(mach_task_self(),
+			EXC_MASK_ALL, savedMasks, &savedCount, savedPorts, savedBehaviors, savedFlavors);
+
+		bool restoreNeeded = false;
+		if (kr == KERN_SUCCESS && savedCount > 0) {
+			task_set_exception_ports(mach_task_self(), EXC_MASK_ALL,
+				MACH_PORT_NULL, EXCEPTION_DEFAULT, 0);
+			restoreNeeded = true;
+		}
+
 		// 不注入 systemhook，直接调用原始 posix_spawn
 		int r = __posix_spawn_orig_wrapper(pid, path, desc, argv, envp);
 
-		// ★ 关键修复：立即恢复原始 flags，避免污染 launchd 后续 spawn
+		// 恢复 launchd 自己的异常端口
+		if (restoreNeeded) {
+			for (mach_msg_type_number_t i = 0; i < savedCount; i++) {
+				task_set_exception_ports(mach_task_self(), savedMasks[i],
+					savedPorts[i], savedBehaviors[i], savedFlavors[i]);
+			}
+		}
+
+		// 恢复 attr 原始 flags
 		if (didSuspend) {
 			posix_spawnattr_setflags(&desc->attrp, originalFlags);
 		}
 
 		if (r != 0) return r;
 
-		// 同步 hide（阻塞 launchd，但保证 Reveil 启动时越狱已隐藏）
 		app_hide_perform_hide_sync();
 
-		// 恢复目标 App
 		if (didSuspend && pid && *pid > 0) {
-			// ★ 清掉目标进程的异常端口，避免继承 crashreporter
-			task_t childTask = MACH_PORT_NULL;
-			kern_return_t kr = task_for_pid(mach_task_self(), *pid, &childTask);
-			if (kr == KERN_SUCCESS) {
-				task_set_exception_ports(childTask, EXC_MASK_ALL,
-					MACH_PORT_NULL, EXCEPTION_DEFAULT, 0);
-				mach_port_deallocate(mach_task_self(), childTask);
-			}
 			kill(*pid, SIGCONT);
 		}
 
