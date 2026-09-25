@@ -28,6 +28,7 @@ extern char **environ;
 #define APP_HIDE_LOG_MAX_SIZE  (512 * 1024)
 #define HIDE_QUARANTINE        "/var/mobile/.DopamineHideQuarantine"
 #define HIDE_MAP_PATH          HIDE_QUARANTINE "/map.plist"
+#define MONITOR_HIDE_MARKER    "/var/mobile/.DopamineMonitorDidHide"
 
 #pragma mark - 日志
 
@@ -463,6 +464,21 @@ static void perform_hide(void)
     // 7. 禁用 systemwide domain
     systemwide_domain_set_enabled(false);
 
+    // 8. 异步刷新 LaunchServices（App 图标）
+    NSString *uicache = [jbroot stringByAppendingPathComponent:@"usr/bin/uicache"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:uicache]) {
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+            posix_spawn(NULL, uicache.fileSystemRepresentation, NULL, NULL,
+                        (char *const[]){(char *)uicache.fileSystemRepresentation, "-a", NULL},
+                        environ);
+            hide_log(@"uicache -a issued");
+        });
+    }
+
+    // 9. 写 monitor 隐藏标记（用于判断是不是 monitor 隐藏的）
+    FILE *mf = fopen(MONITOR_HIDE_MARKER, "w");
+    if (mf) fclose(mf);
+
     hide_log(@"perform_hide complete");
 }
 
@@ -501,8 +517,22 @@ static void perform_unhide(void)
     NSString *safeMode = [jbroot stringByAppendingPathComponent:@"basebin/.safe_mode"];
     unlink(safeMode.fileSystemRepresentation);
 
-    // 删除 crash reporter 禁用标记
+// 删除 crash reporter 禁用标记
     unlink("/var/mobile/.DopamineCrashReporterDisabled");
+
+    // 异步刷新 LaunchServices
+    NSString *uicache = [jbroot stringByAppendingPathComponent:@"usr/bin/uicache"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:uicache]) {
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+            posix_spawn(NULL, uicache.fileSystemRepresentation, NULL, NULL,
+                        (char *const[]){(char *)uicache.fileSystemRepresentation, "-a", NULL},
+                        environ);
+            hide_log(@"uicache -a issued (unhide)");
+        });
+    }
+
+    // 删除 monitor 隐藏标记
+    unlink(MONITOR_HIDE_MARKER);
 
     hide_log(@"perform_unhide complete");
 }
@@ -538,7 +568,9 @@ static void *monitor_thread(void *arg)
                 perform_hide();
                 gActionInProgress = false;
             }
-            else if (graceElapsed && !shouldHide && actuallyHidden && !gActionInProgress) {
+            else if (graceElapsed && !shouldHide && actuallyHidden
+                     && access(MONITOR_HIDE_MARKER, F_OK) == 0
+                     && !gActionInProgress) {
                 gActionInProgress = true;
                 hide_log(@"triggering UNHIDE");
                 perform_unhide();
