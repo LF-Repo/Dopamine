@@ -1470,5 +1470,186 @@ extern char **environ;
         return nil;
     }
 }
+#pragma mark - URL Scheme Hiding
+
+- (BOOL)isHideJailbreakURLSchemesEnabled
+{
+    return [[DOPreferenceManager sharedManager] boolPreferenceValueForKey:@"hideJailbreakURLSchemes" fallback:NO];
+}
+
+- (void)setHideJailbreakURLSchemesEnabled:(BOOL)enabled
+{
+    [[DOPreferenceManager sharedManager] setPreferenceValue:@(enabled) forKey:@"hideJailbreakURLSchemes"];
+    [self applyURLSchemeHiding:[self jbURLTargets] useJbPath:YES hide:enabled];
+}
+
+- (BOOL)isHideThirdPartyURLSchemesEnabled
+{
+    return [[DOPreferenceManager sharedManager] boolPreferenceValueForKey:@"hideOtherURLSchemes" fallback:NO];
+}
+
+- (void)setHideThirdPartyURLSchemesEnabled:(BOOL)enabled
+{
+    [[DOPreferenceManager sharedManager] setPreferenceValue:@(enabled) forKey:@"hideOtherURLSchemes"];
+    [self applyURLSchemeHiding:[self thirdPartyURLTargets] useJbPath:NO hide:enabled];
+}
+
+- (NSDictionary *)jbURLTargets
+{
+    return @{
+        @"Sileo.app":    @[@"sileo"],
+        @"Saily.app":    @[@"apt-repo"],
+        @"Filza.app":    @[@"filza"],
+        @"iCleaner.app": @[@"icleaner"],
+    };
+}
+
+- (NSDictionary *)thirdPartyURLTargets
+{
+    return @{
+        @"PostBox.app":    @[@"postbox"],
+        @"Santander.app":  @[@"santander"],
+        @"Reveil.app":     @[@"reveil", @"82flex"],
+        @"Cowabunga.app":  @[@"cowabunga"],
+        @"misaka.app":     @[@"misaka"],
+    };
+}
+
+- (NSString *)findJbAppPath:(NSString *)appName
+{
+    NSString *jbroot = [NSString stringWithUTF8String:JBROOT_PATH("/")];
+    NSString *full = [[jbroot stringByAppendingPathComponent:@"Applications"]
+                      stringByAppendingPathComponent:appName];
+    BOOL isDir = NO;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:full isDirectory:&isDir] && isDir) {
+        return full;
+    }
+    return nil;
+}
+
+- (NSString *)findSysAppPath:(NSString *)appName
+{
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *roots = @[@"/var/containers/Bundle/Application", @"/Applications"];
+    for (NSString *root in roots) {
+        for (NSString *uuid in [fm contentsOfDirectoryAtPath:root error:nil]) {
+            NSString *uuidPath = [root stringByAppendingPathComponent:uuid];
+            for (NSString *item in [fm contentsOfDirectoryAtPath:uuidPath error:nil]) {
+                if ([item isEqualToString:appName]) {
+                    NSString *full = [uuidPath stringByAppendingPathComponent:item];
+                    BOOL isDir = NO;
+                    if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) return full;
+                }
+            }
+        }
+    }
+    return nil;
+}
+
+- (BOOL)hideURLSchemeInPlist:(NSString *)infoPath scheme:(NSString *)scheme
+{
+    NSData *data = [NSData dataWithContentsOfFile:infoPath];
+    if (!data) return NO;
+
+    NSMutableDictionary *plist = [NSPropertyListSerialization
+        propertyListWithData:data options:NSPropertyListMutableContainersAndLeaves
+        format:NULL error:nil];
+    if (!plist) return NO;
+
+    BOOL modified = NO;
+
+    NSArray *urlTypes = plist[@"CFBundleURLTypes"];
+    if ([urlTypes isKindOfClass:[NSArray class]]) {
+        NSMutableArray *newTypes = [NSMutableArray array];
+        for (NSDictionary *t in urlTypes) {
+            NSArray *schemes = t[@"CFBundleURLSchemes"];
+            if ([schemes isKindOfClass:[NSArray class]] && [schemes containsObject:scheme]) {
+                NSMutableDictionary *nt = [t mutableCopy];
+                NSMutableArray *ns = [schemes mutableCopy];
+                [ns removeObject:scheme];
+                if (ns.count) {
+                    nt[@"CFBundleURLSchemes"] = ns;
+                    [newTypes addObject:nt];
+                }
+                modified = YES;
+            } else {
+                [newTypes addObject:t];
+            }
+        }
+        if (modified) plist[@"CFBundleURLTypes"] = newTypes;
+    }
+
+    NSArray *queries = plist[@"LSApplicationQueriesSchemes"];
+    if ([queries isKindOfClass:[NSArray class]] && [queries containsObject:scheme]) {
+        NSMutableArray *nq = [queries mutableCopy];
+        [nq removeObject:scheme];
+        plist[@"LSApplicationQueriesSchemes"] = nq;
+        modified = YES;
+    }
+
+    if (!modified) return NO;
+
+    NSString *backup = [infoPath stringByAppendingString:@".hideurl_backup"];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:backup]) {
+        [fm copyItemAtPath:infoPath toPath:backup error:nil];
+    }
+
+    NSData *out = [NSPropertyListSerialization dataWithPropertyList:plist
+        format:NSPropertyListXMLFormat_v1_0 options:0 error:nil];
+    return [out writeToFile:infoPath atomically:YES];
+}
+
+- (void)refreshLaunchServicesForPaths:(NSArray<NSString *> *)appPaths
+{
+    if (appPaths.count == 0) return;
+    NSString *uicache = [NSString stringWithUTF8String:JBROOT_PATH("/usr/bin/uicache")];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:uicache]) return;
+
+    for (NSString *appPath in appPaths) {
+        exec_cmd(uicache.fileSystemRepresentation, "-u", appPath.fileSystemRepresentation, NULL);
+        exec_cmd(uicache.fileSystemRepresentation, "-p", appPath.fileSystemRepresentation, NULL);
+    }
+}
+
+- (void)applyURLSchemeHiding:(NSDictionary *)targets useJbPath:(BOOL)useJb hide:(BOOL)hide
+{
+    NSMutableArray<NSString *> *modified = [NSMutableArray array];
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    for (NSString *appName in targets) {
+        NSString *appPath = useJb ? [self findJbAppPath:appName]
+                                   : [self findSysAppPath:appName];
+        if (!appPath) continue;
+
+        NSString *infoPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+        NSString *backup = [infoPath stringByAppendingString:@".hideurl_backup"];
+        BOOL any = NO;
+
+        if (hide) {
+            for (NSString *scheme in targets[appName]) {
+                if ([self hideURLSchemeInPlist:infoPath scheme:scheme]) any = YES;
+            }
+        } else {
+            if ([fm fileExistsAtPath:backup]) {
+                [fm removeItemAtPath:infoPath error:nil];
+                [fm copyItemAtPath:backup toPath:infoPath error:nil];
+                [fm removeItemAtPath:backup error:nil];
+                any = YES;
+            }
+        }
+
+        if (any) [modified addObject:appPath];
+    }
+
+    if (modified.count == 0) return;
+
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            [self refreshLaunchServicesForPaths:modified];
+        }];
+    }];
+}
 
 @end
