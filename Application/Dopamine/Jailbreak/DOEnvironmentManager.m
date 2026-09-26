@@ -1615,39 +1615,60 @@ extern char **environ;
 
 - (void)applyURLSchemeHiding:(NSDictionary *)targets useJbPath:(BOOL)useJb hide:(BOOL)hide
 {
-    NSMutableArray<NSString *> *modified = [NSMutableArray array];
-    NSFileManager *fm = [NSFileManager defaultManager];
-
-    for (NSString *appName in targets) {
-        NSString *appPath = useJb ? [self findJbAppPath:appName]
-                                   : [self findSysAppPath:appName];
-        if (!appPath) continue;
-
-        NSString *infoPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
-        NSString *backup = [infoPath stringByAppendingString:@".hideurl_backup"];
-        BOOL any = NO;
-
-        if (hide) {
-            for (NSString *scheme in targets[appName]) {
-                if ([self hideURLSchemeInPlist:infoPath scheme:scheme]) any = YES;
-            }
-        } else {
-            if ([fm fileExistsAtPath:backup]) {
-                [fm removeItemAtPath:infoPath error:nil];
-                [fm copyItemAtPath:backup toPath:infoPath error:nil];
-                [fm removeItemAtPath:backup error:nil];
-                any = YES;
-            }
-        }
-
-        if (any) [modified addObject:appPath];
-    }
-
-    if (modified.count == 0) return;
-
     [self runAsRoot:^{
         [self runUnsandboxed:^{
+            NSMutableArray<NSString *> *modified = [NSMutableArray array];
+            NSFileManager *fm = [NSFileManager defaultManager];
+
+            NSLog(@"[URLHide] start apply hide=%d useJb=%d targets=%lu",
+                  hide, useJb, (unsigned long)targets.count);
+
+            for (NSString *appName in targets) {
+                NSString *appPath = useJb ? [self findJbAppPath:appName]
+                                           : [self findSysAppPath:appName];
+                if (!appPath) {
+                    NSLog(@"[URLHide] app not found: %@", appName);
+                    continue;
+                }
+
+                NSString *infoPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+                if (![fm fileExistsAtPath:infoPath]) {
+                    NSLog(@"[URLHide] Info.plist not found: %@", infoPath);
+                    continue;
+                }
+
+                NSString *backup = [infoPath stringByAppendingString:@".hideurl_backup"];
+                BOOL any = NO;
+
+                if (hide) {
+                    for (NSString *scheme in targets[appName]) {
+                        if ([self hideURLSchemeInPlist:infoPath scheme:scheme]) {
+                            NSLog(@"[URLHide] hid %@ in %@", scheme, appPath);
+                            any = YES;
+                        } else {
+                            NSLog(@"[URLHide] failed to hide %@ in %@", scheme, appPath);
+                        }
+                    }
+                } else {
+                    if ([fm fileExistsAtPath:backup]) {
+                        [fm removeItemAtPath:infoPath error:nil];
+                        [fm copyItemAtPath:backup toPath:infoPath error:nil];
+                        [fm removeItemAtPath:backup error:nil];
+                        NSLog(@"[URLHide] restored %@", appPath);
+                        any = YES;
+                    }
+                }
+
+                if (any) [modified addObject:appPath];
+            }
+
+            if (modified.count == 0) {
+                NSLog(@"[URLHide] nothing modified");
+                return;
+            }
+
             [self refreshLaunchServicesForPaths:modified];
+            NSLog(@"[URLHide] refreshed %lu apps", (unsigned long)modified.count);
         }];
     }];
 }
