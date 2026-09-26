@@ -278,6 +278,22 @@
             [disableCrashReporterSpecifier setProperty:@"crashReporterDisabled" forKey:@"key"];
             [disableCrashReporterSpecifier setProperty:@NO forKey:@"default"];
             [specifiers addObject:disableCrashReporterSpecifier];
+PSSpecifier *hideJbURLSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Hide Jailbreak URL Schemes"
+    target:self set:@selector(setHideJailbreakURLSchemes:specifier:)
+    get:@selector(readHideJailbreakURLSchemes:) detail:nil cell:PSSwitchCell edit:nil];
+[hideJbURLSpecifier setProperty:@YES forKey:@"enabled"];
+[hideJbURLSpecifier setProperty:@"hideJailbreakURLSchemes" forKey:@"key"];
+[hideJbURLSpecifier setProperty:@NO forKey:@"default"];
+[specifiers addObject:hideJbURLSpecifier];
+
+PSSpecifier *hide3pURLSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Hide Third-Party URL Schemes"
+    target:self set:@selector(setHideThirdPartyURLSchemes:specifier:)
+    get:@selector(readHideThirdPartyURLSchemes:) detail:nil cell:PSSwitchCell edit:nil];
+[hide3pURLSpecifier setProperty:@YES forKey:@"enabled"];
+[hide3pURLSpecifier setProperty:@"hideOtherURLSchemes" forKey:@"key"];
+[hide3pURLSpecifier setProperty:@NO forKey:@"default"];
+[specifiers addObject:hide3pURLSpecifier];
+
             
             if (!envManager.isJailbroken && !envManager.isInstalledThroughTrollStore) {
                 PSSpecifier *removeJailbreakSwitchSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Button_Remove_Jailbreak") target:self set:@selector(setRemoveJailbreakEnabled:specifier:) get:defGetter detail:nil cell:PSSwitchCell edit:nil];
@@ -568,6 +584,26 @@
         [[NSFileManager defaultManager] removeItemAtPath:@"/var/mobile/.DopamineCrashReporterDisabled" error:nil];
         jbclient_platform_set_crashreporter_enabled(true);
     }
+}
+
+- (id)readHideJailbreakURLSchemes:(PSSpecifier *)specifier
+{
+    return @([[DOEnvironmentManager sharedManager] isHideJailbreakURLSchemesEnabled]);
+}
+
+- (void)setHideJailbreakURLSchemes:(id)value specifier:(PSSpecifier *)specifier
+{
+    [[DOEnvironmentManager sharedManager] setHideJailbreakURLSchemesEnabled:((NSNumber *)value).boolValue];
+}
+
+- (id)readHideThirdPartyURLSchemes:(PSSpecifier *)specifier
+{
+    return @([[DOEnvironmentManager sharedManager] isHideThirdPartyURLSchemesEnabled]);
+}
+
+- (void)setHideThirdPartyURLSchemes:(id)value specifier:(PSSpecifier *)specifier
+{
+    [[DOEnvironmentManager sharedManager] setHideThirdPartyURLSchemesEnabled:((NSNumber *)value).boolValue];
 }
 
 - (void)setRemoveJailbreakEnabled:(id)value specifier:(PSSpecifier *)specifier
