@@ -508,11 +508,6 @@ static void perform_hide(void)
     FILE *fp = fopen("/var/mobile/.DopamineCrashReporterDisabled", "w");
     if (fp) fclose(fp);
 
-    // 立即禁用 crashreporter（不只是写标记文件）
-    // 让目标 App 不再继承异常端口
-    // jbclient_platform_set_crashreporter_enabled(false);
-    // hide_log(@"crashreporter disabled immediately");
-
     // 2. 移走 forkfix
     NSString *forkfix = [jbroot stringByAppendingPathComponent:@"basebin/forkfix.dylib"];
     if ([[NSFileManager defaultManager] fileExistsAtPath:forkfix]) {
@@ -529,21 +524,26 @@ static void perform_hide(void)
     fp = fopen(safeMode.fileSystemRepresentation, "w");
     if (fp) fclose(fp);
 
-    // 4. 隐藏 URL Scheme
-    // hide_all_url_schemes();
+    // 4. 隐藏 URL scheme
+    // （如果有相关调用，保持这里）
 
-    // 5. 删除 /var/jb 符号链接
+    // 5. 解除 preboot 保护
+    run_jbctl_internal("protection", "deactivate");
+    hide_log(@"protection deactivated");
+
+    // 6. ★ 卸载 fakelib
+    run_jbctl_internal("fakelib", "unmount");
+    hide_log(@"fakelib unmounted");
+
+    // 7. 删除 /var/jb 符号链接
     unlink("/var/jb");
     hide_log(@"/var/jb removed");
 
-    // 6. Library Audit
+    // 8. Library Audit
     run_library_audit();
     hide_log(@"library audit done");
 
-    // 7. 禁用 systemwide domain
-
-
-    // 8. 写 monitor 隐藏标记
+    // 9. 写 monitor 隐藏标记
     FILE *mf = fopen(MONITOR_HIDE_MARKER, "w");
     if (mf) fclose(mf);
 
@@ -563,9 +563,8 @@ static void perform_unhide(void)
         return;
     }
 
-
-
     // 恢复 /var/jb 符号链接
+    unlink("/var/jb");
     if (symlink(jbroot.fileSystemRepresentation, "/var/jb") == 0) {
         hide_log(@"/var/jb restored");
     }
@@ -574,8 +573,13 @@ static void perform_unhide(void)
     restore_items();
     hide_log(@"library restored");
 
-    // 恢复 URL Scheme
-    // restore_all_url_schemes();
+    // ★ 重新挂载 fakelib
+    run_jbctl_internal("fakelib", "mount");
+    hide_log(@"fakelib mounted");
+
+    // 恢复 preboot 保护
+    run_jbctl_internal("protection", "activate");
+    hide_log(@"protection activated");
 
     // 恢复 forkfix
     NSString *forkfixDst = [@HIDE_QUARANTINE stringByAppendingPathComponent:@"forkfix.dylib"];
@@ -590,10 +594,6 @@ static void perform_unhide(void)
 
     // 删除 crash reporter 禁用标记
     unlink("/var/mobile/.DopamineCrashReporterDisabled");
-
-    // 恢复 crashreporter
-    // jbclient_platform_set_crashreporter_enabled(true);
-    // hide_log(@"crashreporter re-enabled");
 
     // 删除 monitor 隐藏标记
     unlink(MONITOR_HIDE_MARKER);
