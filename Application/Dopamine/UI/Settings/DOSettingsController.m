@@ -281,49 +281,6 @@
             }
 
             if (envManager.isBootstrapped) {
-                // ===== Hide Settings 分组 =====
-                PSSpecifier *hideSettingsGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
-                hideSettingsGroupSpecifier.name = @"Hide Settings";
-                [specifiers addObject:hideSettingsGroupSpecifier];
-
-                PSSpecifier *hideJbURLSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Hide Jailbreak URL Schemes"
-                    target:self set:@selector(setHideJailbreakURLSchemes:specifier:)
-                    get:@selector(readHideJailbreakURLSchemes:) detail:nil cell:PSSwitchCell edit:nil];
-                [hideJbURLSpecifier setProperty:@YES forKey:@"enabled"];
-                [hideJbURLSpecifier setProperty:@"hideJailbreakURLSchemes" forKey:@"key"];
-                [hideJbURLSpecifier setProperty:@NO forKey:@"default"];
-                [specifiers addObject:hideJbURLSpecifier];
-
-                PSSpecifier *hide3pURLSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Hide Third-Party URL Schemes"
-                    target:self set:@selector(setHideThirdPartyURLSchemes:specifier:)
-                    get:@selector(readHideThirdPartyURLSchemes:) detail:nil cell:PSSwitchCell edit:nil];
-                [hide3pURLSpecifier setProperty:@YES forKey:@"enabled"];
-                [hide3pURLSpecifier setProperty:@"hideOtherURLSchemes" forKey:@"key"];
-                [hide3pURLSpecifier setProperty:@NO forKey:@"default"];
-                [specifiers addObject:hide3pURLSpecifier];
-
-                PSSpecifier *disableCrashReporterSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Disable Crash Reporter" target:self set:@selector(setCrashReporterDisabled:specifier:) get:@selector(readCrashReporterDisabled:) detail:nil cell:PSSwitchCell edit:nil];
-                [disableCrashReporterSpecifier setProperty:@YES forKey:@"enabled"];
-                [disableCrashReporterSpecifier setProperty:@"crashReporterDisabled" forKey:@"key"];
-                [disableCrashReporterSpecifier setProperty:@NO forKey:@"default"];
-                [specifiers addObject:disableCrashReporterSpecifier];
-
-                PSSpecifier *injectionBlockSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
-                [injectionBlockSpecifier setProperty:@"Block App Injection" forKey:@"title"];
-                [injectionBlockSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
-                [injectionBlockSpecifier setProperty:buttonHeight forKey:@"height"];
-                [injectionBlockSpecifier setProperty:@"shield.slash" forKey:@"image"];
-                [injectionBlockSpecifier setProperty:@"injectionBlockPressed" forKey:@"action"];
-                [specifiers addObject:injectionBlockSpecifier];
-
-                PSSpecifier *appHideSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
-                [appHideSpecifier setProperty:@"Hide for App" forKey:@"title"];
-                [appHideSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
-                [appHideSpecifier setProperty:buttonHeight forKey:@"height"];
-                [appHideSpecifier setProperty:@"eye.slash.circle" forKey:@"image"];
-                [appHideSpecifier setProperty:@"appHidePressed" forKey:@"action"];
-                [specifiers addObject:appHideSpecifier];
-
                 // ===== Actions 分组 =====
                 PSSpecifier *actionsGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
                 actionsGroupSpecifier.name = DOLocalizedString(@"Section_Actions");
@@ -396,6 +353,49 @@
                 if (hideJailbreakButtonShown) {
                     [actionsGroupSpecifier setProperty:DOLocalizedString(envManager.isJailbroken ? @"Hint_Hide_Jailbreak_Jailbroken" : @"Hint_Hide_Jailbreak") forKey:@"footerText"];
                 }
+
+                // ===== Hide Settings 分组 =====
+                PSSpecifier *hideSettingsGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
+                hideSettingsGroupSpecifier.name = @"Hide Settings";
+                [specifiers addObject:hideSettingsGroupSpecifier];
+
+                PSSpecifier *hideJbURLSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Hide Jailbreak Schemes"
+                    target:self set:@selector(setHideJailbreakURLSchemes:specifier:)
+                    get:@selector(readHideJailbreakURLSchemes:) detail:nil cell:PSSwitchCell edit:nil];
+                [hideJbURLSpecifier setProperty:@YES forKey:@"enabled"];
+                [hideJbURLSpecifier setProperty:@"hideJailbreakURLSchemes" forKey:@"key"];
+                [hideJbURLSpecifier setProperty:@NO forKey:@"default"];
+                [specifiers addObject:hideJbURLSpecifier];
+
+                PSSpecifier *hide3pURLSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Hide App Schemes"
+                    target:self set:@selector(setHideThirdPartyURLSchemes:specifier:)
+                    get:@selector(readHideThirdPartyURLSchemes:) detail:nil cell:PSSwitchCell edit:nil];
+                [hide3pURLSpecifier setProperty:@YES forKey:@"enabled"];
+                [hide3pURLSpecifier setProperty:@"hideOtherURLSchemes" forKey:@"key"];
+                [hide3pURLSpecifier setProperty:@NO forKey:@"default"];
+                [specifiers addObject:hide3pURLSpecifier];
+
+                PSSpecifier *disableCrashReporterSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Disable Crash Reporter" target:self set:@selector(setCrashReporterDisabled:specifier:) get:@selector(readCrashReporterDisabled:) detail:nil cell:PSSwitchCell edit:nil];
+                [disableCrashReporterSpecifier setProperty:@YES forKey:@"enabled"];
+                [disableCrashReporterSpecifier setProperty:@"crashReporterDisabled" forKey:@"key"];
+                [disableCrashReporterSpecifier setProperty:@NO forKey:@"default"];
+                [specifiers addObject:disableCrashReporterSpecifier];
+
+                PSSpecifier *injectionBlockSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                [injectionBlockSpecifier setProperty:@"Block App Injection" forKey:@"title"];
+                [injectionBlockSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                [injectionBlockSpecifier setProperty:buttonHeight forKey:@"height"];
+                [injectionBlockSpecifier setProperty:@"shield.slash" forKey:@"image"];
+                [injectionBlockSpecifier setProperty:@"injectionBlockPressed" forKey:@"action"];
+                [specifiers addObject:injectionBlockSpecifier];
+
+                PSSpecifier *appHideSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                [appHideSpecifier setProperty:@"Hide for App" forKey:@"title"];
+                [appHideSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                [appHideSpecifier setProperty:buttonHeight forKey:@"height"];
+                [appHideSpecifier setProperty:@"eye.slash.circle" forKey:@"image"];
+                [appHideSpecifier setProperty:@"appHidePressed" forKey:@"action"];
+                [specifiers addObject:appHideSpecifier];
             }
         }
         
