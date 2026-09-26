@@ -274,7 +274,7 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 		app_hide_perform_hide_sync();
 		return r;
 	}
-	}
+
 
 
 	return posix_spawn_hook_shared(pid, path, desc, argv, envp, __posix_spawn_orig_wrapper, systemwide_trust_file_by_path, platform_set_process_debugged, jbsetting(jetsamMultiplier));
