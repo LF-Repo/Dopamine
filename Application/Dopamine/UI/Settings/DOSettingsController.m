@@ -272,28 +272,6 @@
             [jetsamSpecifier setProperty:@"jetsamOptionNumbers" forKey:@"valuesDataSource"];
             [jetsamSpecifier setProperty:@"jetsamOptionTitles" forKey:@"titlesDataSource"];
             [specifiers addObject:jetsamSpecifier];
-
-            PSSpecifier *disableCrashReporterSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Disable Crash Reporter" target:self set:@selector(setCrashReporterDisabled:specifier:) get:@selector(readCrashReporterDisabled:) detail:nil cell:PSSwitchCell edit:nil];
-            [disableCrashReporterSpecifier setProperty:@YES forKey:@"enabled"];
-            [disableCrashReporterSpecifier setProperty:@"crashReporterDisabled" forKey:@"key"];
-            [disableCrashReporterSpecifier setProperty:@NO forKey:@"default"];
-            [specifiers addObject:disableCrashReporterSpecifier];
-PSSpecifier *hideJbURLSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Hide Jailbreak URL Schemes"
-    target:self set:@selector(setHideJailbreakURLSchemes:specifier:)
-    get:@selector(readHideJailbreakURLSchemes:) detail:nil cell:PSSwitchCell edit:nil];
-[hideJbURLSpecifier setProperty:@YES forKey:@"enabled"];
-[hideJbURLSpecifier setProperty:@"hideJailbreakURLSchemes" forKey:@"key"];
-[hideJbURLSpecifier setProperty:@NO forKey:@"default"];
-[specifiers addObject:hideJbURLSpecifier];
-
-PSSpecifier *hide3pURLSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Hide Third-Party URL Schemes"
-    target:self set:@selector(setHideThirdPartyURLSchemes:specifier:)
-    get:@selector(readHideThirdPartyURLSchemes:) detail:nil cell:PSSwitchCell edit:nil];
-[hide3pURLSpecifier setProperty:@YES forKey:@"enabled"];
-[hide3pURLSpecifier setProperty:@"hideOtherURLSchemes" forKey:@"key"];
-[hide3pURLSpecifier setProperty:@NO forKey:@"default"];
-[specifiers addObject:hide3pURLSpecifier];
-
             
             if (!envManager.isJailbroken && !envManager.isInstalledThroughTrollStore) {
                 PSSpecifier *removeJailbreakSwitchSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Button_Remove_Jailbreak") target:self set:@selector(setRemoveJailbreakEnabled:specifier:) get:defGetter detail:nil cell:PSSwitchCell edit:nil];
@@ -303,9 +281,32 @@ PSSpecifier *hide3pURLSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Hide T
             }
 
             if (envManager.isBootstrapped) {
-                PSSpecifier *actionsGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
-                actionsGroupSpecifier.name = DOLocalizedString(@"Section_Actions");
-                [specifiers addObject:actionsGroupSpecifier];
+                // ===== Hide Settings 分组 =====
+                PSSpecifier *hideSettingsGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
+                hideSettingsGroupSpecifier.name = @"Hide Settings";
+                [specifiers addObject:hideSettingsGroupSpecifier];
+
+                PSSpecifier *hideJbURLSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Hide Jailbreak URL Schemes"
+                    target:self set:@selector(setHideJailbreakURLSchemes:specifier:)
+                    get:@selector(readHideJailbreakURLSchemes:) detail:nil cell:PSSwitchCell edit:nil];
+                [hideJbURLSpecifier setProperty:@YES forKey:@"enabled"];
+                [hideJbURLSpecifier setProperty:@"hideJailbreakURLSchemes" forKey:@"key"];
+                [hideJbURLSpecifier setProperty:@NO forKey:@"default"];
+                [specifiers addObject:hideJbURLSpecifier];
+
+                PSSpecifier *hide3pURLSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Hide Third-Party URL Schemes"
+                    target:self set:@selector(setHideThirdPartyURLSchemes:specifier:)
+                    get:@selector(readHideThirdPartyURLSchemes:) detail:nil cell:PSSwitchCell edit:nil];
+                [hide3pURLSpecifier setProperty:@YES forKey:@"enabled"];
+                [hide3pURLSpecifier setProperty:@"hideOtherURLSchemes" forKey:@"key"];
+                [hide3pURLSpecifier setProperty:@NO forKey:@"default"];
+                [specifiers addObject:hide3pURLSpecifier];
+
+                PSSpecifier *disableCrashReporterSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Disable Crash Reporter" target:self set:@selector(setCrashReporterDisabled:specifier:) get:@selector(readCrashReporterDisabled:) detail:nil cell:PSSwitchCell edit:nil];
+                [disableCrashReporterSpecifier setProperty:@YES forKey:@"enabled"];
+                [disableCrashReporterSpecifier setProperty:@"crashReporterDisabled" forKey:@"key"];
+                [disableCrashReporterSpecifier setProperty:@NO forKey:@"default"];
+                [specifiers addObject:disableCrashReporterSpecifier];
 
                 PSSpecifier *injectionBlockSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
                 [injectionBlockSpecifier setProperty:@"Block App Injection" forKey:@"title"];
@@ -322,6 +323,11 @@ PSSpecifier *hide3pURLSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Hide T
                 [appHideSpecifier setProperty:@"eye.slash.circle" forKey:@"image"];
                 [appHideSpecifier setProperty:@"appHidePressed" forKey:@"action"];
                 [specifiers addObject:appHideSpecifier];
+
+                // ===== Actions 分组 =====
+                PSSpecifier *actionsGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
+                actionsGroupSpecifier.name = DOLocalizedString(@"Section_Actions");
+                [specifiers addObject:actionsGroupSpecifier];
 
                 if (envManager.isJailbroken) {
                     PSSpecifier *refreshAppsSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
