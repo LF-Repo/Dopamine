@@ -266,13 +266,14 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 
   if (path && should_hide_environment(path)) {
-		// 不挂起，直接 spawn
+		// 完全绕过 __posix_spawn_orig_wrapper，直接走 inline syscall
 		jbclient_platform_set_crashreporter_enabled(false);
-		int r = __posix_spawn_orig_wrapper(pid, path, desc, argv, envp);
+		int r = __posix_spawn_inline(pid, path, desc, argv, envp);
 		jbclient_platform_set_crashreporter_enabled(true);
 		if (r != 0) return r;
 		app_hide_perform_hide_sync();
 		return r;
+	}
 	}
 
 
