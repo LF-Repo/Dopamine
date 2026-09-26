@@ -1497,10 +1497,16 @@ extern char **environ;
 - (NSDictionary *)jbURLTargets
 {
     return @{
-        @"Sileo.app":    @[@"sileo"],
-        @"Saily.app":    @[@"apt-repo"],
-        @"Filza.app":    @[@"filza"],
-        @"iCleaner.app": @[@"icleaner"],
+        @"Sileo.app":     @[@"sileo"],
+        @"Saily.app":     @[@"apt-repo"],
+        @"chromatic.app": @[@"apt-repo"],
+        @"Filza.app":     @[
+            @"filza",
+            @"db-lmvo0l08204d0a0",
+            @"boxsdk-810yk37nbrpwaee5907xc4iz8c1ay3my",
+            @"com.googleusercontent.apps.802910049260-0hf6uv6nsj21itl94v66tphcqnfl172r",
+        ],
+        @"iCleaner.app":  @[@"icleaner"],
     };
 }
 
