@@ -5,5 +5,6 @@
 
 void start_app_hide_monitor(void);
 void app_hide_perform_hide_sync(void);
+void apply_url_scheme_hiding_from_prefs(void);
 
 #endif
