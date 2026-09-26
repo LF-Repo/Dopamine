@@ -212,38 +212,9 @@ static int exec_cmd_wrapper(const char *path, const char *arg1, const char *arg2
 
 static void run_jbctl_internal(const char *cmd1, const char *cmd2)
 {
-    NSString *jbroot = jbroot_str();
-    if (!jbroot) {
-        hide_log(@"run_jbctl_internal: no jbroot");
-        return;
-    }
-    NSString *jbctl = [jbroot stringByAppendingPathComponent:@"basebin/jbctl"];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:jbctl]) {
-        hide_log(@"run_jbctl_internal: jbctl not found at %@", jbctl);
-        return;
-    }
-
-    const char *argv[6];
-    int idx = 0;
-    argv[idx++] = jbctl.fileSystemRepresentation;
-    argv[idx++] = "internal";
-    argv[idx++] = cmd1;
-    if (cmd2) argv[idx++] = cmd2;
-    argv[idx++] = NULL;
-
-    pid_t pid = 0;
-    int r = __posix_spawn_inline(&pid, jbctl.fileSystemRepresentation,
-                                 NULL, (char *const *)argv, environ);
-    if (r != 0) {
-        hide_log(@"run_jbctl_internal: spawn failed %d", r);
-        return;
-    }
-
-    int status = 0;
-    waitpid(pid, &status, 0);
-
-    int exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-    hide_log(@"jbctl %s %s -> exit %d", cmd1, cmd2 ?: "(nil)", exitCode);
+    mach_port_t port = jbserver_local_start();
+    jbctl_earlyboot(port, "internal", cmd1, cmd2, NULL);
+    jbserver_local_stop();
 }
 
 #pragma mark - URL Scheme 隐藏
@@ -636,7 +607,7 @@ static void perform_unhide(void)
 static bool gActionInProgress = false;
 
 static time_t gLastTargetSeen = 0;
-static const int UNHIDE_GRACE_SECONDS = 20;
+static const int UNHIDE_GRACE_SECONDS = 5;
 
 static void *monitor_thread(void *arg)
 {
