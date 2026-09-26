@@ -93,6 +93,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)isEnvironmentHiddenForBundleID:(NSString *)bundleID;
 - (void)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID;
 - (NSArray<NSString *> *)allEnvironmentHiddenBundleIDs;
+
+- (BOOL)isHideJailbreakURLSchemesEnabled;
+- (void)setHideJailbreakURLSchemesEnabled:(BOOL)enabled;
+- (BOOL)isHideThirdPartyURLSchemesEnabled;
+- (void)setHideThirdPartyURLSchemesEnabled:(BOOL)enabled;
 @end
 
 NS_ASSUME_NONNULL_END
