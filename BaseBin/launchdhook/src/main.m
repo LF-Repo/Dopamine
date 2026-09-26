@@ -200,7 +200,7 @@ __attribute__((constructor)) static void initializer(void)
 	if (!firstLoad) {
 		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10ull * NSEC_PER_SEC),
 					   dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
-			// start_app_hide_monitor();
+			start_app_hide_monitor();
 		});
 	}
 }
