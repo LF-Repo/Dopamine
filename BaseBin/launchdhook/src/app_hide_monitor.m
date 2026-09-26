@@ -173,15 +173,27 @@ static void hide_item(NSString *src)
 static void restore_items(void)
 {
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *map = load_map();
+    NSArray *map = [NSArray arrayWithContentsOfFile:map_path()];
+    if (!map) return;
+
     for (NSDictionary *entry in [map reverseObjectEnumerator]) {
         NSString *src = entry[@"src"];
         NSString *dst = entry[@"dst"];
         if (!src || !dst) continue;
-        if ([fm fileExistsAtPath:src]) continue;
+        if (![fm fileExistsAtPath:dst]) continue;
+
         [fm createDirectoryAtPath:[src stringByDeletingLastPathComponent]
       withIntermediateDirectories:YES attributes:nil error:nil];
-        [fm moveItemAtPath:dst toPath:src error:nil];
+
+        // ★ 关键改动：如果 src 已存在（被 App 重写了），删掉它，用隔离区的原始文件覆盖
+        if ([fm fileExistsAtPath:src]) {
+            [fm removeItemAtPath:src error:nil];
+        }
+
+        NSError *err = nil;
+        if (![fm moveItemAtPath:dst toPath:src error:&err]) {
+            hide_log(@"restore failed: %@ (%@)", src, err.localizedDescription);
+        }
     }
     [fm removeItemAtPath:map_path() error:nil];
 }
