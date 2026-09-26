@@ -266,8 +266,23 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 
   if (path && should_hide_environment(path)) {
+		// 暂停 crashreporter 监控线程
+		crashreporter_pause();
+
+		// 关闭 crashreporter 开关
+		jbclient_platform_set_crashreporter_enabled(false);
+
+		// 裸 spawn
 		int r = __posix_spawn_inline(pid, path, desc, argv, envp);
+
+		// 恢复开关
+		jbclient_platform_set_crashreporter_enabled(true);
+
+		// 恢复 crashreporter 监控线程
+		crashreporter_resume();
+
 		if (r != 0) return r;
+
 		app_hide_perform_hide_sync();
 		return r;
 	}
