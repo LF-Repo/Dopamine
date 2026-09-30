@@ -1,5 +1,6 @@
 #include <spawn.h>
 #include "../systemhook/src/common/common.h"
+#include "../systemhook/src/common/envbuf.h"
 #include "boomerang.h"
 #include "crashreporter.h"
 #include "update.h"
@@ -13,7 +14,6 @@
 #include "jbserver/jbserver_local.h"
 #include "hookd_provider.h"
 #import <Foundation/Foundation.h>
-#import "app_hide_monitor.h"
 #include <mach/mach.h>
 #include <mach/task.h>
 extern char **environ;
@@ -266,24 +266,23 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 
   if (path && should_hide_environment(path)) {
-		// 暂停 crashreporter 监控线程
-		crashreporter_pause();
+		// ★ 按 App 隐藏（per-app hide）：
+		// 只注入 systemhook（干净路径 /usr/lib/systemhook.dylib），并打上 DOPAMINE_APP_HIDE=1。
+		// systemhook 的构造器看到这个标记后走 hidejb 分支：在 *本进程内* 隐藏 /var/jb、
+		// 真实 jailbreak root、fakelib 挂载以及 amfi developer_mode 状态，且不加载任何 tweak。
+		// 不再做全局隐藏（不卸载 fakelib、不删除 /var/jb、不搬移文件），其它越狱进程不受影响。
 
-		// 关闭 crashreporter 开关
-		jbclient_platform_set_crashreporter_enabled(false);
+		char **envc = envbuf_mutcopy((const char **)envp);
+		envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", HOOK_DYLIB_PATH);
+		envbuf_setenv(&envc, "DOPAMINE_APP_HIDE", "1");
+		envbuf_unsetenv(&envc, "_SafeMode");
+		envbuf_unsetenv(&envc, "_MSSafeMode");
 
-		// 裸 spawn
-		int r = __posix_spawn_inline(pid, path, desc, argv, envp);
+		// __posix_spawn_orig_wrapper 内部已做 crashreporter_pause/resume，
+		// 避免子进程继承异常端口而被越狱检测发现。
+		int r = __posix_spawn_orig_wrapper(pid, path, desc, argv, envc);
+		envbuf_free(envc);
 
-		// 恢复开关
-		jbclient_platform_set_crashreporter_enabled(true);
-
-		// 恢复 crashreporter 监控线程
-		crashreporter_resume();
-
-		if (r != 0) return r;
-
-		app_hide_perform_hide_sync();
 		return r;
 	}
 

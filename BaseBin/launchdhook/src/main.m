@@ -200,7 +200,10 @@ __attribute__((constructor)) static void initializer(void)
 	if (!firstLoad) {
 		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10ull * NSEC_PER_SEC),
 					   dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
-			start_app_hide_monitor();
+			// 按偏好隐藏越狱 App 的 URL scheme（独立功能）。
+			// 原全局隐藏监视线程已移除——"Hide for App" 现在由 spawn_hook 按进程注入
+			// systemhook 的 hidejb 分支实现（见 spawn_hook.m / systemhook/src/hidejb.c）。
+			apply_url_scheme_hiding_from_prefs();
 		});
 	}
 }
