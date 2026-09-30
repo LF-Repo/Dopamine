@@ -19,6 +19,7 @@
 #include "sandbox.h"
 #include "common/private.h"
 #include "common/inline.h"
+#include "hidejb.h"
 
 
 bool gFullyDebugged = false;
@@ -417,6 +418,23 @@ __attribute__((constructor)) static void initializer(void)
 
 		*posix_spawn_with_filter = __posix_spawn_hook_with_filter;
 		*execve_with_filter      = __execve_hook;
+	}
+
+	// If launchdhook spawned us as a "hidden" app (DOPAMINE_APP_HIDE=1), install
+	// per-process filesystem/sysctl hiding and stop here: we must NOT load tweaks,
+	// hook csops/necp, load rootlesshooks, etc. The posix_spawn/execve hooks above
+	// are still installed so children keep inheriting hide mode (DOPAMINE_APP_HIDE
+	// stays in environ and systemhook is re-inserted into the child's env).
+	if (hidejb_enabled()) {
+		hidejb_init(JB_RootPath);
+#ifdef __arm64e__
+		// litehook just modified code pages (hidejb's file hooks); on arm64e forking
+		// such a process needs forkfix, same as the normal injection path below.
+		if (sandbox_check(getpid(), "process-fork", SANDBOX_CHECK_NO_REPORT, NULL) == 0) {
+			dlopen(JBROOT_PATH("/basebin/forkfix.dylib"), RTLD_NOW);
+		}
+#endif
+		return;
 	}
 
 	// Hook the dyld_shared_cache __fcntl to jump to the dyld __fcntl instead
