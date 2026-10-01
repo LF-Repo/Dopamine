@@ -41,9 +41,13 @@
 #include <sys/sysctl.h>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
+#include <mach-o/dyld_images.h>
 #include <mach-o/loader.h>
 #include <mach/mach.h>
 #include <mach/task.h>
+#include <mach/task_info.h>
+#include <mach/mach_vm.h>
+#include <mach/vm_region.h>
 #include <dispatch/dispatch.h>
 #include <libjailbreak/codesign.h>
 #include <objc/runtime.h>
@@ -150,18 +154,44 @@ static DIR *hidejb_opendir(const char *dirname)
 	return orig_opendir(dirname);
 }
 
+// NOTE: resolving the directory path with fcntl(F_GETPATH) on *every* entry was
+// a disaster: F_GETPATH is a syscall and fcntl is itself hooked by dyld's
+// MachOMerger, so directory iteration (which Foundation does constantly while
+// loading bundles) became ~30x slower and tripped the launch watchdog on big
+// apps (QQ used 31s of CPU with only 1s of it in the app itself).
+// We now resolve it once per DIR and skip filtering entirely for directories
+// that cannot contain hidden entries.
+static DIR *gLastDirp = NULL;
+static bool gLastDirFilter = false;
+static char gLastDirPath[PATH_MAX] = {0};
+
 static struct dirent *(*orig_readdir)(DIR *);
 static struct dirent *hidejb_readdir(DIR *dirp)
 {
 	if (!gEnabled || !dirp) return orig_readdir(dirp);
 
-	int fd = dirfd(dirp);
-	if (fd < 0) return orig_readdir(dirp);
+	if (dirp != gLastDirp) {
+		gLastDirp = dirp;
+		gLastDirFilter = false;
+		gLastDirPath[0] = '\0';
+		int fd = dirfd(dirp);
+		if (fd >= 0) {
+			char p[PATH_MAX] = {0};
+			if (fcntl(fd, F_GETPATH, p) == 0 && p[0]) {
+				strlcpy(gLastDirPath, p, sizeof(gLastDirPath));
+				gLastDirFilter = hidejb_rules_dir_may_hide_entries(p);
+			}
+		}
+	}
+	if (!gLastDirFilter) return orig_readdir(dirp);
 
-	char dirpath[PATH_MAX] = {0};
-	if (fcntl(fd, F_GETPATH, dirpath) != 0) return orig_readdir(dirp);
+	// Copy once (not per entry) so a concurrent readdir on another DIR cannot
+	// rewrite the cached path while we are filtering entries of this one.
+	char dirpath[PATH_MAX];
+	strlcpy(dirpath, gLastDirPath, sizeof(dirpath));
+	if (!dirpath[0]) return orig_readdir(dirp);
 
-	while (1) {
+	for (;;) {
 		struct dirent *e = orig_readdir(dirp);
 		if (!e) return NULL;
 		char full[PATH_MAX * 2];
@@ -223,6 +253,58 @@ static const char *hidejb_dyld_get_image_name(uint32_t index)
 	return orig_dyld_get_image_name(index);
 }
 
+// --- dyld_all_image_infos patching (the RootHide trick) ---------------------
+// Hooking _dyld_get_image_name only fools callers that go through that one
+// accessor. A detector that reads dyld_all_image_infos directly (through
+// task_info(TASK_DYLD_INFO) or _dyld_get_all_image_infos()) still sees the
+// injected dylibs, which is how the anti-tamper SDKs find the injection.
+// So we ALSO rewrite the path pointer inside dyld's own info array, i.e. we
+// change the data rather than the accessor. We verify the memory is writable
+// first and bail out entirely if anything looks unexpected.
+
+static bool hidejb_range_is_writable(const void *addr, size_t size)
+{
+	if (!addr || !size) return false;
+
+	vm_address_t regionAddr = (vm_address_t)addr;
+	vm_size_t regionSize = 0;
+	vm_region_basic_info_data_64_t info;
+	mach_msg_type_number_t infoCount = VM_REGION_BASIC_INFO_COUNT_64;
+	mach_port_t objectName = MACH_PORT_NULL;
+	kern_return_t kr = mach_vm_region(mach_task_self_, &regionAddr, &regionSize,
+									  VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
+									  &infoCount, &objectName);
+	if (objectName != MACH_PORT_NULL) mach_port_deallocate(mach_task_self_, objectName);
+	if (kr != KERN_SUCCESS) return false;
+	if (!(info.protection & VM_PROT_WRITE)) return false;
+
+	vm_address_t start = (vm_address_t)addr;
+	return start >= regionAddr && (start + size) <= (regionAddr + regionSize);
+}
+
+static void hidejb_patch_all_image_infos(void)
+{
+	task_dyld_info_data_t dyldInfo;
+	uint32_t count = TASK_DYLD_INFO_COUNT;
+	if (task_info(mach_task_self_, TASK_DYLD_INFO, (task_info_t)&dyldInfo, &count) != KERN_SUCCESS) return;
+
+	struct dyld_all_image_infos *infos = (struct dyld_all_image_infos *)dyldInfo.all_image_info_addr;
+	if (!infos || !infos->infoArray || infos->infoArrayCount == 0) return;
+	if (infos->infoArrayCount > 8192) return;
+
+	size_t arrSize = sizeof(struct dyld_image_info) * infos->infoArrayCount;
+	if (!hidejb_range_is_writable(infos->infoArray, arrSize)) return;
+
+	struct dyld_image_info *arr = (struct dyld_image_info *)infos->infoArray;
+	for (uint32_t i = 0; i < infos->infoArrayCount; i++) {
+		const char *p = arr[i].imageFilePath;
+		if (!p) continue;
+		if (hidejb_rules_path_has_marker(p)) {
+			arr[i].imageFilePath = "/usr/lib/libSystem.B.dylib";
+		}
+	}
+}
+
 #pragma mark - dlopen / dladdr (hide the injected dylibs)
 
 static void *(*orig_dlopen)(const char *, int);
@@ -235,7 +317,11 @@ static void *hidejb_dlopen(const char *path, int mode)
 			return NULL;
 		}
 	}
-	return orig_dlopen(path, mode);
+	void *result = orig_dlopen(path, mode);
+	// Adding an image makes dyld rebuild/reallocate its info array, which would
+	// undo the path rewrite below, so re-apply it after every dlopen.
+	if (gEnabled) hidejb_patch_all_image_infos();
+	return result;
 }
 
 static int (*orig_dladdr)(const void *, Dl_info *);
@@ -401,6 +487,10 @@ void hidejb_init(const char *jbroot)
 			}
 		}
 	}
+
+	// Rewrite the paths inside dyld's own image array as well, so detectors that
+	// bypass _dyld_get_image_name still cannot see the injected dylibs.
+	hidejb_patch_all_image_infos();
 
 	// ★ Instruction-replace the shared-cache functions (MSHookFunction) so that
 	// ALL callers — including Foundation/UIKit internals — go through our hooks.

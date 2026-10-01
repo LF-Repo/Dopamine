@@ -209,6 +209,14 @@ static const char *gJailbreakPathMarkers[] = {
 	".installed_dopamine",
 };
 
+// NOTE: this function runs on *every* file syscall in a hidden process
+// (stat/access/fopen/opendir/readdir/realpath/...), so it is deliberately a
+// straight sequence of cheap rejects that bail out as early as possible. An
+// earlier version ran a 13-marker strstr() scan plus a 13-rule loop over the
+// full path for every call; because this file is compiled -O0 (see below), that
+// cost ~90us per call and made large apps (QQ: 195MB binary, hundreds of
+// bundles) spend 31s of CPU in the hooks during launch, tripping the
+// scene-create watchdog (0x8BADF00D).
 bool __attribute__((optnone)) hidejb_rules_path_is_jailbreak(const char *path)
 {
 	if (!path || path[0] != '/') return false;
@@ -218,29 +226,81 @@ bool __attribute__((optnone)) hidejb_rules_path_is_jailbreak(const char *path)
 	// (which use /var/...) still match.
 	if (strncmp(path, "/private/var/", 13) == 0) path += 8;
 
-	if (strcmp(path, "/var/jb") == 0) return true;
-	if (strncmp(path, "/var/jb/", 8) == 0) return true;
+	// ---- hot-path fast rejects -------------------------------------------------
+	// These subtrees can never match a hide rule (all rules live under
+	// /var/mobile) and never contain a jailbreak library.
+	if (strncmp(path, "/var/containers/", 16) == 0) return false; // app bundles
+	if (strncmp(path, "/System/", 8) == 0) return false;
+	if (strncmp(path, "/Applications/", 14) == 0) return false;
+	if (strncmp(path, "/Developer/", 11) == 0) return false;
 
+	// /var/jb
+	if (path[1] == 'v' && path[2] == 'a' && path[3] == 'r' && path[4] == '/' &&
+	    path[5] == 'j' && path[6] == 'b' && (path[7] == '/' || path[7] == '\0')) return true;
+
+	// The real jbroot always lives under /private/preboot.
+	if (strncmp(path, "/private/preboot", 16) == 0) return true;
 	if (gJbRootReal[0]) {
 		size_t n = strlen(gJbRootReal);
 		if (strncmp(path, gJbRootReal, n) == 0 && (path[n] == '/' || path[n] == '\0')) return true;
 	}
 
-	const char *p = path;
-	while (*p) {
-		const char *slash = strchr(p, '/');
-		size_t len = slash ? (size_t)(slash - p) : strlen(p);
-		if (len == 9 && strncmp(p, "procursus", 9) == 0) return true;
-		if (!slash) break;
-		p = slash + 1;
+	// The fakelib bind mount makes the jailbreak dylibs show up in /usr/lib.
+	// Only the basename can carry a marker, so check that instead of scanning
+	// the whole path 13 times.
+	if (strncmp(path, "/usr/lib/", 9) == 0) {
+		const char *base = strrchr(path, '/');
+		base = base ? base + 1 : path;
+		for (size_t i = 0; i < sizeof(gJailbreakPathMarkers)/sizeof(gJailbreakPathMarkers[0]); i++) {
+			if (strstr(base, gJailbreakPathMarkers[i])) return true;
+		}
+		return false;
 	}
 
+	// Every hide rule is under /var/mobile.
+	if (strncmp(path, "/var/mobile/", 12) == 0) return path_is_blacklisted_by_rules(path);
+
+	// Anything else (rare): only an embedded jailbreak marker matters.
 	for (size_t i = 0; i < sizeof(gJailbreakPathMarkers)/sizeof(gJailbreakPathMarkers[0]); i++) {
 		if (strstr(path, gJailbreakPathMarkers[i])) return true;
 	}
+	return false;
+}
 
-	if (path_is_blacklisted_by_rules(path)) return true;
+// True when the basename of `path` carries a jailbreak marker.
+bool __attribute__((optnone)) hidejb_rules_path_has_marker(const char *path)
+{
+	if (!path || !path[0]) return false;
+	const char *base = strrchr(path, '/');
+	base = base ? base + 1 : path;
+	for (size_t i = 0; i < sizeof(gJailbreakPathMarkers)/sizeof(gJailbreakPathMarkers[0]); i++) {
+		if (strstr(base, gJailbreakPathMarkers[i])) return true;
+	}
+	return false;
+}
 
+// True when `dirpath` is a directory that could contain entries which
+// hidejb_rules_path_is_jailbreak() would hide. The readdir hook uses this to
+// skip entry filtering (and the per-directory fcntl) for all other directories,
+// which is the overwhelming majority.
+bool __attribute__((optnone)) hidejb_rules_dir_may_hide_entries(const char *dirpath)
+{
+	if (!dirpath || dirpath[0] != '/') return false;
+	if (strncmp(dirpath, "/private/var/", 13) == 0) dirpath += 8;
+
+	if (strncmp(dirpath, "/usr/lib", 8) == 0) return true;
+	if (strncmp(dirpath, "/var/jb", 7) == 0) return true;
+	if (strncmp(dirpath, "/private/preboot", 16) == 0) return true;
+	if (gJbRootReal[0]) {
+		size_t n = strlen(gJbRootReal);
+		if (strncmp(dirpath, gJbRootReal, n) == 0) return true;
+	}
+
+	// The rule table only matches entries directly under /var/mobile, or under
+	// /var/mobile/Library and /var/mobile/Documents.
+	if (strcmp(dirpath, "/var/mobile") == 0) return true;
+	if (strncmp(dirpath, "/var/mobile/Library", 19) == 0) return true;
+	if (strncmp(dirpath, "/var/mobile/Documents", 21) == 0) return true;
 	return false;
 }
 
