@@ -11,7 +11,7 @@
 //   - file syscalls:        hide /var/jb, the real jbroot, jailbreak files/prefs
 //                           (the rules live in hidejb_rules.c),
 //   - readdir:              filter jailbreak entries out of directory listings,
-//   - dyld image enumeration/dlopen/dladdr: hide the injected dylibs,
+//   - dyld image enumeration/dlopen/dladdr/dlsym: hide the injected dylibs & symbols,
 //   - csops:                clear CS_DEBUGGED / set hardening flags,
 //   - sysctl:               hide amfi developer-mode flag,
 //   - LSApplicationWorkspace/UIApplication canOpenURL: hide jailbreak URL schemes.
@@ -252,6 +252,23 @@ static int hidejb_dladdr(const void *addr, Dl_info *info)
 	return r;
 }
 
+static void *(*orig_dlsym)(void *, const char *);
+static const char *kJailbreakSymbolMarkers[] = {
+	"MSHookFunction", "MSHookMessageEx", "MSHookMemory", "MSFindSymbol",
+	"jbclient_", "libjailbreak_", "jailbreakd", "Dopamine", "dopamine",
+	"hidejb_", "rootlesshooks", "procursus",
+	NULL
+};
+static void *hidejb_dlsym(void *handle, const char *symbol)
+{
+	if (gEnabled && symbol) {
+		for (int i = 0; kJailbreakSymbolMarkers[i]; i++) {
+			if (strstr(symbol, kJailbreakSymbolMarkers[i])) return NULL;
+		}
+	}
+	return orig_dlsym(handle, symbol);
+}
+
 #pragma mark - (task_for_pid/task_name_for_pid deliberately NOT hooked)
 // Hooking task_for_pid/task_name_for_pid to return KERN_FAILURE for self broke
 // IOHIDEventSystemClient (UIKit's HID event-fetch thread calls task_for_pid on
@@ -406,6 +423,7 @@ void hidejb_init(const char *jbroot)
 	MSHookFunction((void *)_dyld_get_image_name,        (void *)hidejb_dyld_get_image_name,        (void **)&orig_dyld_get_image_name);
 	MSHookFunction((void *)dlopen,                      (void *)hidejb_dlopen,                      (void **)&orig_dlopen);
 	MSHookFunction((void *)dladdr,                      (void *)hidejb_dladdr,                      (void **)&orig_dladdr);
+	MSHookFunction((void *)dlsym,                       (void *)hidejb_dlsym,                       (void **)&orig_dlsym);
 
 #ifndef __arm64e__
 	// csops: keep the inline-syscall style (matches systemhook/main.c).
