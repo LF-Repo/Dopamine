@@ -20,6 +20,7 @@
 #include "hidejb.h"
 
 #include <litehook.h>
+#include <substrate.h>
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -511,6 +512,7 @@ static int hidejb_csops_audittoken(pid_t pid, unsigned int ops, void *useraddr, 
 
 #pragma mark - URL scheme hiding (per-app canOpenURL: hook, RootHide-style)
 
+static BOOL (*orig_UIApp_canOpenURL)(id, SEL, id) = NULL;
 static BOOL (*orig_LS_canOpenURL)(id, SEL, id) = NULL;
 
 static const char *kJailbreakSchemes[] = {
@@ -518,44 +520,54 @@ static const char *kJailbreakSchemes[] = {
 	"icleaner", "saily", "chromatic", "misaka", "cowabunga", NULL
 };
 
+static BOOL is_jailbreak_scheme(id url)
+{
+	if (!url) return NO;
+	id schemeObj = ((id (*)(id, SEL))objc_msgSend)(url, sel_registerName("scheme"));
+	if (!schemeObj) return NO;
+	const char *s = ((const char *(*)(id, SEL))objc_msgSend)(schemeObj, sel_registerName("UTF8String"));
+	if (!s) return NO;
+	for (int i = 0; kJailbreakSchemes[i]; i++) {
+		if (strcasecmp(s, kJailbreakSchemes[i]) == 0) return YES;
+	}
+	return NO;
+}
+
+static BOOL hide_UIApp_canOpenURL(id self, SEL _cmd, id url)
+{
+	if (gEnabled && is_jailbreak_scheme(url)) return NO;
+	return orig_UIApp_canOpenURL(self, _cmd, url);
+}
+
 static BOOL hide_LS_canOpenURL(id self, SEL _cmd, id url)
 {
-	if (gEnabled && url) {
-		id schemeObj = ((id (*)(id, SEL))objc_msgSend)(url, sel_registerName("scheme"));
-		if (schemeObj) {
-			const char *s = ((const char *(*)(id, SEL))objc_msgSend)(schemeObj, sel_registerName("UTF8String"));
-			if (s) {
-				for (int i = 0; kJailbreakSchemes[i]; i++) {
-					if (strcasecmp(s, kJailbreakSchemes[i]) == 0) return NO;
-				}
-			}
-		}
-	}
+	if (gEnabled && is_jailbreak_scheme(url)) return NO;
 	return orig_LS_canOpenURL(self, _cmd, url);
+}
+
+// Swizzle -canOpenURL: on a class (best-effort; retried later if not loaded yet).
+static void swizzle_canOpenURL(const char *className, IMP newImp, IMP *origOut)
+{
+	Class cls = objc_getClass(className);
+	if (!cls) return;
+	Method m = class_getInstanceMethod(cls, sel_registerName("canOpenURL:"));
+	if (!m) return;
+	if (*origOut == NULL) {
+		*origOut = method_getImplementation(m);
+		method_setImplementation(m, newImp);
+	}
 }
 
 static void hidejb_swizzle_url_schemes_impl(void *ctx)
 {
-	static bool done = false;
-	if (done) return;
-
-	// LSApplicationWorkspace may not be loaded yet when the constructor runs;
-	// objc_getClass returns NULL in that case and we retry later.
-	Class cls = objc_getClass("LSApplicationWorkspace");
-	if (!cls) return;
-
-	Method m = class_getInstanceMethod(cls, sel_registerName("canOpenURL:"));
-	if (!m) return;
-
-	orig_LS_canOpenURL = (BOOL (*)(id, SEL, id))method_getImplementation(m);
-	method_setImplementation(m, (IMP)hide_LS_canOpenURL);
-	done = true;
+	swizzle_canOpenURL("UIApplication", (IMP)hide_UIApp_canOpenURL, (IMP *)&orig_UIApp_canOpenURL);
+	swizzle_canOpenURL("LSApplicationWorkspace", (IMP)hide_LS_canOpenURL, (IMP *)&orig_LS_canOpenURL);
 }
 
 static void hidejb_swizzle_url_schemes(void)
 {
 	hidejb_swizzle_url_schemes_impl(NULL);
-	// Retry shortly after launch (main queue) in case the class was lazily loaded.
+	// Retry shortly after launch (main queue) in case the classes are lazily loaded.
 	dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC),
 					 dispatch_get_main_queue(), NULL, hidejb_swizzle_url_schemes_impl);
 }
@@ -606,51 +618,34 @@ void hidejb_init(const char *jbroot)
 		}
 	}
 
-	orig_open         = open;
-	orig_openat       = openat;
-	orig_stat         = stat;
-	orig_lstat        = lstat;
-	orig_fstatat      = fstatat;
-	orig_access       = access;
-	orig_faccessat    = faccessat;
-	orig_realpath     = realpath;
-	orig_readlink     = readlink;
-	orig_readlinkat   = readlinkat;
-	orig_opendir      = opendir;
-	orig_readdir      = readdir;
-	orig_statfs       = statfs;
-	orig_sysctlbyname = sysctlbyname;
+	// ★ Instruction-replace the shared-cache functions (MSHookFunction) so that
+	// ALL callers — including Foundation/UIKit internals — go through our hooks.
+	// litehook_rebind_symbol only rewrites the app's own GOT entries, so it misses
+	// the internal stat/access/open calls that NSFileManager & friends make.
+	MSHookFunction((void *)open,         (void *)hidejb_open,         (void **)&orig_open);
+	MSHookFunction((void *)openat,       (void *)hidejb_openat,       (void **)&orig_openat);
+	MSHookFunction((void *)stat,         (void *)hidejb_stat,         (void **)&orig_stat);
+	MSHookFunction((void *)lstat,        (void *)hidejb_lstat,        (void **)&orig_lstat);
+	MSHookFunction((void *)fstatat,      (void *)hidejb_fstatat,      (void **)&orig_fstatat);
+	MSHookFunction((void *)access,       (void *)hidejb_access,       (void **)&orig_access);
+	MSHookFunction((void *)faccessat,    (void *)hidejb_faccessat,    (void **)&orig_faccessat);
+	MSHookFunction((void *)realpath,     (void *)hidejb_realpath,     (void **)&orig_realpath);
+	MSHookFunction((void *)readlink,     (void *)hidejb_readlink,     (void **)&orig_readlink);
+	MSHookFunction((void *)readlinkat,   (void *)hidejb_readlinkat,   (void **)&orig_readlinkat);
+	MSHookFunction((void *)opendir,      (void *)hidejb_opendir,      (void **)&orig_opendir);
+	MSHookFunction((void *)readdir,      (void *)hidejb_readdir,      (void **)&orig_readdir);
+	MSHookFunction((void *)statfs,       (void *)hidejb_statfs,       (void **)&orig_statfs);
+	MSHookFunction((void *)sysctlbyname, (void *)hidejb_sysctlbyname, (void **)&orig_sysctlbyname);
 
-	orig_dyld_image_count          = _dyld_image_count;
-	orig_dyld_get_image_name       = _dyld_get_image_name;
-	orig_dyld_get_image_header     = _dyld_get_image_header;
-	orig_dyld_get_image_vmaddr_slide = _dyld_get_image_vmaddr_slide;
-	orig_dlopen                    = dlopen;
-	orig_dladdr                    = dladdr;
-
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)open,         (void *)hidejb_open, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)openat,       (void *)hidejb_openat, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)stat,         (void *)hidejb_stat, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)lstat,        (void *)hidejb_lstat, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)fstatat,      (void *)hidejb_fstatat, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)access,       (void *)hidejb_access, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)faccessat,    (void *)hidejb_faccessat, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)realpath,     (void *)hidejb_realpath, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)readlink,     (void *)hidejb_readlink, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)readlinkat,   (void *)hidejb_readlinkat, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)opendir,      (void *)hidejb_opendir, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)readdir,      (void *)hidejb_readdir, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)statfs,       (void *)hidejb_statfs, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)sysctlbyname, (void *)hidejb_sysctlbyname, NULL);
-
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)_dyld_image_count,          (void *)hidejb_dyld_image_count, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)_dyld_get_image_name,       (void *)hidejb_dyld_get_image_name, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)_dyld_get_image_header,     (void *)hidejb_dyld_get_image_header, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)_dyld_get_image_vmaddr_slide, (void *)hidejb_dyld_get_image_vmaddr_slide, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)dlopen,                     (void *)hidejb_dlopen, NULL);
-	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)dladdr,                     (void *)hidejb_dladdr, NULL);
+	MSHookFunction((void *)_dyld_image_count,           (void *)hidejb_dyld_image_count,           (void **)&orig_dyld_image_count);
+	MSHookFunction((void *)_dyld_get_image_name,        (void *)hidejb_dyld_get_image_name,        (void **)&orig_dyld_get_image_name);
+	MSHookFunction((void *)_dyld_get_image_header,      (void *)hidejb_dyld_get_image_header,      (void **)&orig_dyld_get_image_header);
+	MSHookFunction((void *)_dyld_get_image_vmaddr_slide, (void *)hidejb_dyld_get_image_vmaddr_slide, (void **)&orig_dyld_get_image_vmaddr_slide);
+	MSHookFunction((void *)dlopen,                      (void *)hidejb_dlopen,                      (void **)&orig_dlopen);
+	MSHookFunction((void *)dladdr,                      (void *)hidejb_dladdr,                      (void **)&orig_dladdr);
 
 #ifndef __arm64e__
+	// csops: keep the inline-syscall style (matches systemhook/main.c).
 	litehook_hook_function((void *)csops,           (void *)hidejb_csops);
 	litehook_hook_function((void *)csops_audittoken, (void *)hidejb_csops_audittoken);
 #endif
