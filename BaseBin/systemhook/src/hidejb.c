@@ -14,7 +14,6 @@
 //   - dyld image enumeration/dlopen/dladdr: hide the injected dylibs,
 //   - csops:                clear CS_DEBUGGED / set hardening flags,
 //   - sysctl:               hide amfi developer-mode flag,
-//   - task_for_pid/task_name_for_pid: hide "process task port was obtained",
 //   - LSApplicationWorkspace/UIApplication canOpenURL: hide jailbreak URL schemes.
 //
 // The path-matching rules are in a SEPARATE compilation unit (hidejb_rules.c)
@@ -253,27 +252,12 @@ static int hidejb_dladdr(const void *addr, Dl_info *info)
 	return r;
 }
 
-#pragma mark - task_for_pid (hide "process task port was obtained")
-
-static kern_return_t (*orig_task_for_pid)(mach_port_name_t, int, mach_port_name_t *);
-static kern_return_t hidejb_task_for_pid(mach_port_name_t target, int pid, mach_port_name_t *t)
-{
-	if (gEnabled && pid == getpid()) {
-		if (t) *t = MACH_PORT_NULL;
-		return KERN_FAILURE;
-	}
-	return orig_task_for_pid(target, pid, t);
-}
-
-static kern_return_t (*orig_task_name_for_pid)(mach_port_name_t, int, mach_port_name_t *);
-static kern_return_t hidejb_task_name_for_pid(mach_port_name_t target, int pid, mach_port_name_t *t)
-{
-	if (gEnabled && pid == getpid()) {
-		if (t) *t = MACH_PORT_NULL;
-		return KERN_FAILURE;
-	}
-	return orig_task_name_for_pid(target, pid, t);
-}
+#pragma mark - (task_for_pid/task_name_for_pid deliberately NOT hooked)
+// Hooking task_for_pid/task_name_for_pid to return KERN_FAILURE for self broke
+// IOHIDEventSystemClient (UIKit's HID event-fetch thread calls task_for_pid on
+// ITSELF and asserts on failure), and it does not actually hide "task port was
+// additionally referenced" (that is a send-right refcount issue caused by the
+// injector, not by the app calling task_for_pid). Leave them unhooked.
 
 #pragma mark - csops (hide the debug/invalid code-signature flags) [arm64]
 
@@ -422,8 +406,6 @@ void hidejb_init(const char *jbroot)
 	MSHookFunction((void *)_dyld_get_image_name,        (void *)hidejb_dyld_get_image_name,        (void **)&orig_dyld_get_image_name);
 	MSHookFunction((void *)dlopen,                      (void *)hidejb_dlopen,                      (void **)&orig_dlopen);
 	MSHookFunction((void *)dladdr,                      (void *)hidejb_dladdr,                      (void **)&orig_dladdr);
-	MSHookFunction((void *)task_for_pid,                (void *)hidejb_task_for_pid,                (void **)&orig_task_for_pid);
-	MSHookFunction((void *)task_name_for_pid,           (void *)hidejb_task_name_for_pid,           (void **)&orig_task_name_for_pid);
 
 #ifndef __arm64e__
 	// csops: keep the inline-syscall style (matches systemhook/main.c).
