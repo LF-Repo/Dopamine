@@ -257,8 +257,30 @@ bool __attribute__((optnone)) hidejb_rules_path_is_jailbreak(const char *path)
 		return false;
 	}
 
-	// Every hide rule is under /var/mobile.
-	if (strncmp(path, "/var/mobile/", 12) == 0) return path_is_blacklisted_by_rules(path);
+	// Every hide rule is under /var/mobile. The vast majority of /var/mobile
+	// paths a running app touches are its own container
+	// (/var/mobile/Containers/...), which no rule can match, so screen on the
+	// second component first: only /var/mobile/Library, /var/mobile/Documents
+	// and the handful of dotfiles in the /var/mobile blacklist can be hidden.
+	if (strncmp(path, "/var/mobile/", 12) == 0) {
+		const char *comp = path + 12;
+		size_t n = 0;
+		while (comp[n] && comp[n] != '/') n++;
+
+		if ((n == 7 && strncmp(comp, "Library", 7) == 0) ||
+		    (n == 9 && strncmp(comp, "Documents", 9) == 0)) {
+			return path_is_blacklisted_by_rules(path);
+		}
+
+		static const char *const kMobileRootBlacklist[] = {
+			".DO-NOT-DELETE-Cowabunga", ".Derootifier", "Helix", ".ssh", ".cache", NULL
+		};
+		for (size_t i = 0; kMobileRootBlacklist[i]; i++) {
+			const char *b = kMobileRootBlacklist[i];
+			if (strlen(b) == n && strncmp(comp, b, n) == 0) return true;
+		}
+		return false;
+	}
 
 	// Anything else (rare): only an embedded jailbreak marker matters.
 	for (size_t i = 0; i < sizeof(gJailbreakPathMarkers)/sizeof(gJailbreakPathMarkers[0]); i++) {
