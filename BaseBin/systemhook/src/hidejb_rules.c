@@ -21,6 +21,10 @@
 #include <mach/message.h>
 #include <libjailbreak/codesign.h>
 
+// The whole path-matching module is compiled unoptimized: Clang -Os miscompiles
+// this string-matching code (register-allocation bug) regardless of inlining.
+#pragma clang optimize off
+
 static char gJbRootReal[PATH_MAX] = {0};
 static char gSelfBundleID[256] = {0};
 
@@ -154,7 +158,10 @@ static const hide_dir_rule_t gHideRules[] = {
 	{ "/var/mobile", false, NULL, kMobileBlacklist, NULL },
 };
 
-static bool path_is_blacklisted_by_rules(const char *path)
+// optnone: Clang -Os miscompiles this string-matching body (register-allocation
+// bug). Even in this separate TU the -Os codegen is unsafe, so disable all
+// optimization on the path-matching functions.
+static bool __attribute__((optnone)) path_is_blacklisted_by_rules(const char *path)
 {
 	if (!path || path[0] != '/') return false;
 
@@ -198,7 +205,7 @@ static const char *gJailbreakPathMarkers[] = {
 	".installed_dopamine",
 };
 
-bool hidejb_rules_path_is_jailbreak(const char *path)
+bool __attribute__((optnone)) hidejb_rules_path_is_jailbreak(const char *path)
 {
 	if (!path || path[0] != '/') return false;
 
