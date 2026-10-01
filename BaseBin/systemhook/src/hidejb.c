@@ -14,7 +14,8 @@
 //   - dyld image enumeration/dlopen/dladdr: hide the injected dylibs,
 //   - csops:                clear CS_DEBUGGED / set hardening flags,
 //   - sysctl:               hide amfi developer-mode flag,
-//   - task_for_pid:         hide "process task port was obtained",
+//   - task_for_pid/task_name_for_pid: hide "process task port was obtained",
+//   - task/thread exception ports: hide "Exception ports were set",
 //   - LSApplicationWorkspace/UIApplication canOpenURL: hide jailbreak URL schemes.
 //
 // The path-matching rules are in a SEPARATE compilation unit (hidejb_rules.c)
@@ -45,6 +46,7 @@
 #include <mach-o/loader.h>
 #include <mach/mach.h>
 #include <mach/task.h>
+#include <mach/thread_act.h>
 #include <dispatch/dispatch.h>
 #include <libjailbreak/codesign.h>
 #include <objc/runtime.h>
@@ -229,16 +231,21 @@ static uint32_t hidejb_dyld_image_count(void)
 }
 
 // Map a "virtual" (visible) image index back to its real index, skipping hidden images.
+// Bounded: if the virtual index is out of range (some apps cache the count and
+// keep iterating), return the real count so the caller gets dyld's normal
+// out-of-range NULL instead of us looping forever or wrapping around.
 static uint32_t hidejb_remap_image_index(uint32_t virtualIndex)
 {
+	uint32_t realCount = orig_dyld_image_count();
 	uint32_t realIndex = 0;
-	while (1) {
+	while (realIndex < realCount) {
 		if (!hidejb_is_hidden_image_index(realIndex)) {
 			if (virtualIndex == 0) return realIndex;
 			virtualIndex--;
 		}
 		realIndex++;
 	}
+	return realCount;
 }
 
 static const char *hidejb_dyld_get_image_name(uint32_t index)
@@ -295,6 +302,44 @@ static kern_return_t hidejb_task_for_pid(mach_port_name_t target, int pid, mach_
 		return KERN_FAILURE;
 	}
 	return orig_task_for_pid(target, pid, t);
+}
+
+static kern_return_t (*orig_task_name_for_pid)(mach_port_name_t, int, mach_port_name_t *);
+static kern_return_t hidejb_task_name_for_pid(mach_port_name_t target, int pid, mach_port_name_t *t)
+{
+	if (gEnabled && pid == getpid()) {
+		if (t) *t = MACH_PORT_NULL;
+		return KERN_FAILURE;
+	}
+	return orig_task_name_for_pid(target, pid, t);
+}
+
+#pragma mark - exception ports (hide "Exception ports were set")
+
+// ElleKit registers an exception port (the "ellekit_exc_port" thread). Reveil
+// detects it via task_get_exception_ports/thread_get_exception_ports. We only
+// hook the GET (detection) side and report "no ports"; the SET side
+// (task_swap_exception_ports) is left alone so ElleKit's crash handler keeps
+// working.
+
+static kern_return_t (*orig_task_get_exception_ports)(task_t, exception_mask_t, exception_mask_array_t, mach_msg_type_number_t *, exception_handler_array_t, exception_behavior_array_t, exception_flavor_array_t);
+static kern_return_t hidejb_task_get_exception_ports(task_t task, exception_mask_t exception_mask, exception_mask_array_t masks, mach_msg_type_number_t *masksCnt, exception_handler_array_t old_handlers, exception_behavior_array_t old_behaviors, exception_flavor_array_t old_flavors)
+{
+	if (gEnabled && task == mach_task_self()) {
+		if (masksCnt) *masksCnt = 0;
+		return KERN_SUCCESS;
+	}
+	return orig_task_get_exception_ports(task, exception_mask, masks, masksCnt, old_handlers, old_behaviors, old_flavors);
+}
+
+static kern_return_t (*orig_thread_get_exception_ports)(thread_act_t, exception_mask_t, exception_mask_array_t, mach_msg_type_number_t *, exception_handler_array_t, exception_behavior_array_t, exception_flavor_array_t);
+static kern_return_t hidejb_thread_get_exception_ports(thread_act_t thread, exception_mask_t exception_mask, exception_mask_array_t masks, mach_msg_type_number_t *masksCnt, exception_handler_array_t old_handlers, exception_behavior_array_t old_behaviors, exception_flavor_array_t old_flavors)
+{
+	if (gEnabled && thread == mach_thread_self()) {
+		if (masksCnt) *masksCnt = 0;
+		return KERN_SUCCESS;
+	}
+	return orig_thread_get_exception_ports(thread, exception_mask, masks, masksCnt, old_handlers, old_behaviors, old_flavors);
 }
 
 #pragma mark - csops (hide the debug/invalid code-signature flags) [arm64]
@@ -448,6 +493,9 @@ void hidejb_init(const char *jbroot)
 	MSHookFunction((void *)dlopen,                      (void *)hidejb_dlopen,                      (void **)&orig_dlopen);
 	MSHookFunction((void *)dladdr,                      (void *)hidejb_dladdr,                      (void **)&orig_dladdr);
 	MSHookFunction((void *)task_for_pid,                (void *)hidejb_task_for_pid,                (void **)&orig_task_for_pid);
+	MSHookFunction((void *)task_name_for_pid,           (void *)hidejb_task_name_for_pid,           (void **)&orig_task_name_for_pid);
+	MSHookFunction((void *)task_get_exception_ports,    (void *)hidejb_task_get_exception_ports,    (void **)&orig_task_get_exception_ports);
+	MSHookFunction((void *)thread_get_exception_ports,  (void *)hidejb_thread_get_exception_ports,  (void **)&orig_thread_get_exception_ports);
 
 #ifndef __arm64e__
 	// csops: keep the inline-syscall style (matches systemhook/main.c).
