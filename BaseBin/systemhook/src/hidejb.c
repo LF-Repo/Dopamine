@@ -199,9 +199,11 @@ static const hide_dir_rule_t gHideRules[] = {
 
 // True when `path` (a child of one of the rule dirs) should be hidden per the
 // DOEnvironmentManager library-audit rules.
-// noinline: this is called from variadic hooks (hidejb_open/openat); inlining it
-// there breaks register allocation (the variadic args leak into strncmp).
-static bool __attribute__((noinline)) path_is_blacklisted_by_rules(const char *path)
+// optnone: Clang -Os miscompiles the strncmp here when this gets inlined into the
+// hook functions (the "strncmp(path, flags, mode)" crash). optnone disables all
+// optimization on this function, which prevents both the inlining and the
+// register-allocation bug.
+static bool __attribute__((optnone)) path_is_blacklisted_by_rules(const char *path)
 {
 	if (!path || path[0] != '/') return false;
 
@@ -249,8 +251,8 @@ static const char *gJailbreakPathMarkers[] = {
 
 // True when `path` points at (or anywhere inside) the jailbreak root, or names
 // a known jailbreak file/preference. Only absolute paths are considered.
-// noinline: see path_is_blacklisted_by_rules (variadic-hook register bug).
-static bool __attribute__((noinline)) path_is_jailbreak(const char *path)
+// optnone: see path_is_blacklisted_by_rules (register-allocation miscompile).
+static bool __attribute__((optnone)) path_is_jailbreak(const char *path)
 {
 	if (!path || path[0] != '/') return false;
 
