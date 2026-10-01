@@ -2,35 +2,19 @@
 //
 // Per-process jailbreak hiding for Dopamine (rootless).
 //
-// This is the replacement for the old "app_hide_monitor" approach, which used to
-// *globally* hide the jailbreak (unmount fakelib, delete the /var/jb symlink,
-// move files out of /var/mobile/Library into a quarantine dir) whenever a
-// "hidden" app was running. That approach was destructive, racy (2s poll loop)
-// and easily detectable, and it broke every other jailbreak process at once.
+// Replaces the old "app_hide_monitor" approach (which *globally* unmounted
+// fakelib, deleted /var/jb and physically moved files into a quarantine dir)
+// with a RootHide-style, per-process filesystem virtualization that keeps the
+// rootless /var/jb layout intact.
 //
-// The approach below mirrors what RootHide does, but is scoped per-app and keeps
-// the rootless /var/jb layout intact:
-//
-//   1. launchdhook spawns a "hidden" app with
-//      DYLD_INSERT_LIBRARIES=/usr/lib/systemhook.dylib (the same clean fakelib
-//      path systemhook is always injected from) plus DOPAMINE_APP_HIDE=1.
-//
-//   2. systemhook's constructor sees DOPAMINE_APP_HIDE=1 and calls hidejb_init()
-//      instead of the normal full-injection path. hidejb then, *from this
-//      process's point of view*:
-//        - hides /var/jb + the real jailbreak root from file syscalls,
-//        - hides jailbreak files/prefs (systemhook.dylib, Dopamine prefs, ...),
-//        - hides the injected systemhook.dylib from dyld image enumeration,
-//          dlopen/dladdr,
-//        - hides the amfi developer-mode flag and the CS_DEBUGGED csflag.
-//
-//   3. DOPAMINE_APP_HIDE stays in environ, so children spawned by the app
-//      (WebKit helpers, extensions, ...) re-enter hide mode as well.
-//
-// What this deliberately does NOT do (kept for a follow-up):
-//   - defeat raw syscall(SYS_open/.../SYS_csops) detections (needs a kernel patch),
-//   - filter getfsstat() mount table entries (only statfs is hooked),
-//   - hide URL schemes per-app (still done globally via Info.plist rewriting).
+// In a "hidden" app this hooks (from inside that one process only):
+//   - file syscalls:        hide /var/jb, the real jbroot, jailbreak files/prefs
+//                           (port of DOEnvironmentManager's library-audit rules),
+//   - readdir:              filter jailbreak entries out of directory listings,
+//   - dyld image enumeration/dlopen/dladdr: hide the injected systemhook.dylib,
+//   - csops:                clear CS_DEBUGGED / set CS_VALID (code signature),
+//   - sysctl:               hide amfi developer-mode flag,
+//   - LSApplicationWorkspace canOpenURL: hide jailbreak URL schemes (per-app).
 //
 
 #include "hidejb.h"
@@ -41,10 +25,13 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <stdio.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <limits.h>
 #include <dirent.h>
+#include <arpa/inet.h>
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <sys/sysctl.h>
@@ -52,9 +39,11 @@
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
 #include <mach/message.h>
+#include <dispatch/dispatch.h>
 #include <libjailbreak/codesign.h>
+#include <objc/runtime.h>
+#include <objc/message.h>
 
-// csops syscall numbers (see common/private.h)
 #ifndef SYS_csops
 #define SYS_csops 0xA9
 #endif
@@ -64,6 +53,7 @@
 
 static bool gEnabled = false;
 static char gJbRootReal[PATH_MAX] = {0};
+static char gSelfBundleID[256] = {0};
 
 // Index of systemhook.dylib in the dyld image list (hidden from enumeration).
 static uint32_t gHiddenImageIndex = UINT32_MAX;
@@ -73,8 +63,172 @@ bool hidejb_enabled(void)
 	return getenv("DOPAMINE_APP_HIDE") != NULL;
 }
 
-// Substrings that mark a path as jailbreak-related. File syscalls for any path
-// containing one of these are made to fail with ENOENT.
+static bool str_in_list(const char *s, const char *const *list)
+{
+	if (!s || !list) return false;
+	for (; *list; list++) {
+		if (strcmp(s, *list) == 0) return true;
+	}
+	return false;
+}
+
+static bool str_has_any_prefix(const char *s, const char *const *prefixes)
+{
+	if (!s || !prefixes) return false;
+	for (; *prefixes; prefixes++) {
+		if (strncmp(s, *prefixes, strlen(*prefixes)) == 0) return true;
+	}
+	return false;
+}
+
+static bool is_self_bundle_name(const char *name)
+{
+	if (!gSelfBundleID[0] || !name) return false;
+	if (strcmp(name, gSelfBundleID) == 0) return true;
+	size_t n = strlen(gSelfBundleID);
+	return strncmp(name, gSelfBundleID, n) == 0 && name[n] == '.';
+}
+
+#pragma mark - library-audit rule table (ported from DOEnvironmentManager)
+
+typedef struct {
+	const char *dir;
+	bool default_blacklist;
+	const char *const *whitelist;
+	const char *const *blacklist;
+	const char *const *whitelist_prefix; // simplified whitelistRegex (prefixes)
+} hide_dir_rule_t;
+
+static const char *const kApplePrefixes[]        = { "com.apple.", "systemgroup.com.apple.", NULL };
+static const char *const kAppleOnlyPrefixes[]    = { "com.apple.", NULL };
+static const char *const kCachesPrefixes[]       = { "com.apple.", "TelephonyUI-", "FamilyMarquee", NULL };
+
+static const char *const kLibWhitelist[] = {
+	"Accessibility", "CoreBrightness", "Keyboard", "Preferences", "Voicemail",
+	"Accounts", "CoreDuet", "KeyboardServices", "PrivacyAccounting", "WatchConnectivity",
+	"AddressBook", "CoreFollowUp", "LASD", "Recents", "Weather",
+	"AggregateDictionary", "CountryModeling", "Reminders", "WebClips", "CrashReporter",
+	"Logs", "ReplayKit", "WebKit", "Application Support", "MediaRemote",
+	"Safari", "Caches", "SplashBoard", "MobileInstallation", "SoftwareUpdate",
+	"BulletinBoard", "MobileContainerManager", "TCC", "Settings", "Cookies",
+	"Passes", "UserNotifications", "ApplicationSync", "DataDeliveryServices", "MediaStream",
+	"SafeHarbor", "Wallet", "Maps", "Phone", NULL
+};
+static const char *const kLibBlacklist[] = { "Sileo", "Filza", "Flex3", "SBSettings", "iCleaner", NULL };
+
+static const char *const kPrefsWhitelist[] = {
+	".GlobalPreferences.plist", ".GlobalPreferences_m.plist", "bluetoothaudiod.plist",
+	"NetworkInterfaces.plist", "OSThermalStatus.plist", "preferences.plist",
+	"osanalyticshelper.plist", "UserEventAgent.plist", "wifid.plist", "dprivacyd.plist",
+	"silhouette.plist", "nfcd.plist", "ptpcamerad.plist", "mobile_storage_proxy.plist", NULL
+};
+static const char *const kPrefsBlacklist[] = {
+	"com.roothide.manager.plist", "com.opa334.Dopamine.roothide.plist",
+	"com.opa334.Dopamine.plist", "com.tigisoftware.Filza.plist", "com.xina.jailbreak.plist",
+	"org.coolstar.SileoStore.plist", "ru.domo.cocoatop64.plist", "ws.hbang.Terminal.plist",
+	"xyz.willy.Zebra.plist", "com.apple.terminal.plist", NULL
+};
+
+static const char *const kAppSupportBlacklist[] = { "xyz.willy.Zebra", NULL };
+
+static const char *const kContainersBlacklist[] = {
+	"xyz.willy.Zebra", "com.tigisoftware.Filza", "org.coolstar.SileoStore", "com.apple.Terminal", NULL
+};
+
+static const char *const kPublicInfoBlacklist[] = { "Flex3Patches.plist", NULL };
+
+static const char *const kSnapshotsBlacklist[] = {
+	"com.roothide.manager", "com.opa334.Dopamine.roothide", "com.opa334.Dopamine",
+	"com.tigisoftware.Filza", "org.coolstar.SileoStore", "ru.domo.cocoatop64",
+	"ws.hbang.Terminal", "xyz.willy.Zebra", "com.apple.Terminal", NULL
+};
+
+static const char *const kCachesWhitelist[] = {
+	"CloudKit", "GameKit", "GeoServices", "FamilyCircle", "PassKit",
+	"VoiceServices", "VoiceTrigger", "Backup", "ssu", NULL
+};
+static const char *const kCachesBlacklist[] = {
+	"com.opa334.Dopamine", "com.tigisoftware.Filza", "org.coolstar.SileoStore",
+	"ws.hbang.Terminal", "xyz.willy.Zebra", "Cephei", "com.apple.Terminal",
+	"GDFileManagerCache.sqlite", "GDFileManagerCache.sqlite-shm", "GDFileManagerCache.sqlite-wal",
+	"ImageTables", "SentryCrash", "io.sentry", "com.hackemist.SDImageCache", NULL
+};
+
+static const char *const kSavedStateBlacklist[] = {
+	"com.opa334.Dopamine.savedState", "com.tigisoftware.Filza.savedState",
+	"org.coolstar.SileoStore.savedState", "ws.hbang.Terminal.savedState",
+	"xyz.willy.Zebra.savedState", "ru.domo.cocoatop64.savedState", "com.apple.Terminal.savedState", NULL
+};
+
+static const char *const kWebKitWhitelist[] = { "Databases", "LocalStorage", NULL };
+static const char *const kWebKitBlacklist[] = { "xyz.willy.Zebra", NULL };
+
+static const char *const kCookiesWhitelist[] = { "Cookies.binarycookies", NULL };
+static const char *const kCookiesBlacklist[] = { "com.johncoates.Flex.binarycookies", NULL };
+
+static const char *const kHTTPStoragesBlacklist[] = {
+	"com.opa334.Dopamine", "com.tigisoftware.Filza", "org.coolstar.SileoStore",
+	"ws.hbang.Terminal", "xyz.willy.Zebra", NULL
+};
+
+static const char *const kDocumentsBlacklist[] = { "DumpDecrypter", "Dumplpa", NULL };
+
+static const char *const kMobileBlacklist[] = {
+	".DO-NOT-DELETE-Cowabunga", ".Derootifier", "Helix", ".ssh", ".cache", NULL
+};
+
+static const hide_dir_rule_t gHideRules[] = {
+	{ "/var/mobile/Library", false, kLibWhitelist, kLibBlacklist, NULL },
+	{ "/var/mobile/Library/Preferences", true, kPrefsWhitelist, kPrefsBlacklist, kApplePrefixes },
+	{ "/var/mobile/Library/Application Support", false, NULL, kAppSupportBlacklist, NULL },
+	{ "/var/mobile/Library/Application Support/Containers", true, NULL, kContainersBlacklist, NULL },
+	{ "/var/mobile/Library/UserConfigurationProfiles/PublicInfo", false, NULL, kPublicInfoBlacklist, NULL },
+	{ "/var/mobile/Library/SplashBoard/Snapshots", true, NULL, kSnapshotsBlacklist, kAppleOnlyPrefixes },
+	{ "/var/mobile/Library/Caches", true, kCachesWhitelist, kCachesBlacklist, kCachesPrefixes },
+	{ "/var/mobile/Library/Saved Application State", true, NULL, kSavedStateBlacklist, kAppleOnlyPrefixes },
+	{ "/var/mobile/Library/WebKit", false, kWebKitWhitelist, kWebKitBlacklist, kAppleOnlyPrefixes },
+	{ "/var/mobile/Library/Cookies", true, kCookiesWhitelist, kCookiesBlacklist, kAppleOnlyPrefixes },
+	{ "/var/mobile/Library/HTTPStorages", true, NULL, kHTTPStoragesBlacklist, kAppleOnlyPrefixes },
+	{ "/var/mobile/Documents", false, NULL, kDocumentsBlacklist, NULL },
+	{ "/var/mobile", false, NULL, kMobileBlacklist, NULL },
+};
+
+// True when `path` (a child of one of the rule dirs) should be hidden per the
+// DOEnvironmentManager library-audit rules.
+static bool path_is_blacklisted_by_rules(const char *path)
+{
+	if (!path || path[0] != '/') return false;
+
+	for (size_t r = 0; r < sizeof(gHideRules)/sizeof(gHideRules[0]); r++) {
+		const hide_dir_rule_t *rule = &gHideRules[r];
+		size_t dlen = strlen(rule->dir);
+		if (strncmp(path, rule->dir, dlen) != 0 || path[dlen] != '/') continue;
+
+		const char *name = path + dlen + 1;
+		const char *slash = strchr(name, '/');
+		char namebuf[256];
+		size_t nlen = slash ? (size_t)(slash - name) : strlen(name);
+		if (nlen == 0 || nlen >= sizeof(namebuf)) continue;
+		memcpy(namebuf, name, nlen);
+		namebuf[nlen] = '\0';
+
+		// never hide "." / ".." (readdir always yields them)
+		if (nlen == 1 && namebuf[0] == '.') continue;
+		if (nlen == 2 && namebuf[0] == '.' && namebuf[1] == '.') continue;
+
+		if (str_in_list(namebuf, rule->blacklist)) return true;          // explicit blacklist
+		if (str_has_any_prefix(namebuf, rule->whitelist_prefix)) continue; // regex whitelist
+		if (str_in_list(namebuf, rule->whitelist)) continue;             // exact whitelist
+		if (rule->default_blacklist) {
+			if (is_self_bundle_name(namebuf)) continue; // never hide our own traces
+			return true; // hide anything not whitelisted
+		}
+	}
+
+	return false;
+}
+
+// Substrings that mark a path as jailbreak-related (dylib names, markers).
 static const char *gJailbreakPathMarkers[] = {
 	"systemhook",
 	"libjailbreak",
@@ -84,11 +238,7 @@ static const char *gJailbreakPathMarkers[] = {
 	"libsubstrate",
 	"CydiaSubstrate",
 	"forkfix",
-	"com.opa334.Dopamine",
-	".Dopamine",
-	"DopamineAppHide",
 	".installed_dopamine",
-	"DopamineCrashReporterDisabled",
 };
 
 // True when `path` points at (or anywhere inside) the jailbreak root, or names
@@ -97,18 +247,14 @@ static bool path_is_jailbreak(const char *path)
 {
 	if (!path || path[0] != '/') return false;
 
-	// 1) canonical rootless symlink
 	if (strcmp(path, "/var/jb") == 0) return true;
 	if (strncmp(path, "/var/jb/", 8) == 0) return true;
 
-	// 2) resolved jbroot (e.g. /private/preboot/<boot-uuid>/procursus)
 	if (gJbRootReal[0]) {
 		size_t n = strlen(gJbRootReal);
 		if (strncmp(path, gJbRootReal, n) == 0 && (path[n] == '/' || path[n] == '\0')) return true;
 	}
 
-	// 3) "procursus" path component (rootless bootstrap dir name), so the real
-	//    preboot path is hidden even if resolution above failed.
 	const char *p = path;
 	while (*p) {
 		const char *slash = strchr(p, '/');
@@ -118,10 +264,11 @@ static bool path_is_jailbreak(const char *path)
 		p = slash + 1;
 	}
 
-	// 4) known jailbreak files / prefs / dylib names anywhere in the path.
 	for (size_t i = 0; i < sizeof(gJailbreakPathMarkers)/sizeof(gJailbreakPathMarkers[0]); i++) {
 		if (strstr(path, gJailbreakPathMarkers[i])) return true;
 	}
+
+	if (path_is_blacklisted_by_rules(path)) return true;
 
 	return false;
 }
@@ -212,7 +359,7 @@ static ssize_t hidejb_readlinkat(int fd, const char *path, char *buf, size_t buf
 	return orig_readlinkat(fd, path, buf, bufsize);
 }
 
-#pragma mark - opendir
+#pragma mark - opendir / readdir (filter directory listings too)
 
 static DIR *(*orig_opendir)(const char *);
 static DIR *hidejb_opendir(const char *dirname)
@@ -221,16 +368,33 @@ static DIR *hidejb_opendir(const char *dirname)
 	return orig_opendir(dirname);
 }
 
+static struct dirent *(*orig_readdir)(DIR *);
+static struct dirent *hidejb_readdir(DIR *dirp)
+{
+	if (!gEnabled || !dirp) return orig_readdir(dirp);
+
+	int fd = dirfd(dirp);
+	if (fd < 0) return orig_readdir(dirp);
+
+	char dirpath[PATH_MAX] = {0};
+	if (fcntl(fd, F_GETPATH, dirpath) != 0) return orig_readdir(dirp);
+
+	while (1) {
+		struct dirent *e = orig_readdir(dirp);
+		if (!e) return NULL;
+		char full[PATH_MAX * 2];
+		snprintf(full, sizeof(full), "%s/%s", dirpath, e->d_name);
+		if (!path_is_jailbreak(full)) return e;
+		// else skip this entry
+	}
+}
+
 #pragma mark - statfs (hide the fakelib bind mount over /usr/lib)
 
 static int (*orig_statfs)(const char *, struct statfs *);
 static int hidejb_statfs(const char *path, struct statfs *buf)
 {
 	if (gEnabled && path) {
-		// On a stock device /usr/lib sits on the root fs, so statfs("/usr/lib")
-		// reports f_mntonname == "/". On a jailbroken device fakelib bind-mounts
-		// <jbroot>/basebin/.fakelib over /usr/lib, so f_mntonname == "/usr/lib"
-		// — a classic jailbreak tell. Report the root fs instead.
 		if (strcmp(path, "/usr/lib") == 0 || strncmp(path, "/usr/lib/", 9) == 0) {
 			return orig_statfs("/", buf);
 		}
@@ -298,7 +462,6 @@ static void *(*orig_dlopen)(const char *, int);
 static void *hidejb_dlopen(const char *path, int mode)
 {
 	if (gEnabled && path && strstr(path, "systemhook.dylib")) {
-		// Pretend the injected dylib is not loaded (dlopen(..., RTLD_NOLOAD) → NULL).
 		return NULL;
 	}
 	return orig_dlopen(path, mode);
@@ -309,7 +472,7 @@ static int hidejb_dladdr(const void *addr, Dl_info *info)
 {
 	int r = orig_dladdr(addr, info);
 	if (gEnabled && r != 0 && info && info->dli_fname && strstr(info->dli_fname, "systemhook.dylib")) {
-		return 0; // report "not in any known image"
+		return 0;
 	}
 	return r;
 }
@@ -325,7 +488,7 @@ static int hidejb_csops(pid_t pid, unsigned int ops, void *useraddr, size_t user
 		if (useraddr && usersize == sizeof(uint32_t)) {
 			uint32_t *csflag = (uint32_t *)useraddr;
 			*csflag |= CS_VALID;
-			*csflag &= ~CS_DEBUGGED; // always hide, never re-add
+			*csflag &= ~CS_DEBUGGED;
 		}
 	}
 	return rv;
@@ -346,7 +509,74 @@ static int hidejb_csops_audittoken(pid_t pid, unsigned int ops, void *useraddr, 
 }
 #endif
 
+#pragma mark - URL scheme hiding (per-app canOpenURL: hook, RootHide-style)
+
+static BOOL (*orig_LS_canOpenURL)(id, SEL, id) = NULL;
+
+static const char *kJailbreakSchemes[] = {
+	"sileo", "zebra", "filza", "apt-repo", "cydia", "sileo-nano",
+	"icleaner", "saily", "chromatic", "misaka", "cowabunga", NULL
+};
+
+static BOOL hide_LS_canOpenURL(id self, SEL _cmd, id url)
+{
+	if (gEnabled && url) {
+		id schemeObj = ((id (*)(id, SEL))objc_msgSend)(url, sel_registerName("scheme"));
+		if (schemeObj) {
+			const char *s = ((const char *(*)(id, SEL))objc_msgSend)(schemeObj, sel_registerName("UTF8String"));
+			if (s) {
+				for (int i = 0; kJailbreakSchemes[i]; i++) {
+					if (strcasecmp(s, kJailbreakSchemes[i]) == 0) return NO;
+				}
+			}
+		}
+	}
+	return orig_LS_canOpenURL(self, _cmd, url);
+}
+
+static void hidejb_swizzle_url_schemes_impl(void *ctx)
+{
+	static bool done = false;
+	if (done) return;
+
+	// LSApplicationWorkspace may not be loaded yet when the constructor runs;
+	// objc_getClass returns NULL in that case and we retry later.
+	Class cls = objc_getClass("LSApplicationWorkspace");
+	if (!cls) return;
+
+	Method m = class_getInstanceMethod(cls, sel_registerName("canOpenURL:"));
+	if (!m) return;
+
+	orig_LS_canOpenURL = (BOOL (*)(id, SEL, id))method_getImplementation(m);
+	method_setImplementation(m, (IMP)hide_LS_canOpenURL);
+	done = true;
+}
+
+static void hidejb_swizzle_url_schemes(void)
+{
+	hidejb_swizzle_url_schemes_impl(NULL);
+	// Retry shortly after launch (main queue) in case the class was lazily loaded.
+	dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC),
+					 dispatch_get_main_queue(), NULL, hidejb_swizzle_url_schemes_impl);
+}
+
 #pragma mark - init
+
+// Read our own bundle id via csops(CS_OPS_IDENTITY) so "default-blacklist"
+// rules never hide the hidden app's own preferences/caches.
+static void get_self_bundle_id(void)
+{
+	struct { uint32_t magic; uint32_t length; } header = {0};
+	if (csops(getpid(), CS_OPS_IDENTITY, &header, sizeof(header)) != 0 && errno != ERANGE) return;
+	uint32_t len = ntohl(header.length);
+	if (len == 0 || len > 4096) return;
+	char *buf = malloc(len);
+	if (!buf) return;
+	if (csops(getpid(), CS_OPS_IDENTITY, buf, len) == 0) {
+		strlcpy(gSelfBundleID, buf + sizeof(header), sizeof(gSelfBundleID));
+	}
+	free(buf);
+}
 
 void hidejb_init(const char *jbroot)
 {
@@ -354,8 +584,6 @@ void hidejb_init(const char *jbroot)
 
 	gEnabled = true;
 
-	// Resolve the canonical jbroot so we can hide /private/preboot/<uuid>/procursus
-	// in addition to the /var/jb symlink.
 	if (jbroot && jbroot[0]) {
 		char resolved[PATH_MAX] = {0};
 		if (realpath(jbroot, resolved)) {
@@ -365,7 +593,8 @@ void hidejb_init(const char *jbroot)
 		}
 	}
 
-	// Locate systemhook.dylib in the dyld image list (before we hide it).
+	get_self_bundle_id();
+
 	{
 		uint32_t n = _dyld_image_count();
 		for (uint32_t i = 0; i < n; i++) {
@@ -377,7 +606,6 @@ void hidejb_init(const char *jbroot)
 		}
 	}
 
-	// ★ Capture the original implementations BEFORE rebinding the symbols.
 	orig_open         = open;
 	orig_openat       = openat;
 	orig_stat         = stat;
@@ -389,6 +617,7 @@ void hidejb_init(const char *jbroot)
 	orig_readlink     = readlink;
 	orig_readlinkat   = readlinkat;
 	orig_opendir      = opendir;
+	orig_readdir      = readdir;
 	orig_statfs       = statfs;
 	orig_sysctlbyname = sysctlbyname;
 
@@ -399,9 +628,6 @@ void hidejb_init(const char *jbroot)
 	orig_dlopen                    = dlopen;
 	orig_dladdr                    = dladdr;
 
-	// Rebind (intercept) the app's calls to these libc/libdyld functions. This
-	// only affects symbol lookups in loaded images; it does NOT patch the shared
-	// cache, so libc/libdyld's own internal calls are untouched (no re-entrancy).
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)open,         (void *)hidejb_open, NULL);
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)openat,       (void *)hidejb_openat, NULL);
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)stat,         (void *)hidejb_stat, NULL);
@@ -413,6 +639,7 @@ void hidejb_init(const char *jbroot)
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)readlink,     (void *)hidejb_readlink, NULL);
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)readlinkat,   (void *)hidejb_readlinkat, NULL);
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)opendir,      (void *)hidejb_opendir, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)readdir,      (void *)hidejb_readdir, NULL);
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)statfs,       (void *)hidejb_statfs, NULL);
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)sysctlbyname, (void *)hidejb_sysctlbyname, NULL);
 
@@ -423,10 +650,10 @@ void hidejb_init(const char *jbroot)
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)dlopen,                     (void *)hidejb_dlopen, NULL);
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)dladdr,                     (void *)hidejb_dladdr, NULL);
 
-	// csops: use instruction replacement (matching systemhook/main.c) so the
-	// "original" is reached via an inline syscall, covering direct csops() calls.
 #ifndef __arm64e__
 	litehook_hook_function((void *)csops,           (void *)hidejb_csops);
 	litehook_hook_function((void *)csops_audittoken, (void *)hidejb_csops_audittoken);
 #endif
+
+	hidejb_swizzle_url_schemes();
 }
