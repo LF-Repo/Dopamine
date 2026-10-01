@@ -283,24 +283,21 @@ static bool __attribute__((noinline)) path_is_jailbreak(const char *path)
 #pragma mark - open / openat
 
 static int (*orig_open)(const char *, int, ...);
-static int hidejb_open(const char *path, int flags, ...)
+// NOTE: declared non-variadic on purpose. open() is variadic, but on arm64 the
+// optional `mode` is always passed in x2, so a fixed 3-arg signature is ABI-
+// identical. Keeping it non-variadic avoids the va_list save area, which was
+// causing the compiler to mis-allocate registers inside the inlined path check
+// (the "strncmp(path, flags, mode)" crash).
+static int hidejb_open(const char *path, int flags, int mode)
 {
 	if (gEnabled && path_is_jailbreak(path)) { errno = ENOENT; return -1; }
-	va_list ap;
-	va_start(ap, flags);
-	int mode = va_arg(ap, int);
-	va_end(ap);
 	return orig_open(path, flags, mode);
 }
 
 static int (*orig_openat)(int, const char *, int, ...);
-static int hidejb_openat(int fd, const char *path, int flags, ...)
+static int hidejb_openat(int fd, const char *path, int flags, int mode)
 {
 	if (gEnabled && path_is_jailbreak(path)) { errno = ENOENT; return -1; }
-	va_list ap;
-	va_start(ap, flags);
-	int mode = va_arg(ap, int);
-	va_end(ap);
 	return orig_openat(fd, path, flags, mode);
 }
 
@@ -514,7 +511,10 @@ static int hidejb_dladdr(const void *addr, Dl_info *info)
 static kern_return_t (*orig_task_for_pid)(mach_port_name_t, int, mach_port_name_t *);
 static kern_return_t hidejb_task_for_pid(mach_port_name_t target, int pid, mach_port_name_t *t)
 {
-	if (gEnabled && pid == getpid()) return KERN_FAILURE;
+	if (gEnabled && pid == getpid()) {
+		if (t) *t = MACH_PORT_NULL;
+		return KERN_FAILURE;
+	}
 	return orig_task_for_pid(target, pid, t);
 }
 
