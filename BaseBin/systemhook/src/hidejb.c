@@ -39,7 +39,8 @@
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
-#include <mach/message.h>
+#include <mach/mach.h>
+#include <mach/task.h>
 #include <dispatch/dispatch.h>
 #include <libjailbreak/codesign.h>
 #include <objc/runtime.h>
@@ -56,8 +57,10 @@ static bool gEnabled = false;
 static char gJbRootReal[PATH_MAX] = {0};
 static char gSelfBundleID[256] = {0};
 
-// Index of systemhook.dylib in the dyld image list (hidden from enumeration).
-static uint32_t gHiddenImageIndex = UINT32_MAX;
+// Indices of injected jailbreak dylibs (systemhook, libellekit, ...) in the
+// dyld image list. These are hidden from _dyld_image_count/_dyld_get_image_name.
+static uint32_t gHiddenImageIndices[8] = {0};
+static uint32_t gHiddenImageCount = 0;
 
 bool hidejb_enabled(void)
 {
@@ -196,7 +199,9 @@ static const hide_dir_rule_t gHideRules[] = {
 
 // True when `path` (a child of one of the rule dirs) should be hidden per the
 // DOEnvironmentManager library-audit rules.
-static bool path_is_blacklisted_by_rules(const char *path)
+// noinline: this is called from variadic hooks (hidejb_open/openat); inlining it
+// there breaks register allocation (the variadic args leak into strncmp).
+static bool __attribute__((noinline)) path_is_blacklisted_by_rules(const char *path)
 {
 	if (!path || path[0] != '/') return false;
 
@@ -244,7 +249,8 @@ static const char *gJailbreakPathMarkers[] = {
 
 // True when `path` points at (or anywhere inside) the jailbreak root, or names
 // a known jailbreak file/preference. Only absolute paths are considered.
-static bool path_is_jailbreak(const char *path)
+// noinline: see path_is_blacklisted_by_rules (variadic-hook register bug).
+static bool __attribute__((noinline)) path_is_jailbreak(const char *path)
 {
 	if (!path || path[0] != '/') return false;
 
@@ -425,21 +431,38 @@ static const char *(*orig_dyld_get_image_name)(uint32_t);
 static const struct mach_header *(*orig_dyld_get_image_header)(uint32_t);
 static intptr_t (*orig_dyld_get_image_vmaddr_slide)(uint32_t);
 
+static bool hidejb_is_hidden_image_index(uint32_t i)
+{
+	for (uint32_t k = 0; k < gHiddenImageCount; k++) {
+		if (gHiddenImageIndices[k] == i) return true;
+	}
+	return false;
+}
+
 static uint32_t hidejb_dyld_image_count(void)
 {
 	uint32_t n = orig_dyld_image_count();
-	if (gEnabled && gHiddenImageIndex != UINT32_MAX && gHiddenImageIndex < n) {
-		return n - 1;
+	if (gEnabled && gHiddenImageCount) {
+		uint32_t hidden = 0;
+		for (uint32_t i = 0; i < n; i++) {
+			if (hidejb_is_hidden_image_index(i)) hidden++;
+		}
+		return n - hidden;
 	}
 	return n;
 }
 
-static uint32_t hidejb_remap_image_index(uint32_t index)
+// Map a "virtual" (visible) image index back to its real index, skipping hidden images.
+static uint32_t hidejb_remap_image_index(uint32_t virtualIndex)
 {
-	if (gEnabled && gHiddenImageIndex != UINT32_MAX && index >= gHiddenImageIndex) {
-		index++;
+	uint32_t realIndex = 0;
+	while (1) {
+		if (!hidejb_is_hidden_image_index(realIndex)) {
+			if (virtualIndex == 0) return realIndex;
+			virtualIndex--;
+		}
+		realIndex++;
 	}
-	return index;
 }
 
 static const char *hidejb_dyld_get_image_name(uint32_t index)
@@ -462,8 +485,12 @@ static intptr_t hidejb_dyld_get_image_vmaddr_slide(uint32_t index)
 static void *(*orig_dlopen)(const char *, int);
 static void *hidejb_dlopen(const char *path, int mode)
 {
-	if (gEnabled && path && strstr(path, "systemhook.dylib")) {
-		return NULL;
+	if (gEnabled && path) {
+		if (strstr(path, "systemhook") || strstr(path, "libellekit") ||
+		    strstr(path, "CydiaSubstrate") || strstr(path, "libjailbreak") ||
+		    strstr(path, "TweakLoader")) {
+			return NULL;
+		}
 	}
 	return orig_dlopen(path, mode);
 }
@@ -472,10 +499,23 @@ static int (*orig_dladdr)(const void *, Dl_info *);
 static int hidejb_dladdr(const void *addr, Dl_info *info)
 {
 	int r = orig_dladdr(addr, info);
-	if (gEnabled && r != 0 && info && info->dli_fname && strstr(info->dli_fname, "systemhook.dylib")) {
-		return 0;
+	if (gEnabled && r != 0 && info && info->dli_fname) {
+		if (strstr(info->dli_fname, "systemhook") || strstr(info->dli_fname, "libellekit") ||
+		    strstr(info->dli_fname, "CydiaSubstrate") || strstr(info->dli_fname, "libjailbreak") ||
+		    strstr(info->dli_fname, "TweakLoader")) {
+			return 0;
+		}
 	}
 	return r;
+}
+
+#pragma mark - task_for_pid (hide "process task port was obtained")
+
+static kern_return_t (*orig_task_for_pid)(mach_port_name_t, int, mach_port_name_t *);
+static kern_return_t hidejb_task_for_pid(mach_port_name_t target, int pid, mach_port_name_t *t)
+{
+	if (gEnabled && pid == getpid()) return KERN_FAILURE;
+	return orig_task_for_pid(target, pid, t);
 }
 
 #pragma mark - csops (hide the debug/invalid code-signature flags) [arm64]
@@ -488,8 +528,9 @@ static int hidejb_csops(pid_t pid, unsigned int ops, void *useraddr, size_t user
 	if (ops == CS_OPS_STATUS) {
 		if (useraddr && usersize == sizeof(uint32_t)) {
 			uint32_t *csflag = (uint32_t *)useraddr;
-			*csflag |= CS_VALID;
-			*csflag &= ~CS_DEBUGGED;
+			// Look like a normally-signed, hardened app again.
+			*csflag |= CS_VALID | CS_HARD | CS_KILL | CS_RESTRICT | CS_ENFORCEMENT | CS_REQUIRE_LV;
+			*csflag &= ~(CS_DEBUGGED | CS_GET_TASK_ALLOW);
 		}
 	}
 	return rv;
@@ -502,8 +543,8 @@ static int hidejb_csops_audittoken(pid_t pid, unsigned int ops, void *useraddr, 
 	if (ops == CS_OPS_STATUS) {
 		if (useraddr && usersize == sizeof(uint32_t)) {
 			uint32_t *csflag = (uint32_t *)useraddr;
-			*csflag |= CS_VALID;
-			*csflag &= ~CS_DEBUGGED;
+			*csflag |= CS_VALID | CS_HARD | CS_KILL | CS_RESTRICT | CS_ENFORCEMENT | CS_REQUIRE_LV;
+			*csflag &= ~(CS_DEBUGGED | CS_GET_TASK_ALLOW);
 		}
 	}
 	return rv;
@@ -516,8 +557,15 @@ static BOOL (*orig_UIApp_canOpenURL)(id, SEL, id) = NULL;
 static BOOL (*orig_LS_canOpenURL)(id, SEL, id) = NULL;
 
 static const char *kJailbreakSchemes[] = {
+	// jailbreak apps
 	"sileo", "zebra", "filza", "apt-repo", "cydia", "sileo-nano",
-	"icleaner", "saily", "chromatic", "misaka", "cowabunga", NULL
+	"icleaner", "saily", "chromatic", "misaka", "cowabunga",
+	// Filza's file-provider / OAuth schemes
+	"db-lmvo0l08204d0a0", "boxsdk-810yk37nbrpwaee5907xc4iz8c1ay3my",
+	"com.googleusercontent.apps.802910049260-0hf6uv6nsj21itl94v66tphcqnfl172r",
+	// other detector apps
+	"reveil", "82flex", "postbox", "santander",
+	NULL
 };
 
 static BOOL is_jailbreak_scheme(id url)
@@ -611,9 +659,11 @@ void hidejb_init(const char *jbroot)
 		uint32_t n = _dyld_image_count();
 		for (uint32_t i = 0; i < n; i++) {
 			const char *name = _dyld_get_image_name(i);
-			if (name && strstr(name, "systemhook")) {
-				gHiddenImageIndex = i;
-				break;
+			if (!name) continue;
+			if (strstr(name, "systemhook") || strstr(name, "libellekit") || strstr(name, "CydiaSubstrate")) {
+				if (gHiddenImageCount < sizeof(gHiddenImageIndices)/sizeof(gHiddenImageIndices[0])) {
+					gHiddenImageIndices[gHiddenImageCount++] = i;
+				}
 			}
 		}
 	}
@@ -643,6 +693,7 @@ void hidejb_init(const char *jbroot)
 	MSHookFunction((void *)_dyld_get_image_vmaddr_slide, (void *)hidejb_dyld_get_image_vmaddr_slide, (void **)&orig_dyld_get_image_vmaddr_slide);
 	MSHookFunction((void *)dlopen,                      (void *)hidejb_dlopen,                      (void **)&orig_dlopen);
 	MSHookFunction((void *)dladdr,                      (void *)hidejb_dladdr,                      (void **)&orig_dladdr);
+	MSHookFunction((void *)task_for_pid,                (void *)hidejb_task_for_pid,                (void **)&orig_task_for_pid);
 
 #ifndef __arm64e__
 	// csops: keep the inline-syscall style (matches systemhook/main.c).
