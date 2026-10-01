@@ -197,10 +197,14 @@ static const char *gJailbreakPathMarkers[] = {
 	"systemhook",
 	"libjailbreak",
 	"TweakLoader",
+	"TweakInject",
 	"ellekit",
 	"libellekit",
 	"libsubstrate",
 	"CydiaSubstrate",
+	"libsubstitute",
+	"libhooker",
+	"MobileSubstrate",
 	"forkfix",
 	".installed_dopamine",
 };
@@ -208,6 +212,11 @@ static const char *gJailbreakPathMarkers[] = {
 bool __attribute__((optnone)) hidejb_rules_path_is_jailbreak(const char *path)
 {
 	if (!path || path[0] != '/') return false;
+
+	// /var is a symlink to /private/var, so detectors often report the same path
+	// with the /private/var prefix. Normalize it so /var/jb and the rule table
+	// (which use /var/...) still match.
+	if (strncmp(path, "/private/var/", 13) == 0) path += 8;
 
 	if (strcmp(path, "/var/jb") == 0) return true;
 	if (strncmp(path, "/var/jb/", 8) == 0) return true;
