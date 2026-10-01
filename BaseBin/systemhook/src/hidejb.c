@@ -232,17 +232,38 @@ void hidejb_init(const char *jbroot)
 		}
 	}
 
-	litehook_hook_function((void *)open,         (void *)hidejb_open);
-	litehook_hook_function((void *)openat,       (void *)hidejb_openat);
-	litehook_hook_function((void *)stat,         (void *)hidejb_stat);
-	litehook_hook_function((void *)lstat,        (void *)hidejb_lstat);
-	litehook_hook_function((void *)fstatat,      (void *)hidejb_fstatat);
-	litehook_hook_function((void *)access,       (void *)hidejb_access);
-	litehook_hook_function((void *)faccessat,    (void *)hidejb_faccessat);
-	litehook_hook_function((void *)realpath,     (void *)hidejb_realpath);
-	litehook_hook_function((void *)readlink,     (void *)hidejb_readlink);
-	litehook_hook_function((void *)readlinkat,   (void *)hidejb_readlinkat);
-	litehook_hook_function((void *)opendir,      (void *)hidejb_opendir);
-	litehook_hook_function((void *)statfs,       (void *)hidejb_statfs);
-	litehook_hook_function((void *)sysctlbyname, (void *)hidejb_sysctlbyname);
+	// ★ Capture the original implementations BEFORE rebinding the symbols.
+	// litehook_rebind_symbol only rewrites the lazy/non-lazy symbol pointers
+	// (fishhook style); it leaves the original shared-cache code intact, so the
+	// saved pointers below still point at the real functions.
+	orig_open         = open;
+	orig_openat       = openat;
+	orig_stat         = stat;
+	orig_lstat        = lstat;
+	orig_fstatat      = fstatat;
+	orig_access       = access;
+	orig_faccessat    = faccessat;
+	orig_realpath     = realpath;
+	orig_readlink     = readlink;
+	orig_readlinkat   = readlinkat;
+	orig_opendir      = opendir;
+	orig_statfs       = statfs;
+	orig_sysctlbyname = sysctlbyname;
+
+	// Rebind (intercept) the app's calls to these libc functions. This only
+	// affects symbol lookups in loaded images; it does NOT patch the shared
+	// cache, so libc's own internal calls are untouched (no re-entrancy).
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)open,         (void *)hidejb_open, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)openat,       (void *)hidejb_openat, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)stat,         (void *)hidejb_stat, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)lstat,        (void *)hidejb_lstat, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)fstatat,      (void *)hidejb_fstatat, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)access,       (void *)hidejb_access, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)faccessat,    (void *)hidejb_faccessat, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)realpath,     (void *)hidejb_realpath, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)readlink,     (void *)hidejb_readlink, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)readlinkat,   (void *)hidejb_readlinkat, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)opendir,      (void *)hidejb_opendir, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)statfs,       (void *)hidejb_statfs, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)sysctlbyname, (void *)hidejb_sysctlbyname, NULL);
 }
