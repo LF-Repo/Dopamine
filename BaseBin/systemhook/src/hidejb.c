@@ -46,8 +46,11 @@
 #include <mach/mach.h>
 #include <mach/task.h>
 #include <mach/task_info.h>
-#include <mach/mach_vm.h>
 #include <mach/vm_region.h>
+
+// <mach/mach_vm.h> is an "#error unsupported" stub in the iOS SDK, so the
+// mach_vm entry points are declared by hand (same as common/private.h does).
+extern kern_return_t mach_vm_region_recurse(vm_map_read_t target_task, mach_vm_address_t *address, mach_vm_size_t *size, natural_t *nesting_depth, vm_region_recurse_info_t info, mach_msg_type_number_t *infoCnt);
 #include <dispatch/dispatch.h>
 #include <libjailbreak/codesign.h>
 #include <objc/runtime.h>
@@ -266,19 +269,18 @@ static bool hidejb_range_is_writable(const void *addr, size_t size)
 {
 	if (!addr || !size) return false;
 
-	vm_address_t regionAddr = (vm_address_t)addr;
-	vm_size_t regionSize = 0;
-	vm_region_basic_info_data_64_t info;
-	mach_msg_type_number_t infoCount = VM_REGION_BASIC_INFO_COUNT_64;
-	mach_port_t objectName = MACH_PORT_NULL;
-	kern_return_t kr = mach_vm_region(mach_task_self_, &regionAddr, &regionSize,
-									  VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
-									  &infoCount, &objectName);
-	if (objectName != MACH_PORT_NULL) mach_port_deallocate(mach_task_self_, objectName);
+	mach_vm_address_t regionAddr = (mach_vm_address_t)addr;
+	mach_vm_size_t regionSize = 0;
+	uint32_t depth = 0;
+	vm_region_submap_info_data_64_t info;
+	mach_msg_type_number_t infoCount = VM_REGION_SUBMAP_INFO_COUNT_64;
+	kern_return_t kr = mach_vm_region_recurse(mach_task_self(), &regionAddr, &regionSize,
+											  &depth, (vm_region_recurse_info_t)&info, &infoCount);
 	if (kr != KERN_SUCCESS) return false;
 	if (!(info.protection & VM_PROT_WRITE)) return false;
 
-	vm_address_t start = (vm_address_t)addr;
+	// The whole range must live inside this one region.
+	mach_vm_address_t start = (mach_vm_address_t)addr;
 	return start >= regionAddr && (start + size) <= (regionAddr + regionSize);
 }
 
