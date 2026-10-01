@@ -319,11 +319,7 @@ static void *hidejb_dlopen(const char *path, int mode)
 			return NULL;
 		}
 	}
-	void *result = orig_dlopen(path, mode);
-	// Adding an image makes dyld rebuild/reallocate its info array, which would
-	// undo the path rewrite below, so re-apply it after every dlopen.
-	if (gEnabled) hidejb_patch_all_image_infos();
-	return result;
+	return orig_dlopen(path, mode);
 }
 
 static int (*orig_dladdr)(const void *, Dl_info *);
@@ -466,6 +462,54 @@ static void hidejb_swizzle_url_schemes(void)
 					 dispatch_get_main_queue(), NULL, hidejb_swizzle_url_schemes_impl);
 }
 
+#pragma mark - runtime hook-group switch (diagnostics)
+
+// Create  /var/jb/basebin/hidejb_off.txt  (via Filza) containing any of these
+// letters, then do a userspace reboot, to disable that hook group for testing:
+//   f = file hooks (fopen/stat/lstat/fstatat/access/faccessat/realpath/
+//                   readlink/readlinkat/opendir/readdir/statfs)
+//   d = dyld image hiding (_dyld_get_image_name + dyld_all_image_infos rewrite)
+//   l = dlopen/dladdr/dlsym
+//   c = csops
+//   s = sysctlbyname
+//   u = URL scheme swizzle
+// This exists so a crashing app can be bisected on-device without rebuilding.
+#define HIDE_OFF_FILE   (1u << 0)
+#define HIDE_OFF_DYLD   (1u << 1)
+#define HIDE_OFF_DL     (1u << 2)
+#define HIDE_OFF_CSOPS  (1u << 3)
+#define HIDE_OFF_SYSCTL (1u << 4)
+#define HIDE_OFF_URL    (1u << 5)
+
+static uint32_t gDisabled = 0;
+
+static void hidejb_load_disable_switch(const char *jbroot)
+{
+	if (!jbroot || !jbroot[0]) return;
+
+	char path[PATH_MAX];
+	snprintf(path, sizeof(path), "%s/basebin/hidejb_off.txt", jbroot);
+
+	int fd = open(path, O_RDONLY);
+	if (fd < 0) return;
+
+	char buf[128] = {0};
+	ssize_t n = read(fd, buf, sizeof(buf) - 1);
+	close(fd);
+	if (n <= 0) return;
+
+	for (ssize_t i = 0; i < n; i++) {
+		switch (buf[i]) {
+			case 'f': gDisabled |= HIDE_OFF_FILE;   break;
+			case 'd': gDisabled |= HIDE_OFF_DYLD;   break;
+			case 'l': gDisabled |= HIDE_OFF_DL;     break;
+			case 'c': gDisabled |= HIDE_OFF_CSOPS;  break;
+			case 's': gDisabled |= HIDE_OFF_SYSCTL; break;
+			case 'u': gDisabled |= HIDE_OFF_URL;    break;
+		}
+	}
+}
+
 #pragma mark - init
 
 void hidejb_init(const char *jbroot)
@@ -477,7 +521,9 @@ void hidejb_init(const char *jbroot)
 	hidejb_rules_set_jbroot(jbroot);
 	hidejb_rules_set_self_bundle_id();
 
-	{
+	hidejb_load_disable_switch(jbroot);
+
+	if (!(gDisabled & HIDE_OFF_DYLD)) {
 		uint32_t n = _dyld_image_count();
 		for (uint32_t i = 0; i < n; i++) {
 			const char *name = _dyld_get_image_name(i);
@@ -488,16 +534,17 @@ void hidejb_init(const char *jbroot)
 				}
 			}
 		}
-	}
 
-	// Rewrite the paths inside dyld's own image array as well, so detectors that
-	// bypass _dyld_get_image_name still cannot see the injected dylibs.
-	hidejb_patch_all_image_infos();
+		// Rewrite the paths inside dyld's own image array as well, so detectors
+		// that bypass _dyld_get_image_name still cannot see the injected dylibs.
+		hidejb_patch_all_image_infos();
+	}
 
 	// ★ Instruction-replace the shared-cache functions (MSHookFunction) so that
 	// ALL callers — including Foundation/UIKit internals — go through our hooks.
 	// litehook_rebind_symbol only rewrites the app's own GOT entries, so it misses
 	// the internal stat/access/open calls that NSFileManager & friends make.
+	if (!(gDisabled & HIDE_OFF_FILE)) {
 	MSHookFunction((void *)fopen,        (void *)hidejb_fopen,        (void **)&orig_fopen);
 	MSHookFunction((void *)stat,         (void *)hidejb_stat,         (void **)&orig_stat);
 	MSHookFunction((void *)lstat,        (void *)hidejb_lstat,        (void **)&orig_lstat);
@@ -510,18 +557,29 @@ void hidejb_init(const char *jbroot)
 	MSHookFunction((void *)opendir,      (void *)hidejb_opendir,      (void **)&orig_opendir);
 	MSHookFunction((void *)readdir,      (void *)hidejb_readdir,      (void **)&orig_readdir);
 	MSHookFunction((void *)statfs,       (void *)hidejb_statfs,       (void **)&orig_statfs);
+	}
+	if (!(gDisabled & HIDE_OFF_SYSCTL)) {
 	MSHookFunction((void *)sysctlbyname, (void *)hidejb_sysctlbyname, (void **)&orig_sysctlbyname);
+	}
 
+	if (!(gDisabled & HIDE_OFF_DYLD)) {
 	MSHookFunction((void *)_dyld_get_image_name,        (void *)hidejb_dyld_get_image_name,        (void **)&orig_dyld_get_image_name);
+	}
+	if (!(gDisabled & HIDE_OFF_DL)) {
 	MSHookFunction((void *)dlopen,                      (void *)hidejb_dlopen,                      (void **)&orig_dlopen);
 	MSHookFunction((void *)dladdr,                      (void *)hidejb_dladdr,                      (void **)&orig_dladdr);
 	MSHookFunction((void *)dlsym,                       (void *)hidejb_dlsym,                       (void **)&orig_dlsym);
+	}
 
 #ifndef __arm64e__
+	if (!(gDisabled & HIDE_OFF_CSOPS)) {
 	// csops: keep the inline-syscall style (matches systemhook/main.c).
 	litehook_hook_function((void *)csops,           (void *)hidejb_csops);
 	litehook_hook_function((void *)csops_audittoken, (void *)hidejb_csops_audittoken);
+	}
 #endif
 
+	if (!(gDisabled & HIDE_OFF_URL)) {
 	hidejb_swizzle_url_schemes();
+	}
 }
