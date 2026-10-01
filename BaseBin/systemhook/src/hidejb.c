@@ -15,7 +15,6 @@
 //   - csops:                clear CS_DEBUGGED / set hardening flags,
 //   - sysctl:               hide amfi developer-mode flag,
 //   - task_for_pid/task_name_for_pid: hide "process task port was obtained",
-//   - task/thread exception ports: hide "Exception ports were set",
 //   - LSApplicationWorkspace/UIApplication canOpenURL: hide jailbreak URL schemes.
 //
 // The path-matching rules are in a SEPARATE compilation unit (hidejb_rules.c)
@@ -46,7 +45,6 @@
 #include <mach-o/loader.h>
 #include <mach/mach.h>
 #include <mach/task.h>
-#include <mach/thread_act.h>
 #include <dispatch/dispatch.h>
 #include <libjailbreak/codesign.h>
 #include <objc/runtime.h>
@@ -62,7 +60,7 @@
 static bool gEnabled = false;
 
 // Indices of injected jailbreak dylibs (systemhook, libellekit, ...) in the
-// dyld image list. These are hidden from _dyld_image_count/_dyld_get_image_name.
+// dyld image list. _dyld_get_image_name returns a benign name for these.
 static uint32_t gHiddenImageIndices[8] = {0};
 static uint32_t gHiddenImageCount = 0;
 
@@ -204,10 +202,7 @@ static int hidejb_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, vo
 
 #pragma mark - dyld image enumeration (hide the injected dylibs)
 
-static uint32_t (*orig_dyld_image_count)(void);
 static const char *(*orig_dyld_get_image_name)(uint32_t);
-static const struct mach_header *(*orig_dyld_get_image_header)(uint32_t);
-static intptr_t (*orig_dyld_get_image_vmaddr_slide)(uint32_t);
 
 static bool hidejb_is_hidden_image_index(uint32_t i)
 {
@@ -217,50 +212,16 @@ static bool hidejb_is_hidden_image_index(uint32_t i)
 	return false;
 }
 
-static uint32_t hidejb_dyld_image_count(void)
-{
-	uint32_t n = orig_dyld_image_count();
-	if (gEnabled && gHiddenImageCount) {
-		uint32_t hidden = 0;
-		for (uint32_t i = 0; i < n; i++) {
-			if (hidejb_is_hidden_image_index(i)) hidden++;
-		}
-		return n - hidden;
-	}
-	return n;
-}
-
-// Map a "virtual" (visible) image index back to its real index, skipping hidden images.
-// Bounded: if the virtual index is out of range (some apps cache the count and
-// keep iterating), return the real count so the caller gets dyld's normal
-// out-of-range NULL instead of us looping forever or wrapping around.
-static uint32_t hidejb_remap_image_index(uint32_t virtualIndex)
-{
-	uint32_t realCount = orig_dyld_image_count();
-	uint32_t realIndex = 0;
-	while (realIndex < realCount) {
-		if (!hidejb_is_hidden_image_index(realIndex)) {
-			if (virtualIndex == 0) return realIndex;
-			virtualIndex--;
-		}
-		realIndex++;
-	}
-	return realCount;
-}
-
+// SAFE variant: keep dyld's real image count and indices unchanged, and only
+// rename the hidden images to a benign path. Remapping indices (returning a
+// reduced count) broke apps that resolve symbols/images by index, so we never
+// shift indices — we only lie about the *name* of the jailbreak dylibs.
 static const char *hidejb_dyld_get_image_name(uint32_t index)
 {
-	return orig_dyld_get_image_name(hidejb_remap_image_index(index));
-}
-
-static const struct mach_header *hidejb_dyld_get_image_header(uint32_t index)
-{
-	return orig_dyld_get_image_header(hidejb_remap_image_index(index));
-}
-
-static intptr_t hidejb_dyld_get_image_vmaddr_slide(uint32_t index)
-{
-	return orig_dyld_get_image_vmaddr_slide(hidejb_remap_image_index(index));
+	if (gEnabled && hidejb_is_hidden_image_index(index)) {
+		return "/usr/lib/libSystem.B.dylib";
+	}
+	return orig_dyld_get_image_name(index);
 }
 
 #pragma mark - dlopen / dladdr (hide the injected dylibs)
@@ -312,34 +273,6 @@ static kern_return_t hidejb_task_name_for_pid(mach_port_name_t target, int pid, 
 		return KERN_FAILURE;
 	}
 	return orig_task_name_for_pid(target, pid, t);
-}
-
-#pragma mark - exception ports (hide "Exception ports were set")
-
-// ElleKit registers an exception port (the "ellekit_exc_port" thread). Reveil
-// detects it via task_get_exception_ports/thread_get_exception_ports. We only
-// hook the GET (detection) side and report "no ports"; the SET side
-// (task_swap_exception_ports) is left alone so ElleKit's crash handler keeps
-// working.
-
-static kern_return_t (*orig_task_get_exception_ports)(task_t, exception_mask_t, exception_mask_array_t, mach_msg_type_number_t *, exception_handler_array_t, exception_behavior_array_t, exception_flavor_array_t);
-static kern_return_t hidejb_task_get_exception_ports(task_t task, exception_mask_t exception_mask, exception_mask_array_t masks, mach_msg_type_number_t *masksCnt, exception_handler_array_t old_handlers, exception_behavior_array_t old_behaviors, exception_flavor_array_t old_flavors)
-{
-	if (gEnabled && task == mach_task_self()) {
-		if (masksCnt) *masksCnt = 0;
-		return KERN_SUCCESS;
-	}
-	return orig_task_get_exception_ports(task, exception_mask, masks, masksCnt, old_handlers, old_behaviors, old_flavors);
-}
-
-static kern_return_t (*orig_thread_get_exception_ports)(thread_act_t, exception_mask_t, exception_mask_array_t, mach_msg_type_number_t *, exception_handler_array_t, exception_behavior_array_t, exception_flavor_array_t);
-static kern_return_t hidejb_thread_get_exception_ports(thread_act_t thread, exception_mask_t exception_mask, exception_mask_array_t masks, mach_msg_type_number_t *masksCnt, exception_handler_array_t old_handlers, exception_behavior_array_t old_behaviors, exception_flavor_array_t old_flavors)
-{
-	if (gEnabled && thread == mach_thread_self()) {
-		if (masksCnt) *masksCnt = 0;
-		return KERN_SUCCESS;
-	}
-	return orig_thread_get_exception_ports(thread, exception_mask, masks, masksCnt, old_handlers, old_behaviors, old_flavors);
 }
 
 #pragma mark - csops (hide the debug/invalid code-signature flags) [arm64]
@@ -486,16 +419,11 @@ void hidejb_init(const char *jbroot)
 	MSHookFunction((void *)statfs,       (void *)hidejb_statfs,       (void **)&orig_statfs);
 	MSHookFunction((void *)sysctlbyname, (void *)hidejb_sysctlbyname, (void **)&orig_sysctlbyname);
 
-	MSHookFunction((void *)_dyld_image_count,           (void *)hidejb_dyld_image_count,           (void **)&orig_dyld_image_count);
 	MSHookFunction((void *)_dyld_get_image_name,        (void *)hidejb_dyld_get_image_name,        (void **)&orig_dyld_get_image_name);
-	MSHookFunction((void *)_dyld_get_image_header,      (void *)hidejb_dyld_get_image_header,      (void **)&orig_dyld_get_image_header);
-	MSHookFunction((void *)_dyld_get_image_vmaddr_slide, (void *)hidejb_dyld_get_image_vmaddr_slide, (void **)&orig_dyld_get_image_vmaddr_slide);
 	MSHookFunction((void *)dlopen,                      (void *)hidejb_dlopen,                      (void **)&orig_dlopen);
 	MSHookFunction((void *)dladdr,                      (void *)hidejb_dladdr,                      (void **)&orig_dladdr);
 	MSHookFunction((void *)task_for_pid,                (void *)hidejb_task_for_pid,                (void **)&orig_task_for_pid);
 	MSHookFunction((void *)task_name_for_pid,           (void *)hidejb_task_name_for_pid,           (void **)&orig_task_name_for_pid);
-	MSHookFunction((void *)task_get_exception_ports,    (void *)hidejb_task_get_exception_ports,    (void **)&orig_task_get_exception_ports);
-	MSHookFunction((void *)thread_get_exception_ports,  (void *)hidejb_thread_get_exception_ports,  (void **)&orig_thread_get_exception_ports);
 
 #ifndef __arm64e__
 	// csops: keep the inline-syscall style (matches systemhook/main.c).
