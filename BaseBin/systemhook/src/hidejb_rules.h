@@ -16,4 +16,13 @@ void hidejb_rules_set_self_bundle_id(void);
 // hooks (it ends up calling strncmp with the hook's `flags`/`mode` args).
 bool hidejb_rules_path_is_jailbreak(const char *path);
 
+// True when `dirpath` is a directory that could contain entries which
+// hidejb_rules_path_is_jailbreak() would hide. Used by the readdir hook to skip
+// entry filtering entirely for the vast majority of directories (perf).
+bool hidejb_rules_dir_may_hide_entries(const char *dirpath);
+
+// True when the *basename* of `path` looks like a jailbreak library
+// (systemhook.dylib, libellekit.dylib, ...). Used for dyld image hiding.
+bool hidejb_rules_path_has_marker(const char *path);
+
 #endif
