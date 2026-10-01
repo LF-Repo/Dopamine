@@ -200,8 +200,8 @@ static int hidejb_statfs(const char *path, struct statfs *buf)
 
 #pragma mark - sysctl (hide amfi developer-mode flag)
 
-static int (*orig_sysctlbyname)(const char *, void *, size_t *, const void *, size_t);
-static int hidejb_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, const void *newp, size_t newlen)
+static int (*orig_sysctlbyname)(const char *, void *, size_t *, void *, size_t);
+static int hidejb_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
 {
 	if (gEnabled && name && strcmp(name, "security.mac.amfi.developer_mode_status") == 0) {
 		if (oldp && oldlenp && *oldlenp >= sizeof(int)) {
