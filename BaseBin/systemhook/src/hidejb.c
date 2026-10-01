@@ -69,23 +69,15 @@ bool hidejb_enabled(void)
 	return getenv("DOPAMINE_APP_HIDE") != NULL;
 }
 
-#pragma mark - open / openat
+#pragma mark - fopen (non-variadic; open/openat are deliberately NOT hooked —
+// hooking the variadic open() via MSHookFunction kept crashing on arm64, and
+// fopen covers the common "fopen(\"/var/jb/...\")" check without a variadic ABI)
 
-static int (*orig_open)(const char *, int, ...);
-// NOTE: declared non-variadic on purpose. open() is variadic, but on arm64 the
-// optional `mode` is always passed in x2, so a fixed 3-arg signature is ABI-
-// identical. Keeping it non-variadic avoids the va_list save area.
-static int hidejb_open(const char *path, int flags, int mode)
+static FILE *(*orig_fopen)(const char *, const char *);
+static FILE *hidejb_fopen(const char *path, const char *mode)
 {
-	if (gEnabled && hidejb_rules_path_is_jailbreak(path)) { errno = ENOENT; return -1; }
-	return orig_open(path, flags, mode);
-}
-
-static int (*orig_openat)(int, const char *, int, ...);
-static int hidejb_openat(int fd, const char *path, int flags, int mode)
-{
-	if (gEnabled && hidejb_rules_path_is_jailbreak(path)) { errno = ENOENT; return -1; }
-	return orig_openat(fd, path, flags, mode);
+	if (gEnabled && hidejb_rules_path_is_jailbreak(path)) { errno = ENOENT; return NULL; }
+	return orig_fopen(path, mode);
 }
 
 #pragma mark - stat family
@@ -435,8 +427,7 @@ void hidejb_init(const char *jbroot)
 	// ALL callers — including Foundation/UIKit internals — go through our hooks.
 	// litehook_rebind_symbol only rewrites the app's own GOT entries, so it misses
 	// the internal stat/access/open calls that NSFileManager & friends make.
-	MSHookFunction((void *)open,         (void *)hidejb_open,         (void **)&orig_open);
-	MSHookFunction((void *)openat,       (void *)hidejb_openat,       (void **)&orig_openat);
+	MSHookFunction((void *)fopen,        (void *)hidejb_fopen,        (void **)&orig_fopen);
 	MSHookFunction((void *)stat,         (void *)hidejb_stat,         (void **)&orig_stat);
 	MSHookFunction((void *)lstat,        (void *)hidejb_lstat,        (void **)&orig_lstat);
 	MSHookFunction((void *)fstatat,      (void *)hidejb_fstatat,      (void **)&orig_fstatat);
