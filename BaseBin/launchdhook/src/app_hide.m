@@ -18,7 +18,7 @@
 #include <xpc/xpc.h>
 #include <errno.h>
 #include <arpa/inet.h>
-#include <substrate.h>
+#include <litehook.h>
 
 #include <libjailbreak/libjailbreak.h>
 #include <xpc_private.h>
@@ -191,9 +191,10 @@ static int new_xpc_pipe_routine_reply(xpc_object_t reply)
 
 void app_hide_init(void)
 {
-	// MSHookFunction fills in the orig pointers; we never assign them directly
-	// (xpc_dictionary_create_reply carries XPC_RETURNS_RETAINED, which makes a
-	// direct assignment a type error under ARC).
-	MSHookFunction((void *)xpc_dictionary_create_reply, (void *)new_xpc_dictionary_create_reply, (void **)&orig_xpc_dictionary_create_reply);
-	MSHookFunction((void *)xpc_pipe_routine_reply, (void *)new_xpc_pipe_routine_reply, (void **)&orig_xpc_pipe_routine_reply);
+	// Save the originals first, then instruction-replace with litehook (launchdhook
+	// does not link substrate, but litehook is already compiled in).
+	orig_xpc_dictionary_create_reply = (xpc_object_t (*)(xpc_object_t))xpc_dictionary_create_reply;
+	orig_xpc_pipe_routine_reply = (int (*)(xpc_object_t))xpc_pipe_routine_reply;
+	litehook_hook_function((void *)xpc_dictionary_create_reply, (void *)new_xpc_dictionary_create_reply);
+	litehook_hook_function((void *)xpc_pipe_routine_reply, (void *)new_xpc_pipe_routine_reply);
 }
