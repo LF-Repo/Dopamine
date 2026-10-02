@@ -298,10 +298,11 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			app_hide_global_hide();
 			pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
 			int r = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, (char *const *)envp);
-			if (pid) *pid = *blacklistedPidp;
+			pid_t childPid = *blacklistedPidp;
+			if (pid) *pid = childPid;
 			app_hide_commit_pid(blacklistedPidp);
 			if (r == 0) {
-				app_hide_watch_exit(*blacklistedPidp);
+				app_hide_watch_exit(childPid);
 			} else {
 				app_hide_global_restore();
 			}
