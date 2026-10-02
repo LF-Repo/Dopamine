@@ -145,6 +145,16 @@ static kSpawnConfig spawn_config_for_executable(const char* path, char *const ar
 	return (kSpawnConfigInject | kSpawnConfigTrust);
 }
 
+// Weak fallback so this translation unit can be linked into launchdhook (which
+// does not compile hidejb.c). systemhook provides the strong definition in
+// hidejb.c. When hidejb is active we must keep propagating DOPAMINE_APP_HIDE to
+// children even though hidejb_init() unset it from our own environ (so the hide
+// marker is not visible to the app as a "suspicious environment variable").
+__attribute__((weak)) bool hidejb_is_hidden(void)
+{
+	return false;
+}
+
 // 1. Ensure the binary about to be spawned and all of it's dependencies are trust cached
 // 2. Insert "DYLD_INSERT_LIBRARIES=/usr/lib/systemhook.dylib" into all binaries spawned
 // 3. Increase Jetsam limit to more sane value (Multipler defined as JETSAM_MULTIPLIER)
@@ -296,7 +306,9 @@ static int spawn_exec_hook_common(bool isExec,
 
 	pid_t childPid = -1;
 
-	if ((shouldInsertJBEnv && JBEnvAlreadyInsertedCount == 1) || (!shouldInsertJBEnv && JBEnvAlreadyInsertedCount == 0 && !hasSafeModeVariable)) {
+	bool hideChild = hidejb_is_hidden();
+
+	if (!hideChild && ((shouldInsertJBEnv && JBEnvAlreadyInsertedCount == 1) || (!shouldInsertJBEnv && JBEnvAlreadyInsertedCount == 0 && !hasSafeModeVariable))) {
 		// we're already good, just call orig
 		r = orig(&childPid, envp);
 	}
@@ -314,6 +326,11 @@ static int spawn_exec_hook_common(bool isExec,
 					strcat(newLibraryInsert, existingLibraryInserts);
 				}
 				envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert);
+			}
+			if (hideChild) {
+				// Re-add the hide marker that hidejb_init() unset from our own
+				// environ, so child processes keep hiding.
+				envbuf_setenv(&envc, "DOPAMINE_APP_HIDE", "1");
 			}
 		}
 		else {

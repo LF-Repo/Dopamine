@@ -8,6 +8,12 @@
 void hidejb_rules_set_jbroot(const char *jbroot);
 void hidejb_rules_set_self_bundle_id(void);
 
+// RootHide-style: true when our own bundle id is marked HideEnvironment=YES in
+// /var/mobile/Library/Preferences/.DopamineAppHideRules.plist. Used instead of
+// the DOPAMINE_APP_HIDE env var when the hide dylib is loaded as a LC_LOAD_DYLIB
+// dependency (the patched-binary path has no env var).
+bool hidejb_rules_is_self_hidden(void);
+
 // True when `path` is a jailbreak path/file that should be hidden from the app.
 //
 // This lives in a SEPARATE compilation unit (hidejb_rules.c) so it can never be

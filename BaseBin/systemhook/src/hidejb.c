@@ -198,7 +198,16 @@ static const char *hidejb_rewrite_id_dylib(const struct mach_header *header, uin
 
 bool hidejb_enabled(void)
 {
-	return getenv("DOPAMINE_APP_HIDE") != NULL;
+	// Backward-compatible: the old spawn path sets DOPAMINE_APP_HIDE=1; the new
+	// RootHide-style path loads us as a LC_LOAD_DYLIB dependency with no env var,
+	// so fall back to the hide-rules plist matched against our own bundle id.
+	if (getenv("DOPAMINE_APP_HIDE") != NULL) return true;
+	return hidejb_rules_is_self_hidden();
+}
+
+bool hidejb_is_hidden(void)
+{
+	return gEnabled;
 }
 
 #pragma mark - fopen (non-variadic; open/openat are deliberately NOT hooked —
@@ -732,18 +741,19 @@ static void hidejb_swizzle_url_schemes(void)
 // directory bookkeeping go out of sync (QQ burned 31s+ of CPU and got killed by
 // the launch watchdog).
 //
-// `d` (dyld image hiding) is ON by default so the injected systemhook / libellekit
-// images are renamed to benign paths — this is the "hide the injected shared
-// libraries" feature. It cannot be made fully undetectable: the LC_UUID still
-// does not match any real file at the claimed path, so an anti-tamper SDK that
-// validates (path, UUID) against the filesystem can still catch it. Hiding the
-// injection for real requires the injected code to not be a separate image at
-// all (RootHide patches the app binary + re-signs it), which is out of scope for
-// this rootless hook layer.
+// `d` (dyld image hiding) is ALSO OFF BY DEFAULT. Renaming the injected images
+// to benign paths tripped two detectors harder than leaving the real path did:
+//   - "发现钩住的共享库 / 动态链接器不可靠": the LC_ID_DYLIB rewrite + fake
+//     imageFilePath are themselves a tamper signal;
+//   - some apps (Filza) spun in CFBundle version resolution over the fake
+//     "/usr/lib/libSystem.B.N.dylib" paths and got killed by the scene-create
+//     watchdog (65s CPU, same failure the QQ note below describes).
+// Hiding the injection for real requires the injected code to not be a separate
+// image at all (RootHide patches the app binary + re-signs it), which is out of
+// scope for this rootless hook layer.
 //
-// Write lowercase `d` to turn image hiding OFF, or `E` to enable readdir
-// filtering, for on-device testing.
-static uint32_t gDisabled = HIDE_OFF_F_DIR;
+// Write uppercase `D` to switch image hiding ON for testing.
+static uint32_t gDisabled = HIDE_OFF_DYLD | HIDE_OFF_F_DIR;
 
 static void hidejb_load_disable_switch(const char *jbroot)
 {
@@ -786,6 +796,12 @@ void hidejb_init(const char *jbroot)
 	if (!hidejb_enabled()) return;
 
 	gEnabled = true;
+
+	// Don't leave DOPAMINE_APP_HIDE in our environ: a detector enumerating the
+	// environment would flag it as a "suspicious environment variable". Child
+	// processes get it re-added by the shared spawn hook (see common.c, which
+	// checks hidejb_is_hidden()).
+	unsetenv("DOPAMINE_APP_HIDE");
 
 	hidejb_rules_set_jbroot(jbroot);
 	hidejb_rules_set_self_bundle_id();
