@@ -78,6 +78,17 @@ static bool gEnabled = false;
 static uint32_t gHiddenImageIndices[HIDE_MAX_IMAGES] = {0};
 static uint32_t gHiddenImageCount = 0;
 static char gHiddenImageFakePaths[HIDE_MAX_IMAGES][40];
+// Once the Mach-O header's LC_ID_DYLIB has been rewritten in place, this holds
+// a pointer to that very string, so the image list, _dyld_get_image_name() and
+// the binary's own self-description all read back the SAME bytes.
+static const char *gHiddenImageFakePtrs[HIDE_MAX_IMAGES] = {0};
+
+// mach_vm.h is an "#error unsupported" stub in the iOS SDK, so declare by hand
+// (same as common/private.h does for the other mach_vm entry points).
+extern kern_return_t mach_vm_protect(vm_map_t target_task, mach_vm_address_t address, mach_vm_size_t size, boolean_t set_maximum, vm_prot_t new_protection);
+#ifndef VM_PROT_COPY
+#define VM_PROT_COPY 0x10
+#endif
 
 static const char *hidejb_fake_path_for_slot(uint32_t slot)
 {
@@ -109,6 +120,79 @@ static int hidejb_register_hidden_index(uint32_t realIndex)
 static bool hidejb_is_hidden_image_index(uint32_t i)
 {
 	return hidejb_hidden_slot_for_index(i) >= 0;
+}
+
+#pragma mark - LC_ID_DYLIB consistency rewrite (the RootHide trick)
+
+// Find the name string of an image's LC_ID_DYLIB (the dylib's own
+// self-description, e.g. "@loader_path/systemhook.dylib").
+static char *hidejb_image_id_dylib_name(const struct mach_header *header)
+{
+	if (!header) return NULL;
+
+	const struct mach_header_64 *mh = (const struct mach_header_64 *)header;
+	if (mh->magic != MH_MAGIC_64) return NULL;
+
+	const uint8_t *p = (const uint8_t *)mh + sizeof(struct mach_header_64);
+	for (uint32_t i = 0; i < mh->ncmds; i++) {
+		const struct load_command *lc = (const struct load_command *)p;
+		if (lc->cmdsize < sizeof(struct load_command)) return NULL;
+		if (lc->cmd == LC_ID_DYLIB) {
+			const struct dylib_command *dc = (const struct dylib_command *)lc;
+			if (dc->dylib.name.offset >= lc->cmdsize) return NULL;
+			return (char *)lc + dc->dylib.name.offset;
+		}
+		p += lc->cmdsize;
+	}
+	return NULL;
+}
+
+// Overwrite an image's LC_ID_DYLIB name IN PLACE with a benign string that fits
+// in the original allocation, and return a pointer to it.
+//
+// Why this matters: faking only dyld_all_image_infos / _dyld_get_image_name
+// leaves the binary itself still saying "systemhook.dylib" / "libellekit.dylib",
+// so an anti-tamper SDK that compares the two sees a contradiction and
+// self-destructs (that is exactly how the banking app was crashing). Rewriting
+// the header removes the contradiction instead of papering over it.
+//
+// Safety: the write never exceeds the length of the original NUL-terminated
+// string, we never touch bytes past our own NUL, and if anything is unexpected
+// (no LC_ID_DYLIB, no room, page not made writable) we simply skip this image.
+static const char *hidejb_rewrite_id_dylib(const struct mach_header *header, uint32_t slot)
+{
+	char *name = hidejb_image_id_dylib_name(header);
+	if (!name || !name[0]) return NULL;
+
+	size_t origLen = strlen(name);
+	if (origLen < 12 || origLen > 512) return NULL;
+
+	char fake[64];
+	snprintf(fake, sizeof(fake), "/usr/lib/libsystem_%u.dylib", slot);
+	size_t fakeLen = strlen(fake);
+	if (fakeLen > origLen) {
+		snprintf(fake, sizeof(fake), "libsystem_%u.dylib", slot);
+		fakeLen = strlen(fake);
+		if (fakeLen > origLen) return NULL;
+	}
+
+	uintptr_t start = (uintptr_t)name;
+	uintptr_t pageStart = start & ~(uintptr_t)0x3FFF;
+	uintptr_t pageEnd = (start + fakeLen + 1 + 0x3FFFu) & ~(uintptr_t)0x3FFF;
+	if (mach_vm_protect(mach_task_self(), pageStart, pageEnd - pageStart, FALSE,
+						VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS) {
+		return NULL;
+	}
+
+	memcpy(name, fake, fakeLen);
+	name[fakeLen] = '\0';
+
+	// Restore the original page protection. LC_ID_DYLIB lives in the load-command
+	// area at the start of the Mach-O, i.e. in __TEXT, which is normally r-x.
+	// Leaving a writable code page behind is itself a tamper signal.
+	mach_vm_protect(mach_task_self(), pageStart, pageEnd - pageStart, FALSE,
+					VM_PROT_READ | VM_PROT_EXECUTE);
+	return name;
 }
 
 bool hidejb_enabled(void)
@@ -279,6 +363,9 @@ static const char *hidejb_dyld_get_image_name(uint32_t index)
 	if (gEnabled) {
 		int slot = hidejb_hidden_slot_for_index(index);
 		if (slot >= 0) {
+			// Prefer the rewritten copy inside the Mach-O header itself, so this
+			// accessor and the binary's LC_ID_DYLIB agree byte for byte.
+			if (gHiddenImageFakePtrs[slot]) return gHiddenImageFakePtrs[slot];
 			const char *fake = hidejb_fake_path_for_slot((uint32_t)slot);
 			if (fake) return fake;
 		}
@@ -335,6 +422,19 @@ static void hidejb_patch_all_image_infos(void)
 
 		int slot = hidejb_register_hidden_index(i);
 		if (slot < 0) continue;
+
+		// Rewrite the binary's own LC_ID_DYLIB first, then point the image list
+		// at that same string.
+		const char *inHeader = hidejb_rewrite_id_dylib(_dyld_get_image_header(i), (uint32_t)slot);
+		if (inHeader) {
+			gHiddenImageFakePtrs[slot] = inHeader;
+			arr[i].imageFilePath = inHeader;
+			continue;
+		}
+
+		// Could not patch the header (unexpected layout / page not writable).
+		// Fall back to a unique fake path; the inconsistency stays, but at least
+		// the name is hidden and nothing was left half-modified.
 		const char *fake = hidejb_fake_path_for_slot((uint32_t)slot);
 		if (fake) arr[i].imageFilePath = fake;
 	}
@@ -360,10 +460,23 @@ static int hidejb_dladdr(const void *addr, Dl_info *info)
 {
 	int r = orig_dladdr(addr, info);
 	if (gEnabled && r != 0 && info && info->dli_fname) {
-		if (strstr(info->dli_fname, "systemhook") || strstr(info->dli_fname, "libellekit") ||
-		    strstr(info->dli_fname, "CydiaSubstrate") || strstr(info->dli_fname, "libjailbreak") ||
-		    strstr(info->dli_fname, "TweakLoader")) {
-			return 0;
+		if (hidejb_rules_path_has_marker(info->dli_fname)) {
+			// Keep the call SUCCEEDING. Returning 0 for an address that is inside
+			// a mapped image is itself an inconsistency an anti-tamper SDK can
+			// notice; instead just hand back the same benign name everything
+			// else reports.
+			const char *fake = NULL;
+			if (info->dli_fbase) {
+				uint32_t n = _dyld_image_count();
+				for (uint32_t i = 0; i < n; i++) {
+					if (_dyld_get_image_header(i) == (const struct mach_header *)info->dli_fbase) {
+						int slot = hidejb_hidden_slot_for_index(i);
+						if (slot >= 0) fake = gHiddenImageFakePtrs[slot];
+						break;
+					}
+				}
+			}
+			info->dli_fname = fake ? fake : "/usr/lib/libsystem.dylib";
 		}
 	}
 	return r;
@@ -500,8 +613,8 @@ static void hidejb_swizzle_url_schemes(void)
 // Create  /var/jb/basebin/hidejb_off.txt  (via Filza) containing any of these
 // letters, then do a userspace reboot, to disable that hook group for testing:
 //   f = all file hooks (equivalent to 1+2+3+4+5)
-//   d = dyld image hiding — ALREADY OFF BY DEFAULT (see gDisabled below);
-//       write uppercase `D` to turn it back ON.
+//   d = dyld image hiding — ON by default now (it also rewrites the image's own
+//       LC_ID_DYLIB so nothing contradicts). Write `d` to turn it OFF.
 //   l = dlopen/dladdr/dlsym
 //   c = csops
 //   s = sysctlbyname
@@ -525,15 +638,14 @@ static void hidejb_swizzle_url_schemes(void)
 #define HIDE_OFF_F_FOPEN  (1u << 9)
 #define HIDE_OFF_F_STATFS (1u << 10)
 
-// Two groups are OFF BY DEFAULT, because they are the two that broke real apps:
-//   d (dyld image hiding): faking an image path makes dyld_all_image_infos
-//     disagree with the Mach-O header's LC_ID_DYLIB, and the banking app's
-//     anti-tamper SDK treats that contradiction as tampering and self-destructs.
-//   2 (opendir/readdir): hiding entries / returning NULL for whole directories
-//     makes a large app's own directory bookkeeping go out of sync (QQ burned
-//     31s+ of CPU and got killed by the launch watchdog).
-// Write uppercase `D` / `E` to switch the respective group back ON.
-static uint32_t gDisabled = HIDE_OFF_DYLD | HIDE_OFF_F_DIR;
+// Only group 2 (opendir/readdir) is OFF BY DEFAULT: hiding entries / returning
+// NULL for whole directories made a large app's own directory bookkeeping go out
+// of sync (QQ burned 31s+ of CPU and got killed by the launch watchdog).
+// `d` (dyld image hiding) is ON again now that it rewrites the image's own
+// LC_ID_DYLIB, so the image list and the binary agree instead of contradicting
+// each other. Write `2` to disable group 2 explicitly, `E` to re-enable it, and
+// `d` to switch image hiding back off.
+static uint32_t gDisabled = HIDE_OFF_F_DIR;
 
 static void hidejb_load_disable_switch(const char *jbroot)
 {
