@@ -1201,6 +1201,14 @@ extern char **environ;
                     [self unregisterJailbreakApps];
                     [self setPrivatePrebootProtected:NO];
                     [self setFakelibMounted:NO];
+
+                    // RootHide-style: hide security.mac.amfi.developer_mode_status
+                    // (1 -> 0, i.e. report "developer mode disabled" like a stock
+                    // device). Runs in jbctl (root) because jbctl acquires the
+                    // kernel r/w primitives; the app itself has none after the
+                    // userspace reboot. Non-fatal: if krw/dev-mode storage is
+                    // unavailable it logs and continues.
+                    [self spawnJbctlAsRootWithArgs:@[@"internal", @"devmode", @"hide"]];
                 }
 
                 [self hideJailbreakURLSchemes];
@@ -1237,6 +1245,11 @@ extern char **environ;
                     [self setFakelibMounted:YES];
                     [self setPrivatePrebootProtected:YES];
                     [self refreshJailbreakApps];
+
+                    // Restore the real developer-mode state (1) that was hidden
+                    // above. Must run AFTER the /var/jb symlink is re-created,
+                    // because jbctl lives at /var/jb/basebin/jbctl.
+                    [self spawnJbctlAsRootWithArgs:@[@"internal", @"devmode", @"show"]];
                 }
             }
         }

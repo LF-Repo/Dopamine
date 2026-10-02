@@ -1,6 +1,7 @@
 #import "internal.h"
 #import <Foundation/Foundation.h>
 #import <libjailbreak/libjailbreak.h>
+#import <libjailbreak/developer_mode_hide.h>
 #import <sys/mount.h>
 #import <libjailbreak/stock_fixes.h>
 
@@ -168,6 +169,25 @@ int jbctl_handle_internal(const char *command, int argc, char* argv[])
 			return fakelib_set_mounted(toMount);
 		}
 		return -1;
+	}
+	else if (!strcmp(command, "devmode")) {
+		bool toHide = false;
+		bool validArg = false;
+		if (argc > 1) {
+			if (!strcmp(argv[1], "hide")) { toHide = true; validArg = true; }
+			else if (!strcmp(argv[1], "show")) { toHide = false; validArg = true; }
+		}
+		if (!validArg) return -1;
+
+		// jbctl runs as root but has no kernel r/w primitives yet; acquire them
+		// from launchdhook (same path idownloadd uses), then toggle the AMFI
+		// developer-mode flag. developer_mode_set_hidden() is non-fatal: if the
+		// storage cannot be located/written it returns -1 and we just report it.
+		if (jbclient_initialize_primitives() != 0) {
+			printf("ERROR: failed to initialize krw primitives\n");
+			return -1;
+		}
+		return developer_mode_set_hidden(toHide);
 	}
 	else if (!strcmp(command, "startup")) {
 		protection_set_active(true);

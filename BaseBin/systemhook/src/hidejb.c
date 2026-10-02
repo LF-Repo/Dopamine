@@ -39,6 +39,7 @@
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <sys/sysctl.h>
+#include <sys/syscall.h>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include <mach-o/dyld_images.h>
@@ -334,19 +335,108 @@ static int hidejb_statfs(const char *path, struct statfs *buf)
 	return orig_statfs(path, buf);
 }
 
-#pragma mark - sysctl (hide amfi developer-mode flag)
+// statfs() above only fakes a single path. A detector that enumerates the whole
+// mount table with getfsstat()/getmntinfo() still sees the fakelib bind mount
+// over /usr/lib and the preboot protection bind mounts. Filter those out here.
+static int (*orig_getfsstat)(struct statfs *, int, int);
+static bool hidejb_mount_is_jailbreak(const struct statfs *m)
+{
+	if (!m || !m->f_mntonname[0]) return false;
+	// fakelib bind mount (jailbreak dylibs live under /usr/lib)
+	if (strcmp(m->f_mntonname, "/usr/lib") == 0) return true;
+	// preboot protection bind mounts (jbctl "protection" mounts)
+	if (strncmp(m->f_mntonname, "/private/preboot/", 17) == 0) return true;
+	// any bindfs mount is jailbreak-created on iOS (stock iOS has no bindfs)
+	if (m->f_fstypename[0] && strcmp(m->f_fstypename, "bindfs") == 0) return true;
+	return false;
+}
+static int hidejb_getfsstat(struct statfs *buf, int bufsize, int flags)
+{
+	int n = orig_getfsstat(buf, bufsize, flags);
+	if (!gEnabled || n <= 0 || !buf) return n;
+	int w = 0;
+	for (int i = 0; i < n; i++) {
+		if (hidejb_mount_is_jailbreak(&buf[i])) continue;
+		if (w != i) buf[w] = buf[i];
+		w++;
+	}
+	return w;
+}
+
+#pragma mark - sysctl (hide amfi developer-mode flag, RootHide-style)
+
+// RootHide's hideDeveloperMode() swaps the two sysctl OIDs so that
+// security.mac.amfi.developer_mode_status *reports* 0 (launch_env_logging's
+// value) while the real kernel state stays on. In-process we emulate the same
+// "report 0" and — like RootHide's __sysctl/__sysctlbyname hooks — cover both
+// the by-name and the numeric-MIB entry points, not just sysctlbyname().
+
+extern int __sysctlbyname(const char *, size_t, void *, size_t *, void *, size_t);
+extern int __sysctl(int *, u_int, void *, size_t *, const void *, size_t);
 
 static int (*orig_sysctlbyname)(const char *, void *, size_t *, void *, size_t);
 static int hidejb_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
 {
 	if (gEnabled && name && strcmp(name, "security.mac.amfi.developer_mode_status") == 0) {
 		if (oldp && oldlenp && *oldlenp >= sizeof(int)) {
-			*(int *)oldp = 1;
+			*(int *)oldp = 0; // report "developer mode disabled" (stock)
 			*oldlenp = sizeof(int);
 			return 0;
 		}
 	}
 	return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+}
+
+// __sysctlbyname is the real by-name syscall wrapper (sysctlbyname funnels into it).
+static int (*orig___sysctlbyname)(const char *, size_t, void *, size_t *, void *, size_t);
+static int syscall___sysctlbyname(const char *name, size_t namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
+{
+	return syscall(SYS_sysctlbyname, name, namelen, oldp, oldlenp, newp, newlen);
+}
+static int hidejb___sysctlbyname(const char *name, size_t namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
+{
+	if (gEnabled && name && namelen && strncmp(name, "security.mac.amfi.developer_mode_status", namelen) == 0) {
+		if (oldp && oldlenp && *oldlenp >= sizeof(int)) {
+			*(int *)oldp = 0;
+			*oldlenp = sizeof(int);
+			return 0;
+		}
+	}
+	return syscall___sysctlbyname(name, namelen, oldp, oldlenp, newp, newlen);
+}
+
+// __sysctl is the numeric-MIB syscall wrapper. Resolve the MIB once by name
+// (the {0,3} + name trick) and then match numeric calls against it — same as
+// RootHide's __sysctl_hook in roothider_common.c.
+static int (*orig___sysctl)(int *, u_int, void *, size_t *, const void *, size_t);
+static int syscall___sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, const void *newp, size_t newlen)
+{
+	return syscall(SYS_sysctl, name, namelen, oldp, oldlenp, newp, newlen);
+}
+static int hidejb___sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, const void *newp, size_t newlen)
+{
+	static int cached_namelen = 0;
+	static int cached_name[CTL_MAXNAME + 2] = {0};
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		int mib[] = {0, 3};
+		size_t buflen = sizeof(cached_name);
+		const char *query = "security.mac.amfi.developer_mode_status";
+		if (syscall___sysctl(mib, sizeof(mib)/sizeof(mib[0]), cached_name, &buflen, (void *)query, strlen(query)) == 0) {
+			cached_namelen = (int)(buflen / sizeof(cached_name[0]));
+		}
+	});
+
+	if (gEnabled && name && namelen && cached_namelen &&
+	    namelen == (u_int)cached_namelen &&
+	    memcmp(cached_name, name, (size_t)namelen * sizeof(name[0])) == 0) {
+		if (oldp && oldlenp && *oldlenp >= sizeof(int)) {
+			*(int *)oldp = 0;
+			*oldlenp = sizeof(int);
+			return 0;
+		}
+	}
+	return syscall___sysctl(name, namelen, oldp, oldlenp, newp, newlen);
 }
 
 #pragma mark - dyld image enumeration (hide the injected dylibs)
@@ -638,22 +728,22 @@ static void hidejb_swizzle_url_schemes(void)
 #define HIDE_OFF_F_FOPEN  (1u << 9)
 #define HIDE_OFF_F_STATFS (1u << 10)
 
-// Both `d` (dyld image hiding) and `2` (opendir/readdir) are OFF BY DEFAULT.
+// `2` (opendir/readdir) is OFF BY DEFAULT: hiding entries made a large app's own
+// directory bookkeeping go out of sync (QQ burned 31s+ of CPU and got killed by
+// the launch watchdog).
 //
-// `2`: hiding entries / returning NULL for whole directories made a large app's
-//      own directory bookkeeping go out of sync (QQ burned 31s+ of CPU and got
-//      killed by the launch watchdog).
-// `d`: image hiding cannot be made undetectable. Rewriting the image's own
-//      LC_ID_DYLIB removes the path/header contradiction, but the LC_UUID still
-//      does not match any real file at the claimed path, so an anti-tamper SDK
-//      that validates (path, UUID) against the filesystem still catches it (the
-//      banking app reported "/usr/lib/libSystem.B.0.dylib" etc. and
-//      self-destructed). Hiding the injection for real requires the injected
-//      code to not be a separate image at all, which is a dyld/MachOMerger
-//      level change, not something this hook layer can fake.
+// `d` (dyld image hiding) is ON by default so the injected systemhook / libellekit
+// images are renamed to benign paths — this is the "hide the injected shared
+// libraries" feature. It cannot be made fully undetectable: the LC_UUID still
+// does not match any real file at the claimed path, so an anti-tamper SDK that
+// validates (path, UUID) against the filesystem can still catch it. Hiding the
+// injection for real requires the injected code to not be a separate image at
+// all (RootHide patches the app binary + re-signs it), which is out of scope for
+// this rootless hook layer.
 //
-// Write uppercase `D` / `E` to switch the respective group back ON for testing.
-static uint32_t gDisabled = HIDE_OFF_DYLD | HIDE_OFF_F_DIR;
+// Write lowercase `d` to turn image hiding OFF, or `E` to enable readdir
+// filtering, for on-device testing.
+static uint32_t gDisabled = HIDE_OFF_F_DIR;
 
 static void hidejb_load_disable_switch(const char *jbroot)
 {
@@ -742,9 +832,12 @@ void hidejb_init(const char *jbroot)
 	}
 	if (!(gDisabled & (HIDE_OFF_FILE | HIDE_OFF_F_STATFS))) {
 	MSHookFunction((void *)statfs,       (void *)hidejb_statfs,       (void **)&orig_statfs);
+	MSHookFunction((void *)getfsstat,    (void *)hidejb_getfsstat,    (void **)&orig_getfsstat);
 	}
 	if (!(gDisabled & HIDE_OFF_SYSCTL)) {
-	MSHookFunction((void *)sysctlbyname, (void *)hidejb_sysctlbyname, (void **)&orig_sysctlbyname);
+	MSHookFunction((void *)sysctlbyname,  (void *)hidejb_sysctlbyname,  (void **)&orig_sysctlbyname);
+	MSHookFunction((void *)__sysctlbyname, (void *)hidejb___sysctlbyname, (void **)&orig___sysctlbyname);
+	MSHookFunction((void *)__sysctl,       (void *)hidejb___sysctl,       (void **)&orig___sysctl);
 	}
 
 	if (!(gDisabled & HIDE_OFF_DYLD)) {
