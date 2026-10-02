@@ -508,7 +508,7 @@ static void hidejb_swizzle_url_schemes(void)
 //   u = URL scheme swizzle
 //   --- finer split of the file hooks, for pinpointing which one breaks an app:
 //   1 = stat / lstat / fstatat / access / faccessat   (path queries)
-//   2 = opendir / readdir                             (directory enumeration)
+//   2 = opendir / readdir   — ALREADY OFF BY DEFAULT; write `E` to re-enable.
 //   3 = realpath / readlink / readlinkat              (path resolution)
 //   4 = fopen
 //   5 = statfs
@@ -525,11 +525,15 @@ static void hidejb_swizzle_url_schemes(void)
 #define HIDE_OFF_F_FOPEN  (1u << 9)
 #define HIDE_OFF_F_STATFS (1u << 10)
 
-// `d` (dyld image hiding) is OFF BY DEFAULT: faking an image's path makes
-// dyld_all_image_infos disagree with the Mach-O header's LC_ID_DYLIB, and the
-// banking app's anti-tamper SDK treats that contradiction as tampering and
-// self-destructs. Write an uppercase `D` to switch it back on.
-static uint32_t gDisabled = HIDE_OFF_DYLD;
+// Two groups are OFF BY DEFAULT, because they are the two that broke real apps:
+//   d (dyld image hiding): faking an image path makes dyld_all_image_infos
+//     disagree with the Mach-O header's LC_ID_DYLIB, and the banking app's
+//     anti-tamper SDK treats that contradiction as tampering and self-destructs.
+//   2 (opendir/readdir): hiding entries / returning NULL for whole directories
+//     makes a large app's own directory bookkeeping go out of sync (QQ burned
+//     31s+ of CPU and got killed by the launch watchdog).
+// Write uppercase `D` / `E` to switch the respective group back ON.
+static uint32_t gDisabled = HIDE_OFF_DYLD | HIDE_OFF_F_DIR;
 
 static void hidejb_load_disable_switch(const char *jbroot)
 {
@@ -560,6 +564,7 @@ static void hidejb_load_disable_switch(const char *jbroot)
 			case '4': gDisabled |= HIDE_OFF_F_FOPEN;  break;
 			case '5': gDisabled |= HIDE_OFF_F_STATFS; break;
 			case 'D': gDisabled &= ~HIDE_OFF_DYLD;    break; // re-enable image hiding
+			case 'E': gDisabled &= ~HIDE_OFF_F_DIR;   break; // re-enable opendir/readdir filtering
 		}
 	}
 }
