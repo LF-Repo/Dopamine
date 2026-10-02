@@ -119,7 +119,7 @@ static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 
 
 @interface _LSDOpenClient : NSObject
-@property(retain,readonly) NSXPCConnection* XPCConnection;
+- (NSXPCConnection *)XPCConnection;
 @end
 
 %hook _LSDOpenClient
@@ -127,8 +127,9 @@ static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 // 16.2+
 -(void)openURL:(NSURL*)url fileHandle:(id)fileHandle options:(id)options completionHandler:(void(^)(BOOL,NSError*))completionHandler
 {
-	if (self.XPCConnection) {
-		pid_t pid = self.XPCConnection.processIdentifier;
+	NSXPCConnection *conn = [self XPCConnection];
+	if (conn) {
+		pid_t pid = [conn processIdentifier];
 		if (jbclient_blacklist_check_pid(pid) && isJailbreakURLScheme(url.scheme)) {
 			if (completionHandler) completionHandler(NO, nil);
 			return;
@@ -140,8 +141,9 @@ static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 // 15.0~16.0
 - (void)openURL:(NSURL*)url options:(id)options completionHandler:(void(^)(BOOL,NSError*))completionHandler
 {
-	if (self.XPCConnection) {
-		pid_t pid = self.XPCConnection.processIdentifier;
+	NSXPCConnection *conn = [self XPCConnection];
+	if (conn) {
+		pid_t pid = [conn processIdentifier];
 		if (jbclient_blacklist_check_pid(pid) && isJailbreakURLScheme(url.scheme)) {
 			if (completionHandler) completionHandler(NO, nil);
 			return;
