@@ -1,4 +1,4 @@
-#include <stdint.h>
+﻿#include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -162,90 +162,8 @@ bool superblob_is_adhoc_signed(const CS_SuperBlob *superblob)
 	return true;
 }
 
-// ---- Stage 2 forensic probe (runs once per process, changes no behaviour) ---
-//
-// QUESTION: can code running inside the merged dyld re-protect a SHARED CACHE
-// code page? That is the one capability needed to install libc hooks from dyld
-// itself, so that a hidden app needs NO extra image - and therefore has no
-// systemhook.dylib / libellekit.dylib for an anti-tamper SDK to find.
-//
-// WHY THIS IS SAFE (the previous attempt was not):
-//   * the instructions that call vm_protect live in dyld's own text;
-//   * the page being re-protected belongs to the shared cache - a completely
-//     different mapping. Even if the protection change went wrong, we could not
-//     kill the code we are executing from. That is exactly how the earlier probe
-//     died (it touched dyld's own __TEXT).
-//   * the target address is the ORIGINAL __fcntl, a libsystem function in the
-//     shared cache, NOT a dyld function (which is why fakelib_redirect's
-//     dlopen_from hook would have been the wrong host: that is dyld's own code).
-//
-// The result goes into the app's own data container ($HOME), because a hidden
-// app cannot write into the jbroot at all.
-extern char gHidejbLogPath[512];
-
-static int s2_append(char *b, int n, const char *s)
-{
-	while (*s && n < 200) b[n++] = *s++;
-	return n;
-}
-
-static int s2_append_int(char *b, int n, long v)
-{
-	char t[24];
-	int i = 0;
-	int neg = 0;
-	if (v < 0) { neg = 1; v = -v; }
-	if (v == 0) t[i++] = '0';
-	while (v > 0 && i < 22) { t[i++] = (char)('0' + (v % 10)); v /= 10; }
-	if (neg) t[i++] = '-';
-	while (i > 0 && n < 200) b[n++] = t[--i];
-	return n;
-}
-
-static void hidejb_stage2_probe(void)
-{
-	unsigned long target = (unsigned long)(uintptr_t)&ORIG(__fcntl);
-	unsigned long pageSize = 0x4000;
-	unsigned long pageStart = target & ~(pageSize - 1);
-
-	// 1|2|0x10 = READ|WRITE|COPY (copy => copy-on-write)
-	int kr = vm_protect(mach_task_self_, pageStart, pageSize, 0, 1 | 2 | 0x10);
-
-	int kr2 = -1;
-	if (kr == 0) {
-		// Put it straight back, immediately: never leave a code page
-		// non-executable. 1|4 = READ|EXECUTE.
-		kr2 = vm_protect(mach_task_self_, pageStart, pageSize, 0, 1 | 4);
-	}
-
-	if (!gHidejbLogPath[0]) return;
-
-	int lfd = open(gHidejbLogPath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-	if (lfd < 0) return;
-
-	char b[224];
-	int n = 0;
-	n = s2_append(b, n, "hidejb stage2 probe\ntarget=0x");
-	n = s2_append_int(b, n, (long)target);
-	n = s2_append(b, n, "\nvm_protect RW+copy = ");
-	n = s2_append_int(b, n, kr);
-	n = s2_append(b, n, "\nrestore r-x = ");
-	n = s2_append_int(b, n, kr2);
-	n = s2_append(b, n, (kr == 0 && kr2 == 0) ? "\nRESULT: FEASIBLE\n" : "\nRESULT: NOT-FEASIBLE\n");
-	write(lfd, b, (size_t)n);
-	close(lfd);
-}
-
 int HOOK(__fcntl)(int fd, int cmd, void *arg1, void *arg2, void *arg3, void *arg4, void *arg5, void *arg6, void *arg7, void *arg8)
 {
-	{
-		static bool didStage2Probe = false;
-		if (!didStage2Probe) {
-			didStage2Probe = true;
-			hidejb_stage2_probe();
-		}
-	}
-
 	// Disable LV bypass if this process does not have a bootstrap port
 	// But only if the process is also running in safe mode
 
