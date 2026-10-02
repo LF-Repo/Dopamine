@@ -20,6 +20,7 @@
 #include <arpa/inet.h>
 #include <mach/message.h>
 #include <libjailbreak/codesign.h>
+#include <CoreFoundation/CoreFoundation.h>
 
 // The whole path-matching module is compiled unoptimized: Clang -Os miscompiles
 // this string-matching code (register-allocation bug) regardless of inlining.
@@ -403,4 +404,50 @@ void hidejb_rules_set_self_bundle_id(void)
 		strlcpy(gSelfBundleID, buf + sizeof(header), sizeof(gSelfBundleID));
 	}
 	free(buf);
+}
+
+// RootHide-style: the hide dylib is loaded as a LC_LOAD_DYLIB dependency (not
+// DYLD_INSERT_LIBRARIES), so there is no DOPAMINE_APP_HIDE environment variable.
+// Determine hide mode from the same .DopamineAppHideRules.plist that launchdhook
+// uses, matched against our own bundle id.
+bool hidejb_rules_is_self_hidden(void)
+{
+	hidejb_rules_set_self_bundle_id();
+	if (!gSelfBundleID[0]) return false;
+
+	const char *rulesPath = "/var/mobile/Library/Preferences/.DopamineAppHideRules.plist";
+	CFURLRef url = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault,
+		(const UInt8 *)rulesPath, (CFIndex)strlen(rulesPath), false);
+	if (!url) return false;
+
+	CFDataRef data = NULL;
+	Boolean ok = CFURLCreateDataAndPropertiesFromResource(kCFAllocatorDefault, url, &data, NULL, NULL, NULL);
+	CFRelease(url);
+	if (!ok || !data) return false;
+
+	CFPropertyListRef plist = CFPropertyListCreateWithData(kCFAllocatorDefault, data, kCFPropertyListImmutable, NULL, NULL);
+	CFRelease(data);
+	if (!plist || CFGetTypeID(plist) != CFDictionaryGetTypeID()) {
+		if (plist) CFRelease(plist);
+		return false;
+	}
+
+	bool hidden = false;
+	CFStringRef bundleKey = CFStringCreateWithCString(kCFAllocatorDefault, gSelfBundleID, kCFStringEncodingUTF8);
+	if (bundleKey) {
+		const void *appRule = CFDictionaryGetValue((CFDictionaryRef)plist, bundleKey);
+		if (appRule && CFGetTypeID(appRule) == CFDictionaryGetTypeID()) {
+			CFStringRef hideKey = CFStringCreateWithCString(kCFAllocatorDefault, "HideEnvironment", kCFStringEncodingUTF8);
+			if (hideKey) {
+				const void *hideVal = CFDictionaryGetValue((CFDictionaryRef)appRule, hideKey);
+				if (hideVal && CFGetTypeID(hideVal) == CFBooleanGetTypeID()) {
+					hidden = CFBooleanGetValue((CFBooleanRef)hideVal);
+				}
+				CFRelease(hideKey);
+			}
+		}
+		CFRelease(bundleKey);
+	}
+	CFRelease(plist);
+	return hidden;
 }
