@@ -198,49 +198,41 @@ static DIR *hidejb_opendir(const char *dirname)
 	return orig_opendir(dirname);
 }
 
-// NOTE: resolving the directory path with fcntl(F_GETPATH) on *every* entry was
-// a disaster: F_GETPATH is a syscall and fcntl is itself hooked by dyld's
-// MachOMerger, so directory iteration (which Foundation does constantly while
-// loading bundles) became ~30x slower and tripped the launch watchdog on big
-// apps (QQ used 31s of CPU with only 1s of it in the app itself).
-// We now resolve it once per DIR and skip filtering entirely for directories
-// that cannot contain hidden entries.
-static DIR *gLastDirp = NULL;
-static bool gLastDirFilter = false;
-static char gLastDirPath[PATH_MAX] = {0};
+// Resolving a directory's path costs a fcntl syscall (and fcntl is itself hooked
+// by dyld's MachOMerger), so it is cached per (thread, DIR) and never done per
+// entry. The cache is thread-local: with many threads enumerating directories at
+// once, a shared cache was rewritten under another thread's feet, which could
+// make us filter entries against the WRONG directory path.
+static __thread DIR *tLastDirp = NULL;
+static __thread bool tLastDirFilter = false;
+static __thread char tLastDirPath[PATH_MAX];
 
 static struct dirent *(*orig_readdir)(DIR *);
 static struct dirent *hidejb_readdir(DIR *dirp)
 {
 	if (!gEnabled || !dirp) return orig_readdir(dirp);
 
-	if (dirp != gLastDirp) {
-		gLastDirp = dirp;
-		gLastDirFilter = false;
-		gLastDirPath[0] = '\0';
+	if (dirp != tLastDirp) {
+		tLastDirp = dirp;
+		tLastDirFilter = false;
+		tLastDirPath[0] = '\0';
 		int fd = dirfd(dirp);
 		if (fd >= 0) {
 			char p[PATH_MAX] = {0};
 			if (fcntl(fd, F_GETPATH, p) == 0 && p[0]) {
-				strlcpy(gLastDirPath, p, sizeof(gLastDirPath));
-				gLastDirFilter = hidejb_rules_dir_may_hide_entries(p);
+				strlcpy(tLastDirPath, p, sizeof(tLastDirPath));
+				tLastDirFilter = hidejb_rules_dir_may_hide_entries(p);
 			}
 		}
 	}
-	if (!gLastDirFilter) return orig_readdir(dirp);
-
-	// Copy once (not per entry) so a concurrent readdir on another DIR cannot
-	// rewrite the cached path while we are filtering entries of this one.
-	char dirpath[PATH_MAX];
-	strlcpy(dirpath, gLastDirPath, sizeof(dirpath));
-	if (!dirpath[0]) return orig_readdir(dirp);
+	if (!tLastDirFilter || !tLastDirPath[0]) return orig_readdir(dirp);
 
 	for (;;) {
 		struct dirent *e = orig_readdir(dirp);
 		if (!e) return NULL;
-		char full[PATH_MAX * 2];
-		snprintf(full, sizeof(full), "%s/%s", dirpath, e->d_name);
-		if (!hidejb_rules_path_is_jailbreak(full)) return e;
+		// Decide from (directory, entry name) — building the full path with
+		// snprintf here is what made recursive enumeration ~30x too slow.
+		if (!hidejb_rules_dir_hides_entry(tLastDirPath, e->d_name)) return e;
 		// else skip this entry
 	}
 }
@@ -508,7 +500,8 @@ static void hidejb_swizzle_url_schemes(void)
 // Create  /var/jb/basebin/hidejb_off.txt  (via Filza) containing any of these
 // letters, then do a userspace reboot, to disable that hook group for testing:
 //   f = all file hooks (equivalent to 1+2+3+4+5)
-//   d = dyld image hiding (_dyld_get_image_name + dyld_all_image_infos rewrite)
+//   d = dyld image hiding — ALREADY OFF BY DEFAULT (see gDisabled below);
+//       write uppercase `D` to turn it back ON.
 //   l = dlopen/dladdr/dlsym
 //   c = csops
 //   s = sysctlbyname
@@ -532,7 +525,11 @@ static void hidejb_swizzle_url_schemes(void)
 #define HIDE_OFF_F_FOPEN  (1u << 9)
 #define HIDE_OFF_F_STATFS (1u << 10)
 
-static uint32_t gDisabled = 0;
+// `d` (dyld image hiding) is OFF BY DEFAULT: faking an image's path makes
+// dyld_all_image_infos disagree with the Mach-O header's LC_ID_DYLIB, and the
+// banking app's anti-tamper SDK treats that contradiction as tampering and
+// self-destructs. Write an uppercase `D` to switch it back on.
+static uint32_t gDisabled = HIDE_OFF_DYLD;
 
 static void hidejb_load_disable_switch(const char *jbroot)
 {
@@ -562,6 +559,7 @@ static void hidejb_load_disable_switch(const char *jbroot)
 			case '3': gDisabled |= HIDE_OFF_F_PATH;   break;
 			case '4': gDisabled |= HIDE_OFF_F_FOPEN;  break;
 			case '5': gDisabled |= HIDE_OFF_F_STATFS; break;
+			case 'D': gDisabled &= ~HIDE_OFF_DYLD;    break; // re-enable image hiding
 		}
 	}
 }
