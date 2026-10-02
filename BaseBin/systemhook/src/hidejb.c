@@ -613,8 +613,8 @@ static void hidejb_swizzle_url_schemes(void)
 // Create  /var/jb/basebin/hidejb_off.txt  (via Filza) containing any of these
 // letters, then do a userspace reboot, to disable that hook group for testing:
 //   f = all file hooks (equivalent to 1+2+3+4+5)
-//   d = dyld image hiding — ON by default now (it also rewrites the image's own
-//       LC_ID_DYLIB so nothing contradicts). Write `d` to turn it OFF.
+//   d = dyld image hiding — ALREADY OFF BY DEFAULT; write uppercase `D` to turn
+//       it ON (note: still detectable via LC_UUID vs the claimed path).
 //   l = dlopen/dladdr/dlsym
 //   c = csops
 //   s = sysctlbyname
@@ -638,14 +638,22 @@ static void hidejb_swizzle_url_schemes(void)
 #define HIDE_OFF_F_FOPEN  (1u << 9)
 #define HIDE_OFF_F_STATFS (1u << 10)
 
-// Only group 2 (opendir/readdir) is OFF BY DEFAULT: hiding entries / returning
-// NULL for whole directories made a large app's own directory bookkeeping go out
-// of sync (QQ burned 31s+ of CPU and got killed by the launch watchdog).
-// `d` (dyld image hiding) is ON again now that it rewrites the image's own
-// LC_ID_DYLIB, so the image list and the binary agree instead of contradicting
-// each other. Write `2` to disable group 2 explicitly, `E` to re-enable it, and
-// `d` to switch image hiding back off.
-static uint32_t gDisabled = HIDE_OFF_F_DIR;
+// Both `d` (dyld image hiding) and `2` (opendir/readdir) are OFF BY DEFAULT.
+//
+// `2`: hiding entries / returning NULL for whole directories made a large app's
+//      own directory bookkeeping go out of sync (QQ burned 31s+ of CPU and got
+//      killed by the launch watchdog).
+// `d`: image hiding cannot be made undetectable. Rewriting the image's own
+//      LC_ID_DYLIB removes the path/header contradiction, but the LC_UUID still
+//      does not match any real file at the claimed path, so an anti-tamper SDK
+//      that validates (path, UUID) against the filesystem still catches it (the
+//      banking app reported "/usr/lib/libSystem.B.0.dylib" etc. and
+//      self-destructed). Hiding the injection for real requires the injected
+//      code to not be a separate image at all, which is a dyld/MachOMerger
+//      level change, not something this hook layer can fake.
+//
+// Write uppercase `D` / `E` to switch the respective group back ON for testing.
+static uint32_t gDisabled = HIDE_OFF_DYLD | HIDE_OFF_F_DIR;
 
 static void hidejb_load_disable_switch(const char *jbroot)
 {
