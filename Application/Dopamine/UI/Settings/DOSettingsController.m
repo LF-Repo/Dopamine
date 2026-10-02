@@ -1086,9 +1086,9 @@
     NSDictionary *appInfo = self.filteredApps[indexPath.row];
     NSString *bundleID = appInfo[@"bundleID"];
 
-    cell.textLabel.text = appInfo[@"name"];
     BOOL noInject = [appInfo[@"noInject"] boolValue];
-    cell.detailTextLabel.text = noInject ? [NSString stringWithFormat:@"%@ · 无注入", bundleID] : bundleID;
+    cell.textLabel.text = noInject ? [NSString stringWithFormat:@"%@ [NoInject]", appInfo[@"name"]] : appInfo[@"name"];
+    cell.detailTextLabel.text = bundleID;
 
     UIImage *icon = [self iconForBundleID:bundleID];
     if (icon) {

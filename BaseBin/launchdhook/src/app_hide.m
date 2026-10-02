@@ -27,6 +27,9 @@
 #include <xpc_private.h>
 #include <libjailbreak/codesign.h>
 #include <libjailbreak/util.h>
+#include "jbserver/jbserver_local.h"
+
+extern void systemwide_domain_set_enabled(bool enabled);
 
 // Not exposed by the public SDK; same value RootHide uses in common.m.
 #define PROC_PIDUNIQIDENTIFIERINFO 17
@@ -232,11 +235,15 @@ void app_hide_global_restore(void)
 	if (jbroot && jbroot[0]) {
 		unlink("/var/jb");
 		symlink(jbroot, "/var/jb");
-		// Remount fakelib via jbctl. launchd (pid 1) lacks the
-		// com.apple.private.bindfs-allow entitlement, so a direct bindfs mount()
-		// fails here; jbctl carries the entitlement and steals root ucred.
-		exec_cmd_root(JBROOT_PATH("/basebin/jbctl"), "internal", "fakelib", "mount", NULL);
 	}
+
+	// Remount fakelib. launchd (pid 1) lacks the com.apple.private.bindfs-allow
+	// entitlement, so a direct bindfs mount() fails here. Host a local jbserver
+	// and let jbctl do the mount, exactly like ensure_fakelib_mounted() does.
+	systemwide_domain_set_enabled(true);
+	mach_port_t serverPort = jbserver_local_start();
+	jbctl_earlyboot(serverPort, "internal", "fakelib", "mount", NULL);
+	jbserver_local_stop();
 }
 
 void app_hide_watch_exit(pid_t pid)
