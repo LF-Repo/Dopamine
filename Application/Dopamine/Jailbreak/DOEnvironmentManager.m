@@ -765,59 +765,7 @@ extern char **environ;
     [rules writeToFile:path atomically:YES];
     chmod(path.fileSystemRepresentation, 0644);
 
-    // RootHide-style: patch/unpatch the app's main binary so systemhook loads as
-    // a LC_LOAD_DYLIB dependency (not a DYLD_INSERT_LIBRARIES injection).
-    [self applyHidePatch:hidden forBundleID:bundleID];
-
     NSLog(@"[AppHide] %@ -> %@", bundleID, hidden ? @"hidden" : @"visible");
-}
-
-#pragma mark - RootHide-style binary patch (hidepatcher)
-
-- (NSString *)findAppBundlePathForBundleID:(NSString *)bundleID
-{
-    if (!bundleID) return nil;
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *roots = @[@"/var/containers/Bundle/Application", @"/Applications"];
-    for (NSString *root in roots) {
-        for (NSString *uuid in [fm contentsOfDirectoryAtPath:root error:nil]) {
-            NSString *uuidPath = [root stringByAppendingPathComponent:uuid];
-            for (NSString *item in [fm contentsOfDirectoryAtPath:uuidPath error:nil]) {
-                if (![item hasSuffix:@".app"]) continue;
-                NSString *appPath = [uuidPath stringByAppendingPathComponent:item];
-                NSString *infoPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
-                NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
-                if ([info[@"CFBundleIdentifier"] isEqualToString:bundleID]) {
-                    return appPath;
-                }
-            }
-        }
-    }
-    return nil;
-}
-
-- (void)applyHidePatch:(BOOL)hidden forBundleID:(NSString *)bundleID
-{
-    NSString *appPath = [self findAppBundlePathForBundleID:bundleID];
-    if (!appPath) {
-        NSLog(@"[AppHide] bundle not found for patch: %@", bundleID);
-        return;
-    }
-
-    NSString *hidepatcher = [NSString stringWithUTF8String:JBROOT_PATH("/basebin/hidepatcher")];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:hidepatcher]) {
-        NSLog(@"[AppHide] hidepatcher not found at %@", hidepatcher);
-        return;
-    }
-
-    [self runAsRoot:^{
-        [self runUnsandboxed:^{
-            int r = exec_cmd(hidepatcher.fileSystemRepresentation,
-                             hidden ? "patch" : "unpatch",
-                             appPath.fileSystemRepresentation, NULL);
-            NSLog(@"[AppHide] hidepatcher %@ %@ -> %d", hidden ? @"patch" : @"unpatch", appPath, r);
-        }];
-    }];
 }
 
 - (NSArray<NSString *> *)allEnvironmentHiddenBundleIDs
