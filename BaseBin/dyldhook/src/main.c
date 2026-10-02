@@ -1,4 +1,4 @@
-﻿#include <stdint.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -104,6 +104,31 @@ void mach_init_4real(void)
 	mach_port_deallocate(mach_task_self_, mach_task_self_);
 }
 
+// ---- Shared log path for the hide experiments ------------------------------
+//
+// A HIDDEN app cannot write into the jbroot AT ALL: hiding the jailbreak paths
+// from it is exactly what HideJailbreak does. (That is why an earlier attempt to
+// log to <jbroot>/basebin/ silently produced no file.) So experimental logs have
+// to go into the app's own data container, which is what $HOME points at.
+//
+// Copied by hand instead of with strlcpy/strlcat so this file needs no extra
+// headers (declaring things by hand is what broke the first build).
+char gHidejbLogPath[512] = {0};
+
+static void dyldhook_setup_log_path(char **envp)
+{
+	char *home = _simple_getenv(envp, "HOME");
+	if (!home || !home[0]) return;
+
+	int i = 0;
+	while (home[i] && i < 460) { gHidejbLogPath[i] = home[i]; i++; }
+
+	const char *suffix = "/hidejb_stage2.txt";
+	int k = 0;
+	while (suffix[k] && i < 511) { gHidejbLogPath[i++] = suffix[k++]; }
+	gHidejbLogPath[i] = '\0';
+}
+
 void dyldhook_init(uintptr_t kernelParams)
 {
 	mach_init_4real();
@@ -120,6 +145,11 @@ void dyldhook_init(uintptr_t kernelParams)
 
 	if (_simple_getenv(envp, "DYLD_HOOK_PRINT") != NULL) {
 		gDyldHookLog = true;
+	}
+
+	// Hidden apps only: remember where we are allowed to write experiment logs.
+	if (_simple_getenv(envp, "DOPAMINE_APP_HIDE") != NULL) {
+		dyldhook_setup_log_path(envp);
 	}
 
 	if (_simple_getenv(envp, "DYLD_HOOK_SETUID") != NULL) {
