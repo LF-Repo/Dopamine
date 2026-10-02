@@ -66,9 +66,50 @@ extern kern_return_t mach_vm_region_recurse(vm_map_read_t target_task, mach_vm_a
 static bool gEnabled = false;
 
 // Indices of injected jailbreak dylibs (systemhook, libellekit, ...) in the
-// dyld image list. _dyld_get_image_name returns a benign name for these.
-static uint32_t gHiddenImageIndices[8] = {0};
+// dyld image list, plus a UNIQUE benign path per entry.
+//
+// NOTE: these paths must be unique. Pointing every hidden image at the same
+// real path ("/usr/lib/libSystem.B.dylib") made two images share one path, which
+// confuses CFBundle's "image path -> bundle" cache and made Foundation spin in
+// repeated bundle/version resolution (this tripped QQ's launch watchdog with
+// 31s+ of pure userspace CPU, stranding threads in
+// _CFBundleGetBundleVersionForURL -> _CFIterateDirectory).
+#define HIDE_MAX_IMAGES 8
+static uint32_t gHiddenImageIndices[HIDE_MAX_IMAGES] = {0};
 static uint32_t gHiddenImageCount = 0;
+static char gHiddenImageFakePaths[HIDE_MAX_IMAGES][40];
+
+static const char *hidejb_fake_path_for_slot(uint32_t slot)
+{
+	if (slot >= HIDE_MAX_IMAGES) return NULL;
+	if (!gHiddenImageFakePaths[slot][0]) {
+		snprintf(gHiddenImageFakePaths[slot], sizeof(gHiddenImageFakePaths[slot]),
+		         "/usr/lib/libSystem.B.%u.dylib", slot);
+	}
+	return gHiddenImageFakePaths[slot];
+}
+
+static int hidejb_hidden_slot_for_index(uint32_t realIndex)
+{
+	for (uint32_t k = 0; k < gHiddenImageCount; k++) {
+		if (gHiddenImageIndices[k] == realIndex) return (int)k;
+	}
+	return -1;
+}
+
+static int hidejb_register_hidden_index(uint32_t realIndex)
+{
+	int slot = hidejb_hidden_slot_for_index(realIndex);
+	if (slot >= 0) return slot;
+	if (gHiddenImageCount >= HIDE_MAX_IMAGES) return -1;
+	gHiddenImageIndices[gHiddenImageCount] = realIndex;
+	return (int)gHiddenImageCount++;
+}
+
+static bool hidejb_is_hidden_image_index(uint32_t i)
+{
+	return hidejb_hidden_slot_for_index(i) >= 0;
+}
 
 bool hidejb_enabled(void)
 {
@@ -236,22 +277,19 @@ static int hidejb_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, vo
 
 static const char *(*orig_dyld_get_image_name)(uint32_t);
 
-static bool hidejb_is_hidden_image_index(uint32_t i)
-{
-	for (uint32_t k = 0; k < gHiddenImageCount; k++) {
-		if (gHiddenImageIndices[k] == i) return true;
-	}
-	return false;
-}
-
 // SAFE variant: keep dyld's real image count and indices unchanged, and only
-// rename the hidden images to a benign path. Remapping indices (returning a
-// reduced count) broke apps that resolve symbols/images by index, so we never
-// shift indices — we only lie about the *name* of the jailbreak dylibs.
+// rename the hidden images to a unique benign path. Remapping indices
+// (returning a reduced count) broke apps that resolve symbols/images by index,
+// so we never shift indices — we only lie about the *name* of the jailbreak
+// dylibs, and each fake name is unique (see the note on gHiddenImageFakePaths).
 static const char *hidejb_dyld_get_image_name(uint32_t index)
 {
-	if (gEnabled && hidejb_is_hidden_image_index(index)) {
-		return "/usr/lib/libSystem.B.dylib";
+	if (gEnabled) {
+		int slot = hidejb_hidden_slot_for_index(index);
+		if (slot >= 0) {
+			const char *fake = hidejb_fake_path_for_slot((uint32_t)slot);
+			if (fake) return fake;
+		}
 	}
 	return orig_dyld_get_image_name(index);
 }
@@ -301,9 +339,12 @@ static void hidejb_patch_all_image_infos(void)
 	for (uint32_t i = 0; i < infos->infoArrayCount; i++) {
 		const char *p = arr[i].imageFilePath;
 		if (!p) continue;
-		if (hidejb_rules_path_has_marker(p)) {
-			arr[i].imageFilePath = "/usr/lib/libSystem.B.dylib";
-		}
+		if (!hidejb_rules_path_has_marker(p)) continue;
+
+		int slot = hidejb_register_hidden_index(i);
+		if (slot < 0) continue;
+		const char *fake = hidejb_fake_path_for_slot((uint32_t)slot);
+		if (fake) arr[i].imageFilePath = fake;
 	}
 }
 
@@ -466,20 +507,30 @@ static void hidejb_swizzle_url_schemes(void)
 
 // Create  /var/jb/basebin/hidejb_off.txt  (via Filza) containing any of these
 // letters, then do a userspace reboot, to disable that hook group for testing:
-//   f = file hooks (fopen/stat/lstat/fstatat/access/faccessat/realpath/
-//                   readlink/readlinkat/opendir/readdir/statfs)
+//   f = all file hooks (equivalent to 1+2+3+4+5)
 //   d = dyld image hiding (_dyld_get_image_name + dyld_all_image_infos rewrite)
 //   l = dlopen/dladdr/dlsym
 //   c = csops
 //   s = sysctlbyname
 //   u = URL scheme swizzle
+//   --- finer split of the file hooks, for pinpointing which one breaks an app:
+//   1 = stat / lstat / fstatat / access / faccessat   (path queries)
+//   2 = opendir / readdir                             (directory enumeration)
+//   3 = realpath / readlink / readlinkat              (path resolution)
+//   4 = fopen
+//   5 = statfs
 // This exists so a crashing app can be bisected on-device without rebuilding.
-#define HIDE_OFF_FILE   (1u << 0)
-#define HIDE_OFF_DYLD   (1u << 1)
-#define HIDE_OFF_DL     (1u << 2)
-#define HIDE_OFF_CSOPS  (1u << 3)
-#define HIDE_OFF_SYSCTL (1u << 4)
-#define HIDE_OFF_URL    (1u << 5)
+#define HIDE_OFF_FILE     (1u << 0)
+#define HIDE_OFF_DYLD     (1u << 1)
+#define HIDE_OFF_DL       (1u << 2)
+#define HIDE_OFF_CSOPS    (1u << 3)
+#define HIDE_OFF_SYSCTL   (1u << 4)
+#define HIDE_OFF_URL      (1u << 5)
+#define HIDE_OFF_F_QUERY  (1u << 6)
+#define HIDE_OFF_F_DIR    (1u << 7)
+#define HIDE_OFF_F_PATH   (1u << 8)
+#define HIDE_OFF_F_FOPEN  (1u << 9)
+#define HIDE_OFF_F_STATFS (1u << 10)
 
 static uint32_t gDisabled = 0;
 
@@ -505,7 +556,12 @@ static void hidejb_load_disable_switch(const char *jbroot)
 			case 'l': gDisabled |= HIDE_OFF_DL;     break;
 			case 'c': gDisabled |= HIDE_OFF_CSOPS;  break;
 			case 's': gDisabled |= HIDE_OFF_SYSCTL; break;
-			case 'u': gDisabled |= HIDE_OFF_URL;    break;
+			case 'u': gDisabled |= HIDE_OFF_URL;      break;
+			case '1': gDisabled |= HIDE_OFF_F_QUERY;  break;
+			case '2': gDisabled |= HIDE_OFF_F_DIR;    break;
+			case '3': gDisabled |= HIDE_OFF_F_PATH;   break;
+			case '4': gDisabled |= HIDE_OFF_F_FOPEN;  break;
+			case '5': gDisabled |= HIDE_OFF_F_STATFS; break;
 		}
 	}
 }
@@ -529,9 +585,7 @@ void hidejb_init(const char *jbroot)
 			const char *name = _dyld_get_image_name(i);
 			if (!name) continue;
 			if (strstr(name, "systemhook") || strstr(name, "libellekit") || strstr(name, "CydiaSubstrate")) {
-				if (gHiddenImageCount < sizeof(gHiddenImageIndices)/sizeof(gHiddenImageIndices[0])) {
-					gHiddenImageIndices[gHiddenImageCount++] = i;
-				}
+				hidejb_register_hidden_index(i);
 			}
 		}
 
@@ -544,18 +598,26 @@ void hidejb_init(const char *jbroot)
 	// ALL callers — including Foundation/UIKit internals — go through our hooks.
 	// litehook_rebind_symbol only rewrites the app's own GOT entries, so it misses
 	// the internal stat/access/open calls that NSFileManager & friends make.
-	if (!(gDisabled & HIDE_OFF_FILE)) {
-	MSHookFunction((void *)fopen,        (void *)hidejb_fopen,        (void **)&orig_fopen);
+	if (!(gDisabled & (HIDE_OFF_FILE | HIDE_OFF_F_QUERY))) {
 	MSHookFunction((void *)stat,         (void *)hidejb_stat,         (void **)&orig_stat);
 	MSHookFunction((void *)lstat,        (void *)hidejb_lstat,        (void **)&orig_lstat);
 	MSHookFunction((void *)fstatat,      (void *)hidejb_fstatat,      (void **)&orig_fstatat);
 	MSHookFunction((void *)access,       (void *)hidejb_access,       (void **)&orig_access);
 	MSHookFunction((void *)faccessat,    (void *)hidejb_faccessat,    (void **)&orig_faccessat);
+	}
+	if (!(gDisabled & (HIDE_OFF_FILE | HIDE_OFF_F_DIR))) {
+	MSHookFunction((void *)opendir,      (void *)hidejb_opendir,      (void **)&orig_opendir);
+	MSHookFunction((void *)readdir,      (void *)hidejb_readdir,      (void **)&orig_readdir);
+	}
+	if (!(gDisabled & (HIDE_OFF_FILE | HIDE_OFF_F_PATH))) {
 	MSHookFunction((void *)realpath,     (void *)hidejb_realpath,     (void **)&orig_realpath);
 	MSHookFunction((void *)readlink,     (void *)hidejb_readlink,     (void **)&orig_readlink);
 	MSHookFunction((void *)readlinkat,   (void *)hidejb_readlinkat,   (void **)&orig_readlinkat);
-	MSHookFunction((void *)opendir,      (void *)hidejb_opendir,      (void **)&orig_opendir);
-	MSHookFunction((void *)readdir,      (void *)hidejb_readdir,      (void **)&orig_readdir);
+	}
+	if (!(gDisabled & (HIDE_OFF_FILE | HIDE_OFF_F_FOPEN))) {
+	MSHookFunction((void *)fopen,        (void *)hidejb_fopen,        (void **)&orig_fopen);
+	}
+	if (!(gDisabled & (HIDE_OFF_FILE | HIDE_OFF_F_STATFS))) {
 	MSHookFunction((void *)statfs,       (void *)hidejb_statfs,       (void **)&orig_statfs);
 	}
 	if (!(gDisabled & HIDE_OFF_SYSCTL)) {
