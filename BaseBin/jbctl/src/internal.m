@@ -1,4 +1,5 @@
 #import "internal.h"
+#import "hide_global.h"
 #import <Foundation/Foundation.h>
 #import <libjailbreak/libjailbreak.h>
 #import <libjailbreak/developer_mode_hide.h>
@@ -188,6 +189,20 @@ int jbctl_handle_internal(const char *command, int argc, char* argv[])
 			return -1;
 		}
 		return developer_mode_set_hidden(toHide);
+	}
+	else if (!strcmp(command, "urlschemes")) {
+		if (argc > 1) {
+			if (!strcmp(argv[1], "hide")) return hide_global_urlschemes_hide();
+			else if (!strcmp(argv[1], "show")) return hide_global_urlschemes_show();
+		}
+		return -1;
+	}
+	else if (!strcmp(command, "audit")) {
+		if (argc > 1) {
+			if (!strcmp(argv[1], "hide")) return hide_global_audit_hide();
+			else if (!strcmp(argv[1], "restore")) return hide_global_audit_restore();
+		}
+		return -1;
 	}
 	else if (!strcmp(command, "startup")) {
 		protection_set_active(true);

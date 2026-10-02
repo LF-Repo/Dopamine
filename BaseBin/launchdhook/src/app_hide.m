@@ -213,15 +213,27 @@ void app_hide_init(void)
 
 static bool gNoInjectActive = false;
 
+static void app_hide_run_jbctl(const char *command, const char *arg)
+{
+	// jbctl carries the bindfs-allow entitlement + root; host a local jbserver so
+	// it can talk to us, same pattern as ensure_fakelib_mounted().
+	systemwide_domain_set_enabled(true);
+	mach_port_t serverPort = jbserver_local_start();
+	jbctl_earlyboot(serverPort, "internal", command, arg, NULL);
+	jbserver_local_stop();
+}
+
 void app_hide_global_hide(void)
 {
 	if (gNoInjectActive) return;
 	gNoInjectActive = true;
 
-	// Remove the /var/jb symlink and unmount fakelib so a bare (uninjected) app
-	// sees a clean system. Both are global — this is the "global destruction"
-	// tradeoff of no-injection hiding, but it is exactly what RootHide avoids by
-	// relocating the root; here we only apply it while a hidden app is running.
+	// Hide jailbreak URL schemes (edits jailbreak apps' Info.plist + runs uicache;
+	// needs /var/jb, so run BEFORE removing it) and quarantine jailbreak files.
+	app_hide_run_jbctl("urlschemes", "hide");
+	app_hide_run_jbctl("audit", "hide");
+
+	// Remove the /var/jb symlink and unmount fakelib last.
 	unlink("/var/jb");
 	unmount("/usr/lib", MNT_FORCE);
 }
@@ -237,13 +249,12 @@ void app_hide_global_restore(void)
 		symlink(jbroot, "/var/jb");
 	}
 
-	// Remount fakelib. launchd (pid 1) lacks the com.apple.private.bindfs-allow
-	// entitlement, so a direct bindfs mount() fails here. Host a local jbserver
-	// and let jbctl do the mount, exactly like ensure_fakelib_mounted() does.
-	systemwide_domain_set_enabled(true);
-	mach_port_t serverPort = jbserver_local_start();
-	jbctl_earlyboot(serverPort, "internal", "fakelib", "mount", NULL);
-	jbserver_local_stop();
+	// Restore quarantined files + jailbreak URL schemes (needs /var/jb for uicache).
+	app_hide_run_jbctl("audit", "restore");
+	app_hide_run_jbctl("urlschemes", "show");
+
+	// Remount fakelib.
+	app_hide_run_jbctl("fakelib", "mount");
 }
 
 void app_hide_watch_exit(pid_t pid)
