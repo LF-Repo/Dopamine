@@ -25,4 +25,8 @@ bool hidejb_rules_dir_may_hide_entries(const char *dirpath);
 // (systemhook.dylib, libellekit.dylib, ...). Used for dyld image hiding.
 bool hidejb_rules_path_has_marker(const char *path);
 
+// Cheap readdir-side decision: should `entryName`, a component directly inside
+// `dirpath`, be hidden? Avoids building the full path in the hot loop.
+bool hidejb_rules_dir_hides_entry(const char *dirpath, const char *entryName);
+
 #endif

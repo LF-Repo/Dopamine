@@ -158,6 +158,30 @@ static const hide_dir_rule_t gHideRules[] = {
 	{ "/var/mobile", false, NULL, kMobileBlacklist, NULL },
 };
 
+// Decides whether one rule hides a single path component sitting directly under
+// rule->dir. `name`/`nlen` may point into the middle of a longer path, so the
+// component is copied into a bounded buffer first.
+static bool __attribute__((optnone)) rule_hides_name(const hide_dir_rule_t *rule, const char *name, size_t nlen)
+{
+	if (nlen == 0 || nlen >= 256) return false;
+
+	char namebuf[256];
+	memcpy(namebuf, name, nlen);
+	namebuf[nlen] = '\0';
+
+	if (nlen == 1 && namebuf[0] == '.') return false;
+	if (nlen == 2 && namebuf[0] == '.' && namebuf[1] == '.') return false;
+
+	if (str_in_list(namebuf, rule->blacklist)) return true;
+	if (str_has_any_prefix(namebuf, rule->whitelist_prefix)) return false;
+	if (str_in_list(namebuf, rule->whitelist)) return false;
+	if (rule->default_blacklist) {
+		if (is_self_bundle_name(namebuf)) return false;
+		return true;
+	}
+	return false;
+}
+
 // optnone: Clang -Os miscompiles this string-matching body (register-allocation
 // bug). Even in this separate TU the -Os codegen is unsafe, so disable all
 // optimization on the path-matching functions.
@@ -172,22 +196,9 @@ static bool __attribute__((optnone)) path_is_blacklisted_by_rules(const char *pa
 
 		const char *name = path + dlen + 1;
 		const char *slash = strchr(name, '/');
-		char namebuf[256];
 		size_t nlen = slash ? (size_t)(slash - name) : strlen(name);
-		if (nlen == 0 || nlen >= sizeof(namebuf)) continue;
-		memcpy(namebuf, name, nlen);
-		namebuf[nlen] = '\0';
 
-		if (nlen == 1 && namebuf[0] == '.') continue;
-		if (nlen == 2 && namebuf[0] == '.' && namebuf[1] == '.') continue;
-
-		if (str_in_list(namebuf, rule->blacklist)) return true;
-		if (str_has_any_prefix(namebuf, rule->whitelist_prefix)) continue;
-		if (str_in_list(namebuf, rule->whitelist)) continue;
-		if (rule->default_blacklist) {
-			if (is_self_bundle_name(namebuf)) continue;
-			return true;
-		}
+		if (rule_hides_name(rule, name, nlen)) return true;
 	}
 
 	return false;
@@ -297,6 +308,40 @@ bool __attribute__((optnone)) hidejb_rules_path_has_marker(const char *path)
 	base = base ? base + 1 : path;
 	for (size_t i = 0; i < sizeof(gJailbreakPathMarkers)/sizeof(gJailbreakPathMarkers[0]); i++) {
 		if (strstr(base, gJailbreakPathMarkers[i])) return true;
+	}
+	return false;
+}
+
+// Cheap per-entry decision for the readdir hook: `entryName` is a component
+// sitting directly inside `dirpath`.
+//
+// The readdir hook used to build the full path with snprintf() and then run
+// hidejb_rules_path_is_jailbreak() on it for EVERY directory entry. When an app
+// recursively enumerates a large tree (QQ: Foundation walking
+// /var/mobile/Library via subpathsAtPath/enumeratorAtPath), that is hundreds of
+// thousands of snprintf + full-path matches, and it burned 31s+ of CPU and
+// tripped the launch watchdog. Deciding from (dirpath, entryName) directly
+// avoids building the path at all.
+bool __attribute__((optnone)) hidejb_rules_dir_hides_entry(const char *dirpath, const char *entryName)
+{
+	if (!dirpath || !entryName || !entryName[0]) return false;
+	if (strncmp(dirpath, "/private/var/", 13) == 0) dirpath += 8;
+
+	// Jailbreak library locations: decided purely by markers in the entry name.
+	if (strncmp(dirpath, "/usr/lib", 8) == 0 ||
+	    strncmp(dirpath, "/var/jb", 7) == 0 ||
+	    strncmp(dirpath, "/private/preboot", 16) == 0 ||
+	    (gJbRootReal[0] && strncmp(dirpath, gJbRootReal, strlen(gJbRootReal)) == 0)) {
+		return hidejb_rules_path_has_marker(entryName);
+	}
+
+	// Rule table: only the rule whose dir IS this directory can hide the entry.
+	// (An ancestor rule that wanted to hide this directory would have hidden the
+	// directory itself, so readdir would never have been reached for it.)
+	for (size_t r = 0; r < sizeof(gHideRules)/sizeof(gHideRules[0]); r++) {
+		const hide_dir_rule_t *rule = &gHideRules[r];
+		if (strcmp(dirpath, rule->dir) != 0) continue;
+		if (rule_hides_name(rule, entryName, strlen(entryName))) return true;
 	}
 	return false;
 }
