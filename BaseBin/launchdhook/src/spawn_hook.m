@@ -51,15 +51,6 @@ static bool should_hide_environment(const char *executablePath)
     }
 }
 
-// True when hidepatcher already patched this executable (its .hidejb_backup exists).
-static bool has_hide_backup(const char *executablePath)
-{
-    if (!executablePath) return false;
-    char backupPath[1024];
-    snprintf(backupPath, sizeof(backupPath), "%s.hidejb_backup", executablePath);
-    return access(backupPath, F_OK) == 0;
-}
-
 extern bool gInEarlyBoot;
 extern bool gFreeBootLogoBeforeBackboardd;
 void free_boot_logo(void);
@@ -275,21 +266,17 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 
   if (path && should_hide_environment(path)) {
-		// ★ RootHide-style per-app hide:
-		// If hidepatcher patched the app binary (backup file exists), systemhook
-		// loads as a LC_LOAD_DYLIB dependency — bare spawn, no DYLD_INSERT_LIBRARIES
-		// (otherwise systemhook loads twice and still shows as "injected").
-		// If the binary was NOT patched (e.g. encrypted, patcher failed), fall back
-		// to the old env injection so hiding still works.
-		bool patched = has_hide_backup(path);
+		// ★ 按 App 隐藏（per-app hide）：
+		// 只注入 systemhook（干净路径 /usr/lib/systemhook.dylib），并打上 DOPAMINE_APP_HIDE=1。
+		// systemhook 的构造器看到这个标记后走 hidejb 分支：在 *本进程内* 隐藏 /var/jb、
+		// 真实 jailbreak root、fakelib 挂载以及 amfi developer_mode 状态，且不加载任何 tweak。
+		// 不再做全局隐藏（不卸载 fakelib、不删除 /var/jb、不搬移文件），其它越狱进程不受影响。
 
 		char **envc = envbuf_mutcopy((const char **)envp);
+		envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", HOOK_DYLIB_PATH);
+		envbuf_setenv(&envc, "DOPAMINE_APP_HIDE", "1");
 		envbuf_unsetenv(&envc, "_SafeMode");
 		envbuf_unsetenv(&envc, "_MSSafeMode");
-		if (!patched) {
-			envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", HOOK_DYLIB_PATH);
-			envbuf_setenv(&envc, "DOPAMINE_APP_HIDE", "1");
-		}
 
 		// __posix_spawn_orig_wrapper 内部已做 crashreporter_pause/resume，
 		// 避免子进程继承异常端口而被越狱检测发现。
