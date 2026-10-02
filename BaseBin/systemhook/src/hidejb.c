@@ -198,11 +198,11 @@ static const char *hidejb_rewrite_id_dylib(const struct mach_header *header, uin
 
 bool hidejb_enabled(void)
 {
-	// Backward-compatible: the old spawn path sets DOPAMINE_APP_HIDE=1; the new
-	// RootHide-style path loads us as a LC_LOAD_DYLIB dependency with no env var,
-	// so fall back to the hide-rules plist matched against our own bundle id.
-	if (getenv("DOPAMINE_APP_HIDE") != NULL) return true;
-	return hidejb_rules_is_self_hidden();
+	// The spawn hook always sets DOPAMINE_APP_HIDE=1 for hidden apps, so the env
+	// var alone is sufficient. (The plist fallback was for the abandoned
+	// binary-patching path and only added CoreFoundation file I/O to the *normal*
+	// injection path, which tripped some apps' anti-tamper.)
+	return getenv("DOPAMINE_APP_HIDE") != NULL;
 }
 
 bool hidejb_is_hidden(void)
