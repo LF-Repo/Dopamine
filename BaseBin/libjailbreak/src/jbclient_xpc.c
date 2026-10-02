@@ -263,6 +263,20 @@ int jbclient_persona_fix(int childPid, uid_t overwriteUid, gid_t overwriteGid)
 	return -1;
 }
 
+bool jbclient_blacklist_check_pid(uint64_t pid)
+{
+	xpc_object_t xargs = xpc_dictionary_create_empty();
+	xpc_dictionary_set_uint64(xargs, "pid", pid);
+	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_SYSTEMWIDE, JBS_SYSTEMWIDE_BLACKLIST_CHECK, xargs);
+	xpc_release(xargs);
+	if (xreply) {
+		bool blacklisted = xpc_dictionary_get_bool(xreply, "blacklisted");
+		xpc_release(xreply);
+		return blacklisted;
+	}
+	return false;
+}
+
 int jbclient_platform_set_process_debugged(uint64_t pid, bool fullyDebugged)
 {
 	xpc_object_t xargs = xpc_dictionary_create_empty();
