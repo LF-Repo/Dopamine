@@ -191,10 +191,12 @@ static int new_xpc_pipe_routine_reply(xpc_object_t reply)
 
 void app_hide_init(void)
 {
-	// Save the originals first, then instruction-replace with litehook (launchdhook
-	// does not link substrate, but litehook is already compiled in).
+	// Save the originals, then GOT-rebind (NOT instruction-replace). Instruction
+	// replacement clears CS_VALID on arm64 and panics launchd (pid 1) during the
+	// jailbreak "protection" stage; the existing initXPCHooks() uses GOT rebind for
+	// exactly this reason.
 	orig_xpc_dictionary_create_reply = (xpc_object_t (*)(xpc_object_t))xpc_dictionary_create_reply;
 	orig_xpc_pipe_routine_reply = (int (*)(xpc_object_t))xpc_pipe_routine_reply;
-	litehook_hook_function((void *)xpc_dictionary_create_reply, (void *)new_xpc_dictionary_create_reply);
-	litehook_hook_function((void *)xpc_pipe_routine_reply, (void *)new_xpc_pipe_routine_reply);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)xpc_dictionary_create_reply, (void *)new_xpc_dictionary_create_reply, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)xpc_pipe_routine_reply, (void *)new_xpc_pipe_routine_reply, NULL);
 }
