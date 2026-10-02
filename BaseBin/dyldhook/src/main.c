@@ -128,7 +128,9 @@ void mach_init_4real(void)
 // execute 4, copy 0x10 (copy => copy-on-write, so the dyld file on disk is not
 // modified).
 extern int vm_protect(mach_port_t target_task, unsigned long address, unsigned long size, int set_maximum, int new_protection);
-extern int open(const char *path, int flags, int mode);
+// NOTE: variadic, to match the declaration pulled in by <sys/fcntl.h> (via
+// <sandbox.h>) - declaring it as a fixed 3-arg function is a type conflict.
+extern int open(const char *path, int flags, ...);
 extern long write(int fd, const void *buf, unsigned long nbyte);
 
 // Minimal logging helpers: this runs before libc exists, so there is no
