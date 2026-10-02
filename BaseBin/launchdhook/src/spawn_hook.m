@@ -13,6 +13,7 @@
 #include <litehook.h>
 #include "jbserver/jbserver_local.h"
 #include "hookd_provider.h"
+#include "app_hide.h"
 #import <Foundation/Foundation.h>
 #include <mach/mach.h>
 #include <mach/task.h>
@@ -280,8 +281,13 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 		// __posix_spawn_orig_wrapper 内部已做 crashreporter_pause/resume，
 		// 避免子进程继承异常端口而被越狱检测发现。
-		int r = __posix_spawn_orig_wrapper(pid, path, desc, argv, envc);
+		// 同时把这个隐藏 App 的 pid 标记进黑名单（RootHide 式进程隐藏）：
+		// launchd 的 XPC 回复钩子会据此过滤它的进程/coalition 枚举结果。
+		pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
+		int r = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, envc);
 		envbuf_free(envc);
+		if (pid) *pid = *blacklistedPidp;
+		app_hide_commit_pid(blacklistedPidp);
 
 		return r;
 	}

@@ -30,6 +30,7 @@
 #import "jbserver/jbserver_local.h"
 #import "asl.h"
 #import "app_hide_monitor.h"
+#import "app_hide.h"
 
 bool gInEarlyBoot = true;
 
@@ -164,6 +165,7 @@ __attribute__((constructor)) static void initializer(void)
 	initSpawnHooks();
 	initIPCHooks();
 	initJetsamHook();
+	app_hide_init();
 
 	sysctlbyname_orig = sysctlbyname;
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)sysctlbyname, (void *)sysctlbyname_hook, NULL);
