@@ -931,6 +931,9 @@
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                                                           target:self
                                                                                           action:@selector(donePressed)];
+
+    UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
+    [self.tableView addGestureRecognizer:longPress];
 }
 
 - (void)donePressed
@@ -954,10 +957,12 @@
         if ([bundleID hasPrefix:@"com.apple."]) continue;
 
         BOOL hidden = [env isEnvironmentHiddenForBundleID:bundleID];
+        BOOL noInject = [env isEnvironmentNoInjectForBundleID:bundleID];
         [self.allApps addObject:[@{
             @"bundleID": bundleID,
             @"name": name,
-            @"hidden": @(hidden)
+            @"hidden": @(hidden),
+            @"noInject": @(noInject)
         } mutableCopy]];
     }
 
@@ -1082,7 +1087,8 @@
     NSString *bundleID = appInfo[@"bundleID"];
 
     cell.textLabel.text = appInfo[@"name"];
-    cell.detailTextLabel.text = bundleID;
+    BOOL noInject = [appInfo[@"noInject"] boolValue];
+    cell.detailTextLabel.text = noInject ? [NSString stringWithFormat:@"%@ · 无注入", bundleID] : bundleID;
 
     UIImage *icon = [self iconForBundleID:bundleID];
     if (icon) {
@@ -1111,11 +1117,39 @@
     for (NSMutableDictionary *dict in self.allApps) {
         if ([dict[@"bundleID"] isEqualToString:bundleID]) {
             dict[@"hidden"] = @(hidden);
+            if (!hidden) dict[@"noInject"] = @NO;
             break;
         }
     }
 
     UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+    [fb impactOccurred];
+}
+
+// Long-press a (hidden) app to toggle "无注入" (RootHide-style no-injection) mode.
+- (void)handleLongPress:(UILongPressGestureRecognizer *)gesture
+{
+    if (gesture.state != UIGestureRecognizerStateBegan) return;
+    CGPoint p = [gesture locationInView:self.tableView];
+    NSIndexPath *indexPath = [self.tableView indexPathForRowAtPoint:p];
+    if (!indexPath) return;
+
+    NSDictionary *appInfo = self.filteredApps[indexPath.row];
+    if (![appInfo[@"hidden"] boolValue]) return; // only meaningful when already hidden
+    NSString *bundleID = appInfo[@"bundleID"];
+
+    BOOL noInject = ![appInfo[@"noInject"] boolValue];
+    [[DOEnvironmentManager sharedManager] setEnvironmentNoInject:noInject forBundleID:bundleID];
+
+    for (NSMutableDictionary *dict in self.allApps) {
+        if ([dict[@"bundleID"] isEqualToString:bundleID]) {
+            dict[@"noInject"] = @(noInject);
+            break;
+        }
+    }
+    [self.tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
+
+    UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [fb impactOccurred];
 }
 

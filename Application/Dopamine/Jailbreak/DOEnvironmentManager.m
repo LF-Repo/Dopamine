@@ -750,13 +750,25 @@ extern char **environ;
     return NO;
 }
 
+- (BOOL)isEnvironmentNoInjectForBundleID:(NSString *)bundleID
+{
+    if (!bundleID) return NO;
+    NSDictionary *appRule = [self appHideRules][bundleID];
+    if (appRule) {
+        return [appRule[@"HideNoInject"] boolValue];
+    }
+    return NO;
+}
+
 - (void)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID
 {
     if (!bundleID) return;
 
     NSMutableDictionary *rules = [[self appHideRules] mutableCopy];
     if (hidden) {
-        rules[bundleID] = @{@"HideEnvironment": @YES};
+        NSMutableDictionary *appRule = [rules[bundleID] mutableCopy] ?: [NSMutableDictionary dictionary];
+        appRule[@"HideEnvironment"] = @YES;
+        rules[bundleID] = appRule;
     } else {
         [rules removeObjectForKey:bundleID];
     }
@@ -766,6 +778,27 @@ extern char **environ;
     chmod(path.fileSystemRepresentation, 0644);
 
     NSLog(@"[AppHide] %@ -> %@", bundleID, hidden ? @"hidden" : @"visible");
+}
+
+- (void)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID
+{
+    if (!bundleID) return;
+
+    NSMutableDictionary *rules = [[self appHideRules] mutableCopy];
+    NSMutableDictionary *appRule = [rules[bundleID] mutableCopy] ?: [NSMutableDictionary dictionary];
+    if (noInject) {
+        appRule[@"HideNoInject"] = @YES;
+        appRule[@"HideEnvironment"] = @YES; // no-injection implies hidden
+    } else {
+        [appRule removeObjectForKey:@"HideNoInject"];
+    }
+    rules[bundleID] = appRule;
+
+    NSString *path = [self appHideRulesPath];
+    [rules writeToFile:path atomically:YES];
+    chmod(path.fileSystemRepresentation, 0644);
+
+    NSLog(@"[AppHide] %@ no-inject -> %@", bundleID, noInject ? @"on" : @"off");
 }
 
 - (NSArray<NSString *> *)allEnvironmentHiddenBundleIDs

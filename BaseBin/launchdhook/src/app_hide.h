@@ -16,4 +16,11 @@ void app_hide_init(void);
 void *app_hide_alloc_pid(void);
 void app_hide_commit_pid(void *pidp);
 
+// RootHide-style "no-injection" mode: temporarily hide the jailbreak globally
+// (remove /var/jb, unmount fakelib) so a bare-spawned (uninjected) app sees a
+// clean system, then restore once the app exits.
+void app_hide_global_hide(void);
+void app_hide_global_restore(void);
+void app_hide_watch_exit(pid_t pid);
+
 #endif // APP_HIDE_H
