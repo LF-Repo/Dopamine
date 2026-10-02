@@ -161,7 +161,11 @@ static const hide_dir_rule_t gHideRules[] = {
 // Decides whether one rule hides a single path component sitting directly under
 // rule->dir. `name`/`nlen` may point into the middle of a longer path, so the
 // component is copied into a bounded buffer first.
-static bool __attribute__((optnone)) rule_hides_name(const hide_dir_rule_t *rule, const char *name, size_t nlen)
+// `allowDefaultBlacklist`: for a single-path query we apply the full rule
+// (including "hide everything not whitelisted"); for a *directory listing* we
+// must not, because dropping most entries out of a listing makes an app's
+// index/cache inconsistent (QQ spun until the launch watchdog killed it).
+static bool __attribute__((optnone)) rule_hides_name(const hide_dir_rule_t *rule, const char *name, size_t nlen, bool allowDefaultBlacklist)
 {
 	if (nlen == 0 || nlen >= 256) return false;
 
@@ -175,7 +179,7 @@ static bool __attribute__((optnone)) rule_hides_name(const hide_dir_rule_t *rule
 	if (str_in_list(namebuf, rule->blacklist)) return true;
 	if (str_has_any_prefix(namebuf, rule->whitelist_prefix)) return false;
 	if (str_in_list(namebuf, rule->whitelist)) return false;
-	if (rule->default_blacklist) {
+	if (allowDefaultBlacklist && rule->default_blacklist) {
 		if (is_self_bundle_name(namebuf)) return false;
 		return true;
 	}
@@ -198,7 +202,7 @@ static bool __attribute__((optnone)) path_is_blacklisted_by_rules(const char *pa
 		const char *slash = strchr(name, '/');
 		size_t nlen = slash ? (size_t)(slash - name) : strlen(name);
 
-		if (rule_hides_name(rule, name, nlen)) return true;
+		if (rule_hides_name(rule, name, nlen, true)) return true;
 	}
 
 	return false;
@@ -341,7 +345,11 @@ bool __attribute__((optnone)) hidejb_rules_dir_hides_entry(const char *dirpath, 
 	for (size_t r = 0; r < sizeof(gHideRules)/sizeof(gHideRules[0]); r++) {
 		const hide_dir_rule_t *rule = &gHideRules[r];
 		if (strcmp(dirpath, rule->dir) != 0) continue;
-		if (rule_hides_name(rule, entryName, strlen(entryName))) return true;
+		// Listings only drop names from the rule's EXPLICIT blacklist. Applying
+		// default_blacklist here would strip whole subtrees out of a listing
+		// (e.g. /var/mobile/Library/Caches/*), which made QQ spin in its own
+		// directory/bundle bookkeeping until the launch watchdog killed it.
+		if (rule_hides_name(rule, entryName, strlen(entryName), false)) return true;
 	}
 	return false;
 }
