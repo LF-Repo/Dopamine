@@ -230,12 +230,12 @@ void app_hide_global_restore(void)
 
 	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
 	if (jbroot && jbroot[0]) {
-		char fakelibPath[PATH_MAX];
-		snprintf(fakelibPath, sizeof(fakelibPath), "%s/basebin/.fakelib", jbroot);
-
 		unlink("/var/jb");
 		symlink(jbroot, "/var/jb");
-		mount("bindfs", "/usr/lib", MNT_RDONLY, fakelibPath);
+		// Remount fakelib via jbctl. launchd (pid 1) lacks the
+		// com.apple.private.bindfs-allow entitlement, so a direct bindfs mount()
+		// fails here; jbctl carries the entitlement and steals root ucred.
+		exec_cmd_root(JBROOT_PATH("/basebin/jbctl"), "internal", "fakelib", "mount", NULL);
 	}
 }
 
