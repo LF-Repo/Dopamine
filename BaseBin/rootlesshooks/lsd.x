@@ -66,6 +66,23 @@ static BOOL isJailbreakBundleIdentifier(NSString *bundleID)
 	return bundleID.length > 0 && [set containsObject:bundleID];
 }
 
+// TrollStore / jailbreak utility apps have bundle ids that vary, so also match
+// on the .app directory name (same idea as the fork's hideJailbreakURLSchemes).
+static BOOL isJailbreakAppName(NSString *appName)
+{
+	static NSSet<NSString *> *set = nil;
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		set = [NSSet setWithArray:@[
+			@"Sileo.app", @"Zebra.app", @"Filza.app", @"NewTerm.app",
+			@"CocoaTop.app", @"Dopamine.app", @"TrollStore.app",
+			@"Reveil.app", @"PostBox.app", @"Santander.app", @"Cowabunga.app",
+			@"misaka.app", @"iCleaner.app", @"iCleanerPro.app",
+		]];
+	});
+	return appName.length > 0 && [set containsObject:appName];
+}
+
 static BOOL isJailbreakURLScheme(NSString *scheme)
 {
 	if (scheme.length == 0) return NO;
@@ -75,6 +92,11 @@ static BOOL isJailbreakURLScheme(NSString *scheme)
 	for (id app in apps) {
 		NSString *bundleID = [app performSelector:@selector(bundleIdentifier)];
 		if (isJailbreakBundleIdentifier(bundleID)) {
+			return YES;
+		}
+
+		NSURL *bundleURL = [app performSelector:@selector(bundleURL)];
+		if (isJailbreakAppName(bundleURL.lastPathComponent)) {
 			return YES;
 		}
 	}
