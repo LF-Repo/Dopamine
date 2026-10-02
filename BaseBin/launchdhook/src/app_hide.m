@@ -191,8 +191,9 @@ static int new_xpc_pipe_routine_reply(xpc_object_t reply)
 
 void app_hide_init(void)
 {
-	orig_xpc_dictionary_create_reply = xpc_dictionary_create_reply;
-	orig_xpc_pipe_routine_reply = xpc_pipe_routine_reply;
+	// MSHookFunction fills in the orig pointers; we never assign them directly
+	// (xpc_dictionary_create_reply carries XPC_RETURNS_RETAINED, which makes a
+	// direct assignment a type error under ARC).
 	MSHookFunction((void *)xpc_dictionary_create_reply, (void *)new_xpc_dictionary_create_reply, (void **)&orig_xpc_dictionary_create_reply);
 	MSHookFunction((void *)xpc_pipe_routine_reply, (void *)new_xpc_pipe_routine_reply, (void **)&orig_xpc_pipe_routine_reply);
 }
