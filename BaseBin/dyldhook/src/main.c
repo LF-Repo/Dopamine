@@ -104,6 +104,112 @@ void mach_init_4real(void)
 	mach_port_deallocate(mach_task_self_, mach_task_self_);
 }
 
+// ---- Stage 1 of the RootHide-style stealth injection ------------------------
+//
+// GOAL OF STAGE 1: prove, on a real device, that code running inside the merged
+// dyld can make one of dyld's OWN __TEXT pages writable.
+//
+// Why that matters: a hook-based hide (systemhook.dylib) always leaves an extra
+// image in the process, and an extra image can always be caught (its UUID never
+// matches any real file at the claimed path). The only way out is to do the
+// hiding from something that is ALREADY part of the process - the merged dyld -
+// so that no extra image exists at all. Installing instruction hooks from dyld
+// requires re-protecting a code page, which is exactly what this probes.
+//
+// It must run AFTER dyldhook_perform_checkin(): the check-in is what disables
+// page validation and therefore allows re-protecting code pages.
+//
+// NOTE: this changes NO behaviour, it only logs. If vm_protect fails we find out
+// here instead of halfway through stage 2.
+//
+// vm_protect is one of the trampolines MachOMerger created for us (see main.S);
+// it is declared by hand with plain types so this file does not depend on which
+// Mach headers happen to be pulled in. VM_PROT_* values: read 1, write 2,
+// execute 4, copy 0x10 (copy => copy-on-write, so the dyld file on disk is not
+// modified).
+extern int vm_protect(mach_port_t target_task, unsigned long address, unsigned long size, int set_maximum, int new_protection);
+extern int open(const char *path, int flags, int mode);
+extern long write(int fd, const void *buf, unsigned long nbyte);
+
+// Minimal logging helpers: this runs before libc exists, so there is no
+// snprintf/printf here. We append to a file inside the jbroot instead, which the
+// user can simply read with Filza.
+static int gStage1Fd = -1;
+
+static void stage1_puts(const char *s)
+{
+	if (gStage1Fd < 0) return;
+	unsigned long n = 0;
+	while (s[n]) n++;
+	write(gStage1Fd, s, n);
+}
+
+static void stage1_put_int(long v)
+{
+	char tmp[24];
+	int i = 0;
+	int neg = 0;
+	if (v < 0) { neg = 1; v = -v; }
+	if (v == 0) tmp[i++] = '0';
+	while (v > 0) { tmp[i++] = (char)('0' + (v % 10)); v /= 10; }
+	if (neg) tmp[i++] = '-';
+	char out[24];
+	int j = 0;
+	while (i > 0) out[j++] = tmp[--i];
+	if (gStage1Fd >= 0) write(gStage1Fd, out, (unsigned long)j);
+}
+
+static void stage1_open_log(void)
+{
+	char *jbroot = jbinfo_get_jbroot();
+	if (!jbroot) return;
+
+	// "<jbroot>/basebin/hidejb_stage1.txt"
+	char path[512];
+	int i = 0;
+	while (jbroot[i] && i < 440) { path[i] = jbroot[i]; i++; }
+	const char *suffix = "/basebin/hidejb_stage1.txt";
+	int k = 0;
+	while (suffix[k] && i < 511) { path[i++] = suffix[k++]; }
+	path[i] = '\0';
+
+	// O_WRONLY|O_CREAT|O_TRUNC = 0x0001|0x0200|0x0400
+	gStage1Fd = open(path, 0x0001 | 0x0200 | 0x0400, 0644);
+}
+
+static void dyldhook_probe_text_writable(void)
+{
+	const unsigned long pageSize = 0x4000;
+	unsigned long probe = (unsigned long)(uintptr_t)&dyldhook_probe_text_writable;
+	unsigned long pageStart = probe & ~(pageSize - 1);
+
+	stage1_open_log();
+
+	int kr = vm_protect(mach_task_self_, pageStart, pageSize, 0, 1 | 2 | 0x10);
+	if (gDyldHookLog) {
+		_simple_dprintf(2, "[hidejb stage1] vm_protect dyld __TEXT @0x%lx rw+copy -> %d\n", pageStart, kr);
+	}
+
+	stage1_puts("hidejb stage1 probe\npage=");
+	stage1_put_int((long)pageStart);
+	if (kr == 0) {
+		stage1_puts("\nvm_protect RW+copy = OK\n");
+		// Put it straight back: leaving a writable code page is itself a tell.
+		int kr2 = vm_protect(mach_task_self_, pageStart, pageSize, 0, 1 | 4);
+		if (gDyldHookLog) {
+			_simple_dprintf(2, "[hidejb stage1] restore dyld __TEXT r-x -> %d\n", kr2);
+		}
+		stage1_puts("restore r-x = ");
+		stage1_put_int((long)kr2);
+		stage1_puts("\nRESULT: FEASIBLE\n");
+	} else {
+		stage1_puts("\nvm_protect RW+copy = FAILED kr=");
+		stage1_put_int((long)kr);
+		stage1_puts("\nRESULT: NOT-FEASIBLE\n");
+	}
+	if (gStage1Fd >= 0) { write(gStage1Fd, "", 0); }
+}
+
 void dyldhook_init(uintptr_t kernelParams)
 {
 	mach_init_4real();
@@ -213,4 +319,10 @@ void dyldhook_init(uintptr_t kernelParams)
 
 	// If all is well, do check-in right here before dyld_start!
 	dyldhook_perform_checkin();
+
+	// Stage 1 probe: only for apps that launchdhook marked as hidden, and it only
+	// logs. Nothing else about this process changes.
+	if (_simple_getenv(envp, "DOPAMINE_APP_HIDE") != NULL) {
+		dyldhook_probe_text_writable();
+	}
 }
