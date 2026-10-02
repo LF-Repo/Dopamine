@@ -155,11 +155,11 @@ static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 void lsdInit(void)
 {
 	MSImageRef coreServicesImage = MSGetImageByName("/System/Library/Frameworks/CoreServices.framework/CoreServices");
-	if (coreServicesImage) {
-		%init(_LSGetInboxURLForBundleIdentifier = MSFindSymbol(coreServicesImage, "__LSGetInboxURLForBundleIdentifier"),
-		  _LSServer_RebuildApplicationDatabases = MSFindSymbol(coreServicesImage, "__LSServer_RebuildApplicationDatabases"));
-	}
 
-	%init(_LSCanOpenURLManager = objc_getClass("_LSCanOpenURLManager"),
+	// One %init for everything (Logos forbids re-initializing the same group):
+	// the two C-function hooks from CoreServices, plus the two private classes.
+	%init(_LSGetInboxURLForBundleIdentifier = MSFindSymbol(coreServicesImage, "__LSGetInboxURLForBundleIdentifier"),
+		  _LSServer_RebuildApplicationDatabases = MSFindSymbol(coreServicesImage, "__LSServer_RebuildApplicationDatabases"),
+		  _LSCanOpenURLManager = objc_getClass("_LSCanOpenURLManager"),
 		  _LSDOpenClient = objc_getClass("_LSDOpenClient"));
 }
