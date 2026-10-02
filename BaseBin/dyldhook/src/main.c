@@ -122,11 +122,6 @@ void dyldhook_init(uintptr_t kernelParams)
 		gDyldHookLog = true;
 	}
 
-	// Hidden apps only: remember where we are allowed to write experiment logs.
-	if (_simple_getenv(envp, "DOPAMINE_APP_HIDE") != NULL) {
-		dyldhook_setup_log_path(envp);
-	}
-
 	if (_simple_getenv(envp, "DYLD_HOOK_SETUID") != NULL) {
 		int uid = 0, gid = 0, ruid = 0, rgid = 0, fd = -1;
 		gid_t groups[NGROUPS_MAX] = { 0 };
