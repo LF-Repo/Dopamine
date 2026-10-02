@@ -533,6 +533,13 @@ static int systemwide_persona_fix(audit_token_t *callerToken, int childPid, uid_
 	return 0;
 }
 
+static int systemwide_blacklist_check(uint64_t pid, bool *blacklisted)
+{
+	extern bool app_hide_is_blacklisted_pid(pid_t pid);
+	*blacklisted = app_hide_is_blacklisted_pid((pid_t)pid);
+	return 0;
+}
+
 struct jbserver_domain gSystemwideDomain = {
 	.permissionHandler = systemwide_domain_allowed,
 	.actions = {
@@ -609,6 +616,15 @@ struct jbserver_domain gSystemwideDomain = {
 				{ .name = "child-pid", .type = JBS_TYPE_UINT64, .out = false },
 				{ .name = "overwrite-uid", .type = JBS_TYPE_UINT64, .out = false },
 				{ .name = "overwrite-gid", .type = JBS_TYPE_UINT64, .out = false },
+			},
+		},
+		// JBS_SYSTEMWIDE_BLACKLIST_CHECK
+		{
+			.handler = systemwide_blacklist_check,
+			.args = (jbserver_arg[]) {
+				{ .name = "pid", .type = JBS_TYPE_UINT64, .out = false },
+				{ .name = "blacklisted", .type = JBS_TYPE_BOOL, .out = true },
+				{ 0 },
 			},
 		},
 		{ 0 },

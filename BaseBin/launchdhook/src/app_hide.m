@@ -135,6 +135,21 @@ void app_hide_commit_pid(void *pidp)
 	free(pidp);
 }
 
+bool app_hide_is_blacklisted_pid(pid_t pid)
+{
+	if (pid <= 0) return false;
+	state_init();
+
+	bool blacklisted = false;
+	pthread_rwlock_rdlock(&gStateLock);
+	NSNumber *cachedVersion = gBlacklistedState[@(pid)];
+	if (cachedVersion && cachedVersion.intValue == proc_get_pidversion(pid)) {
+		blacklisted = true;
+	}
+	pthread_rwlock_unlock(&gStateLock);
+	return blacklisted;
+}
+
 // ---------------------------------------------------------------------------
 // XPC reply hooks (RootHide xpc_hook.m)
 // ---------------------------------------------------------------------------
