@@ -52,6 +52,30 @@ static bool should_hide_environment(const char *executablePath)
     }
 }
 
+// RootHide-style "no-injection" mode: when HideNoInject is YES, don't inject
+// systemhook at all — instead the jailbreak is hidden globally (remove /var/jb,
+// unmount fakelib) while the app runs, then restored on exit.
+static bool should_hide_no_inject(const char *executablePath)
+{
+    if (!executablePath) return false;
+
+    @autoreleasepool {
+        NSString *path = [NSString stringWithUTF8String:executablePath];
+        NSRange appRange = [path rangeOfString:@".app/"];
+        if (appRange.location == NSNotFound) return false;
+
+        NSString *appPath = [path substringToIndex:appRange.location + 4];
+        NSString *infoPlistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+        NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
+        NSString *bundleID = info[@"CFBundleIdentifier"];
+        if (!bundleID) return false;
+
+        NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:@APP_HIDE_RULES_PATH];
+        NSDictionary *appRule = rules[bundleID];
+        return [appRule[@"HideNoInject"] boolValue];
+    }
+}
+
 extern bool gInEarlyBoot;
 extern bool gFreeBootLogoBeforeBackboardd;
 void free_boot_logo(void);
@@ -267,6 +291,23 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 
   if (path && should_hide_environment(path)) {
+		if (should_hide_no_inject(path)) {
+			// RootHide-style no-injection mode: temporarily hide the jailbreak
+			// globally (remove /var/jb + unmount fakelib), bare-spawn the app
+			// (no systemhook injection at all), and restore when it exits.
+			app_hide_global_hide();
+			pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
+			int r = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, (char *const *)envp);
+			if (pid) *pid = *blacklistedPidp;
+			app_hide_commit_pid(blacklistedPidp);
+			if (r == 0) {
+				app_hide_watch_exit(*blacklistedPidp);
+			} else {
+				app_hide_global_restore();
+			}
+			return r;
+		}
+
 		// ★ 按 App 隐藏（per-app hide）：
 		// 只注入 systemhook（干净路径 /usr/lib/systemhook.dylib），并打上 DOPAMINE_APP_HIDE=1。
 		// systemhook 的构造器看到这个标记后走 hidejb 分支：在 *本进程内* 隐藏 /var/jb、

@@ -19,6 +19,9 @@
 #include <errno.h>
 #include <arpa/inet.h>
 #include <litehook.h>
+#include <unistd.h>
+#include <limits.h>
+#include <sys/mount.h>
 
 #include <libjailbreak/libjailbreak.h>
 #include <xpc_private.h>
@@ -199,4 +202,52 @@ void app_hide_init(void)
 	orig_xpc_pipe_routine_reply = (int (*)(xpc_object_t))xpc_pipe_routine_reply;
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)xpc_dictionary_create_reply, (void *)new_xpc_dictionary_create_reply, NULL);
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)xpc_pipe_routine_reply, (void *)new_xpc_pipe_routine_reply, NULL);
+}
+
+// ---------------------------------------------------------------------------
+// RootHide-style "no-injection" mode: temporary global hide + bare spawn
+// ---------------------------------------------------------------------------
+
+static bool gNoInjectActive = false;
+
+void app_hide_global_hide(void)
+{
+	if (gNoInjectActive) return;
+	gNoInjectActive = true;
+
+	// Remove the /var/jb symlink and unmount fakelib so a bare (uninjected) app
+	// sees a clean system. Both are global — this is the "global destruction"
+	// tradeoff of no-injection hiding, but it is exactly what RootHide avoids by
+	// relocating the root; here we only apply it while a hidden app is running.
+	unlink("/var/jb");
+	unmount("/usr/lib", MNT_FORCE);
+}
+
+void app_hide_global_restore(void)
+{
+	if (!gNoInjectActive) return;
+	gNoInjectActive = false;
+
+	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
+	if (jbroot && jbroot[0]) {
+		char fakelibPath[PATH_MAX];
+		snprintf(fakelibPath, sizeof(fakelibPath), "%s/basebin/.fakelib", jbroot);
+
+		unlink("/var/jb");
+		symlink(jbroot, "/var/jb");
+		mount("bindfs", "/usr/lib", MNT_RDONLY, fakelibPath);
+	}
+}
+
+void app_hide_watch_exit(pid_t pid)
+{
+	if (pid <= 0) return;
+
+	dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC, (uintptr_t)pid, DISPATCH_PROC_EXIT,
+		dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
+	dispatch_source_set_event_handler(source, ^{
+		app_hide_global_restore();
+		dispatch_source_cancel(source);
+	});
+	dispatch_resume(source);
 }
