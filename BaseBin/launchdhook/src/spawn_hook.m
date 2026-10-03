@@ -48,7 +48,10 @@ static bool should_hide_environment(const char *executablePath)
 
         NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:@APP_HIDE_RULES_PATH];
         NSDictionary *appRule = rules[bundleID];
-        return [appRule[@"HideEnvironment"] boolValue];
+        BOOL hideEnv = [appRule[@"HideEnvironment"] boolValue];
+        FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
+        if (f) { fprintf(f, "hide_env: %s = %d\n", bundleID.UTF8String, hideEnv); fclose(f); }
+        return hideEnv;
     }
 }
 
@@ -72,7 +75,10 @@ static bool should_hide_no_inject(const char *executablePath)
 
         NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:@APP_HIDE_RULES_PATH];
         NSDictionary *appRule = rules[bundleID];
-        return [appRule[@"HideNoInject"] boolValue];
+        BOOL noInject = [appRule[@"HideNoInject"] boolValue];
+        FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
+        if (f) { fprintf(f, "no_inject: %s = %d\n", bundleID.UTF8String, noInject); fclose(f); }
+        return noInject;
     }
 }
 

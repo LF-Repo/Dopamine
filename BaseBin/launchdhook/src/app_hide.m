@@ -155,6 +155,15 @@ bool app_hide_is_blacklisted_pid(pid_t pid)
 	return blacklisted;
 }
 
+static void app_hide_remove_pid(pid_t pid)
+{
+	if (pid <= 0) return;
+	state_init();
+	pthread_rwlock_wrlock(&gStateLock);
+	[gBlacklistedState removeObjectForKey:@(pid)];
+	pthread_rwlock_unlock(&gStateLock);
+}
+
 // ---------------------------------------------------------------------------
 // bind() hook (RootHide roothider.m new_bind) — force auto-assigned (port 0)
 // sockets into the ephemeral range so jailbreak sockets don't land on a
@@ -352,6 +361,7 @@ void app_hide_watch_exit(pid_t pid)
 	dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC, (uintptr_t)pid, DISPATCH_PROC_EXIT,
 		dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
 	dispatch_source_set_event_handler(source, ^{
+		app_hide_remove_pid(pid);
 		app_hide_global_restore();
 		dispatch_source_cancel(source);
 	});
