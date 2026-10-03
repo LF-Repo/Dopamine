@@ -12,6 +12,7 @@
 
 #include <libproc.h>
 #include <sys/proc_info.h>
+#include <mach/mach.h>
 #include <bsm/audit.h>
 #include <bsm/libbsm.h>
 #include <pthread.h>
@@ -136,6 +137,30 @@ void app_hide_commit_pid(void *pidp)
 		gBlacklistedState[@(pid)] = @(pidversion);
 		pthread_rwlock_unlock(&gStateLock);
 		app_hide_log([NSString stringWithFormat:@"commit pid %d (version %d), blacklist size %lu", pid, pidversion, (unsigned long)gBlacklistedState.count]);
+
+		// Diagnostic: dump the child's POSIX signal dispositions and mach
+		// exception ports so we can see what a "signal handlers set" detector
+		// is actually observing on a bare (no-inject) app.
+		struct proc_bsdshortinfo bsdinfo = {0};
+		if (proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &bsdinfo, sizeof(bsdinfo)) == sizeof(bsdinfo)) {
+			app_hide_log([NSString stringWithFormat:@"  child %d sigignore=0x%x sigcatch=0x%x", pid, bsdinfo.pbsi_sigignore, bsdinfo.pbsi_sigcatch]);
+		}
+
+		mach_port_t task = MACH_PORT_NULL;
+		if (task_for_pid(mach_task_self(), pid, &task) == KERN_SUCCESS) {
+			exception_mask_t masks[EXC_TYPES_COUNT] = {0};
+			mach_port_t ports[EXC_TYPES_COUNT] = {0};
+			exception_behavior_t behaviors[EXC_TYPES_COUNT] = {0};
+			thread_state_flavor_t flavors[EXC_TYPES_COUNT] = {0};
+			mach_msg_type_number_t count = 0;
+			kern_return_t kr = task_get_exception_ports(task, EXC_MASK_ALL, masks, &count, ports, behaviors, flavors);
+			if (kr == KERN_SUCCESS) {
+				for (mach_msg_type_number_t i = 0; i < count; i++) {
+					app_hide_log([NSString stringWithFormat:@"  child %d exc mask=0x%x port=0x%x", pid, masks[i], ports[i]]);
+				}
+			}
+			mach_port_deallocate(mach_task_self(), task);
+		}
 	}
 	free(pidp);
 }
