@@ -94,6 +94,8 @@ static NSString *frontmost_bundle_id(void)
 
 static NSString *gLastFrontmostBundleID = @"";
 static BOOL gLastShouldHide = NO;
+static BOOL gLastActed = NO;
+static int gStableCount = 0;
 static dispatch_source_t gForegroundTimer = NULL;
 
 static void check_foreground_app(void)
@@ -101,26 +103,49 @@ static void check_foreground_app(void)
 	NSString *bundleID = frontmost_bundle_id();
 	BOOL shouldHide = is_no_inject_bundle_id(bundleID);
 
-	if ([bundleID isEqualToString:gLastFrontmostBundleID] && shouldHide == gLastShouldHide) {
-		return;
-	}
+	BOOL changed = (![bundleID isEqualToString:gLastFrontmostBundleID] || shouldHide != gLastShouldHide);
 	gLastFrontmostBundleID = bundleID;
 	gLastShouldHide = shouldHide;
 
+	if (changed) {
+		// Frontmost app (or its hide rule) changed: reset the debounce so we
+		// never act on a transient state (e.g. the spawn hook just hid while
+		// SpringBoard hasn't yet marked the app frontmost).
+		gStableCount = 0;
+		gLastActed = NO;
+		return;
+	}
+
+	if (gLastActed) return;
+
+	// Require 3 stable polls (~1.5s) before acting. This also makes the state
+	// self-healing: if the hide got stuck, a stable "not hidden" frontmost will
+	// restore it after ~1.5s.
+	gStableCount++;
+	if (gStableCount < 3) return;
+
+	gLastActed = YES;
 	jbclient_set_app_hidden(shouldHide);
 }
 
 static void start_foreground_polling(void)
 {
 	if (gForegroundTimer) return;
-	gForegroundTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
-		dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
-	dispatch_source_set_timer(gForegroundTimer, dispatch_time(DISPATCH_TIME_NOW, 0),
-		500 * NSEC_PER_MSEC, 100 * NSEC_PER_MSEC);
-	dispatch_source_set_event_handler(gForegroundTimer, ^{
-		check_foreground_app();
+	// Delay startup well past the jailbreak/userspace-reboot window so we never
+	// act on a transitional frontmost app during boot (this was hiding the
+	// jailbreak right after it finished and breaking "Updating Bundled Packages").
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC),
+		dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+		if (gForegroundTimer) return;
+		gForegroundTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+			dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
+		dispatch_source_set_timer(gForegroundTimer, dispatch_time(DISPATCH_TIME_NOW, 0),
+			500 * NSEC_PER_MSEC, 100 * NSEC_PER_MSEC);
+		dispatch_source_set_event_handler(gForegroundTimer, ^{
+			check_foreground_app();
+		});
+		dispatch_resume(gForegroundTimer);
 	});
-	dispatch_resume(gForegroundTimer);
 }
 
 void springboardInit(void)
