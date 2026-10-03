@@ -124,6 +124,34 @@ static NSString *frontmost_bundle_id(void)
 
 #pragma clang diagnostic pop
 
+// ---------------------------------------------------------------------------
+// Diagnostic logging. Read at: /var/mobile/Documents/sb_hide_log.txt
+// ---------------------------------------------------------------------------
+static void sbHideLog(NSString *msg)
+{
+	FILE *f = fopen("/var/mobile/Documents/sb_hide_log.txt", "a");
+	if (f) {
+		fprintf(f, "%s\n", msg.UTF8String);
+		fclose(f);
+	}
+}
+
+static BOOL gHideArmed = NO;
+static NSString *gHookFrontmostBundleID = nil;  // set by _setFrontmostApplication: (if it fires)
+
+%hook SpringBoard
+- (void)_setFrontmostApplication:(id)app {
+	%orig;
+	if (!gHideArmed) return;
+	NSString *bid = @"";
+	if (app && [app respondsToSelector:@selector(bundleIdentifier)]) {
+		bid = [app performSelector:@selector(bundleIdentifier)] ?: @"";
+	}
+	gHookFrontmostBundleID = bid;
+	sbHideLog([NSString stringWithFormat:@"hook frontmost: '%@'", bid]);
+}
+%end
+
 static NSString *gLastFrontmostBundleID = @"";
 static BOOL gLastShouldHide = NO;
 static BOOL gLastActed = NO;
@@ -132,7 +160,8 @@ static dispatch_source_t gForegroundTimer = NULL;
 
 static void check_foreground_app(void)
 {
-	NSString *bundleID = frontmost_bundle_id();
+	// Prefer the hook's instant value; fall back to querying.
+	NSString *bundleID = gHookFrontmostBundleID ?: frontmost_bundle_id();
 	BOOL shouldHide = is_no_inject_bundle_id(bundleID);
 
 	BOOL changed = (![bundleID isEqualToString:gLastFrontmostBundleID] || shouldHide != gLastShouldHide);
@@ -140,9 +169,7 @@ static void check_foreground_app(void)
 	gLastShouldHide = shouldHide;
 
 	if (changed) {
-		// Frontmost app (or its hide rule) changed: reset the debounce so we
-		// never act on a transient state (e.g. the spawn hook just hid while
-		// SpringBoard hasn't yet marked the app frontmost).
+		sbHideLog([NSString stringWithFormat:@"changed: '%@' hide=%d", bundleID, shouldHide]);
 		gStableCount = 0;
 		gLastActed = NO;
 		return;
@@ -150,24 +177,22 @@ static void check_foreground_app(void)
 
 	if (gLastActed) return;
 
-	// Require 3 stable polls (~1.5s) before acting. This also makes the state
-	// self-healing: if the hide got stuck, a stable "not hidden" frontmost will
-	// restore it after ~1.5s.
+	// Require 3 stable polls (~1.5s) before acting.
 	gStableCount++;
 	if (gStableCount < 3) return;
 
 	gLastActed = YES;
+	sbHideLog([NSString stringWithFormat:@"act: hide=%d (frontmost '%@')", shouldHide, bundleID]);
 	jbclient_set_app_hidden(shouldHide);
 }
 
 static void start_foreground_polling(void)
 {
 	if (gForegroundTimer) return;
-	// Delay startup well past the jailbreak/userspace-reboot window so we never
-	// act on a transitional frontmost app during boot (this was hiding the
-	// jailbreak right after it finished and breaking "Updating Bundled Packages").
+	// Delay startup well past the jailbreak/userspace-reboot window.
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC),
 		dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+		gHideArmed = YES;
 		if (gForegroundTimer) return;
 		gForegroundTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
 			dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
