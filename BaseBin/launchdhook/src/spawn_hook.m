@@ -329,7 +329,13 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			// background signal) so we can learn which role values map to each.
 			if (desc && desc->coal_info) {
 				FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-				if (f) { fprintf(f, "spawn coal role=%d id=%llu\n", desc->coal_info->psci_role, desc->coal_info->psci_id); fclose(f); }
+				if (f) {
+					const unsigned char *p = (const unsigned char *)desc->coal_info;
+					fprintf(f, "spawn coal raw:");
+					for (int i = 0; i < 32; i++) fprintf(f, " %02x", p[i]);
+					fprintf(f, "\n");
+					fclose(f);
+				}
 			} else {
 				FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
 				if (f) { fprintf(f, "spawn coal info NULL\n"); fclose(f); }
