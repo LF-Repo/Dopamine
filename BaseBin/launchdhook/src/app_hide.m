@@ -142,14 +142,20 @@ void app_hide_commit_pid(void *pidp)
 		// exception ports so we can see what a "signal handlers set" detector
 		// is actually observing on a bare (no-inject) app.
 		mach_port_t task = MACH_PORT_NULL;
-		if (task_for_pid(mach_task_self(), pid, &task) == KERN_SUCCESS) {
+		if (task_for_pid(mach_task_self(), pid, &task) != KERN_SUCCESS) {
+			app_hide_log([NSString stringWithFormat:@"  child %d task_for_pid failed", pid]);
+		} else {
 			exception_mask_t masks[EXC_TYPES_COUNT] = {0};
 			mach_port_t ports[EXC_TYPES_COUNT] = {0};
 			exception_behavior_t behaviors[EXC_TYPES_COUNT] = {0};
 			thread_state_flavor_t flavors[EXC_TYPES_COUNT] = {0};
 			mach_msg_type_number_t count = 0;
 			kern_return_t kr = task_get_exception_ports(task, EXC_MASK_ALL, masks, &count, ports, behaviors, flavors);
-			if (kr == KERN_SUCCESS) {
+			if (kr != KERN_SUCCESS) {
+				app_hide_log([NSString stringWithFormat:@"  child %d task_get_exception_ports kr=%d", pid, kr]);
+			} else if (count == 0) {
+				app_hide_log([NSString stringWithFormat:@"  child %d no exception ports (clean)", pid]);
+			} else {
 				for (mach_msg_type_number_t i = 0; i < count; i++) {
 					app_hide_log([NSString stringWithFormat:@"  child %d exc mask=0x%x port=0x%x", pid, masks[i], ports[i]]);
 				}
@@ -333,6 +339,7 @@ void app_hide_global_hide(void)
 	int count = gNoInjectRefCount++;
 	gNoInjectActive = true;
 	pthread_mutex_unlock(&gNoInjectLock);
+	app_hide_log([NSString stringWithFormat:@"global_hide: refcount now %d", count + 1]);
 	if (count > 0) return;
 
 	// Unmount fakelib FIRST so the re-entrant jbctl spawn below runs without
@@ -353,15 +360,18 @@ void app_hide_global_restore(void)
 	pthread_mutex_lock(&gNoInjectLock);
 	if (gNoInjectRefCount <= 0) {
 		pthread_mutex_unlock(&gNoInjectLock);
+		app_hide_log(@"global_restore: refcount already 0 (no-op)");
 		return;
 	}
 	int count = --gNoInjectRefCount;
 	if (count > 0) {
 		pthread_mutex_unlock(&gNoInjectLock);
+		app_hide_log([NSString stringWithFormat:@"global_restore: refcount now %d (skip, still hidden)", count]);
 		return;
 	}
 	gNoInjectActive = false;
 	pthread_mutex_unlock(&gNoInjectLock);
+	app_hide_log(@"global_restore: refcount 0, restoring jailbreak");
 
 	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
 	if (jbroot && jbroot[0]) {
@@ -381,6 +391,7 @@ void app_hide_watch_exit(pid_t pid)
 	dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC, (uintptr_t)pid, DISPATCH_PROC_EXIT,
 		dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
 	dispatch_source_set_event_handler(source, ^{
+		app_hide_log([NSString stringWithFormat:@"watch_exit: pid %d exited", pid]);
 		app_hide_remove_pid(pid);
 		app_hide_global_restore();
 		dispatch_source_cancel(source);
