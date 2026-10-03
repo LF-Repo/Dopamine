@@ -422,11 +422,20 @@ bool app_hide_is_currently_hidden(void)
 
 bool app_hide_is_jailbreak_app(const char *path)
 {
-	// A "jailbreak app" is one installed inside the jailbreak root itself
-	// (Sileo, Filza, Terminal, ... under /var/jb/). When /var/jb is removed
-	// such apps cannot even be resolved, so restoring /var/jb is required.
+	// A "jailbreak app" is an app bundle (contains ".app/") installed inside
+	// the jailbreak root itself (Sileo, Filza, Terminal, ...). It may be
+	// launched via the /var/jb/ symlink OR via the fully-resolved preboot path,
+	// so accept both. Requiring ".app/" also excludes jailbreak binaries like
+	// jbctl (spawned re-entrantly during hide/restore) from a false resurrect.
 	if (!path) return false;
-	return strncmp(path, "/var/jb/", 8) == 0;
+	if (!strstr(path, ".app/")) return false;
+	if (strncmp(path, "/var/jb/", 8) == 0) return true;
+	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
+	if (jbroot && jbroot[0]) {
+		size_t len = strlen(jbroot);
+		if (len > 0 && strncmp(path, jbroot, len) == 0) return true;
+	}
+	return false;
 }
 
 void app_hide_resurrect_for_jb_app(void)
