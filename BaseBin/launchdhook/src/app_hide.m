@@ -141,9 +141,9 @@ void app_hide_commit_pid(void *pidp)
 		// Diagnostic: dump the child's POSIX signal dispositions and mach
 		// exception ports so we can see what a "signal handlers set" detector
 		// is actually observing on a bare (no-inject) app.
-		struct proc_bsdshortinfo bsdinfo = {0};
-		if (proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &bsdinfo, sizeof(bsdinfo)) == sizeof(bsdinfo)) {
-			app_hide_log([NSString stringWithFormat:@"  child %d sigignore=0x%x sigcatch=0x%x", pid, bsdinfo.pbsi_sigignore, bsdinfo.pbsi_sigcatch]);
+		struct proc_bsdinfo bsdinfo = {0};
+		if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &bsdinfo, sizeof(bsdinfo)) == sizeof(bsdinfo)) {
+			app_hide_log([NSString stringWithFormat:@"  child %d sigignore=0x%x sigcatch=0x%x", pid, bsdinfo.pbi_sigignore, bsdinfo.pbi_sigcatch]);
 		}
 
 		mach_port_t task = MACH_PORT_NULL;
