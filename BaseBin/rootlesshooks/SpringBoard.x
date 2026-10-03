@@ -82,6 +82,9 @@ static BOOL is_no_inject_bundle_id(NSString *bundleID)
 	return [appRule[@"HideNoInject"] boolValue];
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+
 static NSString *frontmost_bundle_id(void)
 {
 	// FBProcessManager.frontmostApplicationProcess is the live frontmost process.
@@ -118,6 +121,8 @@ static NSString *frontmost_bundle_id(void)
 	}
 	return @"";
 }
+
+#pragma clang diagnostic pop
 
 static NSString *gLastFrontmostBundleID = @"";
 static BOOL gLastShouldHide = NO;
