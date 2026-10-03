@@ -19,6 +19,14 @@
 #include <mach/task.h>
 extern char **environ;
 
+// Private XNU spawn coalition info (bsd/sys/spawn_internal.h). Used to read the
+// coalition role at spawn time (pre-spawn) to tell foreground/background apart.
+struct _posix_spawn_coalition_info {
+	int psci_role;		/* COALITION_ROLE_* */
+	uint64_t psci_id;	/* coalition id */
+	int psci_order;
+};
+
 void abort_with_reason(uint32_t reason_namespace, uint64_t reason_code, const char *reason_string, uint64_t reason_flags);
 
 extern int systemwide_trust_file_by_path(const char *path);
@@ -291,10 +299,17 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 	// "Jailbreak app resurrection": if the jailbreak is currently hidden (a
 	// no-inject app is running) and a jailbreak app (under /var/jb/) is being
-	// spawned, restore the jailbreak first so the jailbreak app can run. No
-	// re-hide on exit (accepted limitation).
+	// spawned, restore the jailbreak, spawn it directly, and track its pid so it
+	// can be killed when the jailbreak is re-hidden. No re-hide on exit.
 	if (path && app_hide_is_currently_hidden() && app_hide_is_jailbreak_app(path)) {
 		app_hide_resurrect_for_jb_app();
+		pid_t jbPid = 0;
+		int r = posix_spawn_hook_shared(&jbPid, path, desc, argv, envp, __posix_spawn_orig_wrapper, systemwide_trust_file_by_path, platform_set_process_debugged, jbsetting(jetsamMultiplier));
+		if (pid) *pid = jbPid;
+		if (r == 0) {
+			app_hide_track_jailbreak_app(jbPid);
+		}
+		return r;
 	}
 
 	// Check whether this App is on the injection block list
@@ -310,6 +325,15 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			// globally (remove /var/jb + unmount fakelib), bare-spawn the app
 			// (no systemhook injection at all), and restore when it exits.
 			app_hide_global_hide();
+			// Diagnostic: log the spawn coalition role (a pre-spawn foreground/
+			// background signal) so we can learn which role values map to each.
+			if (desc && desc->coal_info) {
+				FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
+				if (f) { fprintf(f, "spawn coal role=%d id=%llu\n", desc->coal_info->psci_role, desc->coal_info->psci_id); fclose(f); }
+			} else {
+				FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
+				if (f) { fprintf(f, "spawn coal info NULL\n"); fclose(f); }
+			}
 			pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
 			int r = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, (char *const *)envp);
 			pid_t childPid = *blacklistedPidp;
