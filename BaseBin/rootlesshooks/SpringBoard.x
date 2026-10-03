@@ -84,12 +84,39 @@ static BOOL is_no_inject_bundle_id(NSString *bundleID)
 
 static NSString *frontmost_bundle_id(void)
 {
+	// FBProcessManager.frontmostApplicationProcess is the live frontmost process.
+	Class pmClass = NSClassFromString(@"FBProcessManager");
+	if (pmClass && [pmClass respondsToSelector:@selector(sharedInstance)]) {
+		id pm = [pmClass performSelector:@selector(sharedInstance)];
+		if (pm) {
+			SEL pmSels[] = { @selector(frontmostApplicationProcess), @selector(currentProcess) };
+			for (int i = 0; i < 2; i++) {
+				if ([pm respondsToSelector:pmSels[i]]) {
+					id proc = [pm performSelector:pmSels[i]];
+					if (proc && [proc respondsToSelector:@selector(bundleIdentifier)]) {
+						NSString *bid = [proc performSelector:@selector(bundleIdentifier)];
+						if (bid.length) return bid;
+					}
+				}
+			}
+		}
+	}
+
+	// SpringBoard frontmost application (fallback).
 	id springBoard = [NSClassFromString(@"SpringBoard") performSelector:@selector(sharedApplication)];
-	if (!springBoard) return @"";
-	id frontmost = [springBoard performSelector:@selector(_frontmostApplication)];
-	if (!frontmost) frontmost = [springBoard performSelector:@selector(frontmostApplication)];
-	NSString *bundleID = [frontmost performSelector:@selector(bundleIdentifier)];
-	return bundleID ?: @"";
+	if (springBoard) {
+		SEL sbSels[] = { @selector(frontmostApplication), @selector(_frontmostApplication) };
+		for (int i = 0; i < 2; i++) {
+			if ([springBoard respondsToSelector:sbSels[i]]) {
+				id frontmost = [springBoard performSelector:sbSels[i]];
+				if (frontmost && [frontmost respondsToSelector:@selector(bundleIdentifier)]) {
+					NSString *bid = [frontmost performSelector:@selector(bundleIdentifier)];
+					if (bid.length) return bid;
+				}
+			}
+		}
+	}
+	return @"";
 }
 
 static NSString *gLastFrontmostBundleID = @"";
