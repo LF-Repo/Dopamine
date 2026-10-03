@@ -18,6 +18,8 @@
 #include <xpc/xpc.h>
 #include <errno.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <litehook.h>
 #include <unistd.h>
 #include <limits.h>
@@ -131,6 +133,7 @@ void app_hide_commit_pid(void *pidp)
 		pthread_rwlock_wrlock(&gStateLock);
 		gBlacklistedState[@(pid)] = @(pidversion);
 		pthread_rwlock_unlock(&gStateLock);
+		app_hide_log([NSString stringWithFormat:@"commit pid %d (version %d), blacklist size %lu", pid, pidversion, (unsigned long)gBlacklistedState.count]);
 	}
 	free(pidp);
 }
@@ -148,6 +151,55 @@ bool app_hide_is_blacklisted_pid(pid_t pid)
 	}
 	pthread_rwlock_unlock(&gStateLock);
 	return blacklisted;
+}
+
+// ---------------------------------------------------------------------------
+// bind() hook (RootHide roothider.m new_bind) — force auto-assigned (port 0)
+// sockets into the ephemeral range so jailbreak sockets don't land on a
+// suspicious fixed port. Hooks launchd itself; applied via GOT rebind (no
+// instruction replacement, which would panic launchd on arm64).
+// ---------------------------------------------------------------------------
+
+static int (*orig_bind)(int, const struct sockaddr *, socklen_t);
+
+static int new_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
+{
+	if (addr && addr->sa_family == AF_INET && addrlen >= sizeof(struct sockaddr_in)) {
+		struct sockaddr_in addr_in = *(struct sockaddr_in *)addr;
+		in_port_t port = ntohs(addr_in.sin_port);
+		if (port == 0) {
+			int ret = -1;
+			for (port = IPPORT_HIFIRSTAUTO; port <= IPPORT_HILASTAUTO; port++) {
+				addr_in.sin_port = htons(port);
+				ret = orig_bind(sockfd, (struct sockaddr *)&addr_in, addrlen);
+				if (ret == 0 || errno != EADDRINUSE) break;
+			}
+			return ret;
+		}
+	}
+	else if (addr && addr->sa_family == AF_INET6 && addrlen >= sizeof(struct sockaddr_in6)) {
+		struct sockaddr_in6 addr_in6 = *(struct sockaddr_in6 *)addr;
+		in_port_t port = ntohs(addr_in6.sin6_port);
+		if (port == 0) {
+			int ret = -1;
+			for (port = IPPORT_HIFIRSTAUTO; port <= IPPORT_HILASTAUTO; port++) {
+				addr_in6.sin6_port = htons(port);
+				ret = orig_bind(sockfd, (struct sockaddr *)&addr_in6, addrlen);
+				if (ret == 0 || errno != EADDRINUSE) break;
+			}
+			return ret;
+		}
+	}
+	return orig_bind(sockfd, addr, addrlen);
+}
+
+static void app_hide_log(NSString *msg)
+{
+	FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
+	if (f) {
+		fprintf(f, "%s\n", msg.UTF8String);
+		fclose(f);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -218,8 +270,10 @@ void app_hide_init(void)
 	// exactly this reason.
 	orig_xpc_dictionary_create_reply = (xpc_object_t (*)(xpc_object_t))xpc_dictionary_create_reply;
 	orig_xpc_pipe_routine_reply = (int (*)(xpc_object_t))xpc_pipe_routine_reply;
+	orig_bind = bind;
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)xpc_dictionary_create_reply, (void *)new_xpc_dictionary_create_reply, NULL);
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)xpc_pipe_routine_reply, (void *)new_xpc_pipe_routine_reply, NULL);
+	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)bind, (void *)new_bind, NULL);
 }
 
 // ---------------------------------------------------------------------------
