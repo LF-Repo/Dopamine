@@ -24,6 +24,7 @@ uint64_t jbclient_jbsettings_get_uint64(const char *key);
 double jbclient_jbsettings_get_double(const char *key);
 int jbclient_persona_fix(int childPid, uid_t overwriteUid, gid_t overwriteGid);
 bool jbclient_blacklist_check_pid(uint64_t pid);
+int jbclient_set_app_hidden(bool hidden);
 int jbclient_platform_set_process_debugged(uint64_t pid, bool fullyDebugged);
 int jbclient_platform_stage_jailbreak_update(const char *updateTar);
 int jbclient_platform_jbsettings_set(const char *key, xpc_object_t value);
