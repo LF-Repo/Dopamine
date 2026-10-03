@@ -289,7 +289,15 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 		}
 	}
 
-// Check whether this App is on the injection block list
+	// "Jailbreak app resurrection": if the jailbreak is currently hidden (a
+	// no-inject app is running) and a jailbreak app (under /var/jb/) is being
+	// spawned, restore the jailbreak first so the jailbreak app can run. No
+	// re-hide on exit (accepted limitation).
+	if (path && app_hide_is_currently_hidden() && app_hide_is_jailbreak_app(path)) {
+		app_hide_resurrect_for_jb_app();
+	}
+
+	// Check whether this App is on the injection block list
 	if (path && should_block_injection(path)) {
 		return __posix_spawn_orig_wrapper(pid, path, desc, argv, envp);
 	}
