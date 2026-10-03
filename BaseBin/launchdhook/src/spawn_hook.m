@@ -327,18 +327,17 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			app_hide_global_hide();
 			// Diagnostic: log the spawn coalition role (a pre-spawn foreground/
 			// background signal) so we can learn which role values map to each.
-			if (desc && desc->coal_info) {
+			// Read the launch type from the spawn attributes (offset 0xA8 in
+			// struct _posix_spawnattr). This is a pre-spawn foreground/background
+			// signal: 0 = default (foreground), 1 = background, 2 = system.
+			if (desc && desc->attrp) {
+				int launch_type = 0;
+				memcpy(&launch_type, (char *)desc->attrp + 0xA8, sizeof(launch_type));
 				FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-				if (f) {
-					const unsigned char *p = (const unsigned char *)desc->coal_info;
-					fprintf(f, "spawn coal raw:");
-					for (int i = 0; i < 32; i++) fprintf(f, " %02x", p[i]);
-					fprintf(f, "\n");
-					fclose(f);
-				}
+				if (f) { fprintf(f, "spawn launch_type=%d\n", launch_type); fclose(f); }
 			} else {
 				FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-				if (f) { fprintf(f, "spawn coal info NULL\n"); fclose(f); }
+				if (f) { fprintf(f, "spawn attr NULL\n"); fclose(f); }
 			}
 			pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
 			int r = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, (char *const *)envp);
