@@ -465,7 +465,7 @@ static int app_hide_get_task_role(pid_t pid)
 	if (task_for_pid(mach_task_self(), pid, &task) != KERN_SUCCESS) {
 		return -1;
 	}
-	task_category_policy_t policy = {0};
+	struct task_category_policy policy = {0};
 	mach_msg_type_number_t count = TASK_CATEGORY_POLICY_COUNT;
 	boolean_t get_default = FALSE;
 	kern_return_t kr = task_policy_get(task, TASK_CATEGORY_POLICY, (task_policy_t)&policy, &count, &get_default);
