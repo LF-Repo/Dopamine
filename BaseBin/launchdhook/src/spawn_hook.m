@@ -317,6 +317,7 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			app_hide_commit_pid(blacklistedPidp);
 			if (r == 0) {
 				app_hide_watch_exit(childPid);
+				app_hide_check_role_after_spawn(childPid);
 			} else {
 				app_hide_global_restore();
 			}
