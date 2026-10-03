@@ -327,14 +327,17 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			app_hide_global_hide();
 			// Diagnostic: log the spawn coalition role (a pre-spawn foreground/
 			// background signal) so we can learn which role values map to each.
-			// Read the launch type from the spawn attributes (offset 0xA8 in
-			// struct _posix_spawnattr). This is a pre-spawn foreground/background
-			// signal: 0 = default (foreground), 1 = background, 2 = system.
+			// Dump the spawn attribute struct (first 256 bytes as u64s) to locate
+			// the launch_type field that distinguishes foreground/background.
 			if (desc && desc->attrp) {
-				int launch_type = 0;
-				memcpy(&launch_type, (char *)desc->attrp + 0xA8, sizeof(launch_type));
 				FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-				if (f) { fprintf(f, "spawn launch_type=%d\n", launch_type); fclose(f); }
+				if (f) {
+					const uint64_t *u = (const uint64_t *)desc->attrp;
+					fprintf(f, "attr:");
+					for (int i = 0; i < 32; i++) fprintf(f, " %016llx", (unsigned long long)u[i]);
+					fprintf(f, "\n");
+					fclose(f);
+				}
 			} else {
 				FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
 				if (f) { fprintf(f, "spawn attr NULL\n"); fclose(f); }
