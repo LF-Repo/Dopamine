@@ -165,6 +165,15 @@ static NSString *hideMapPath(void)
 	return [hideQuarantineRoot() stringByAppendingPathComponent:@"map.plist"];
 }
 
+static void auditLog(NSString *msg)
+{
+	FILE *f = fopen("/var/mobile/audit_log.txt", "a");
+	if (f) {
+		fprintf(f, "%s\n", msg.UTF8String);
+		fclose(f);
+	}
+}
+
 static void hideItemAtPath(NSString *src)
 {
 	NSFileManager *fm = [NSFileManager defaultManager];
@@ -172,11 +181,16 @@ static void hideItemAtPath(NSString *src)
 	[fm createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
 
 	NSString *dst = [root stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
-	if (![fm moveItemAtPath:src toPath:dst error:nil]) return;
+	if (![fm moveItemAtPath:src toPath:dst error:nil]) {
+		auditLog([NSString stringWithFormat:@"hide FAILED: %@", src]);
+		return;
+	}
 
 	NSMutableArray *map = [[NSArray arrayWithContentsOfFile:hideMapPath()] mutableCopy] ?: [NSMutableArray array];
 	[map addObject:@{ @"src": src, @"dst": dst }];
 	[map writeToFile:hideMapPath() atomically:YES];
+
+	auditLog([NSString stringWithFormat:@"hide ok: %@", src]);
 }
 
 static void restoreHiddenItems(void)
@@ -321,12 +335,20 @@ int hide_global_urlschemes_show(void)
 
 int hide_global_audit_hide(void)
 {
-	@autoreleasepool { runJailbreakLibraryAudit(); }
+	@autoreleasepool {
+		auditLog(@"=== audit hide START ===");
+		runJailbreakLibraryAudit();
+		auditLog(@"=== audit hide END ===");
+	}
 	return 0;
 }
 
 int hide_global_audit_restore(void)
 {
-	@autoreleasepool { restoreHiddenItems(); }
+	@autoreleasepool {
+		auditLog(@"=== audit restore START ===");
+		restoreHiddenItems();
+		auditLog(@"=== audit restore END ===");
+	}
 	return 0;
 }

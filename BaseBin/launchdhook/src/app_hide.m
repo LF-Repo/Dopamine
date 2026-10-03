@@ -243,15 +243,16 @@ void app_hide_global_hide(void)
 	if (gNoInjectActive) return;
 	gNoInjectActive = true;
 
+	// Unmount fakelib FIRST so the re-entrant jbctl spawn below runs without
+	// systemhook injection (same proven pattern as ensure_fakelib_mounted()).
+	unmount("/usr/lib", MNT_FORCE);
+
 	// Quarantine the jailbreak files a bare app can still see (the "suspicious
-	// files" under /var/mobile/Library). This is a pure file-rename operation —
-	// NO uicache — so it is fast and does not hang launchd the way the old
-	// URL-scheme step did. URL schemes are handled per-process by lsd instead.
+	// files" under /var/mobile/Library). Pure file-rename, no uicache.
 	app_hide_run_jbctl("audit", "hide");
 
-	// Remove the /var/jb symlink and unmount fakelib.
+	// Remove the /var/jb symlink last.
 	unlink("/var/jb");
-	unmount("/usr/lib", MNT_FORCE);
 }
 
 void app_hide_global_restore(void)
