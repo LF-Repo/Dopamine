@@ -540,6 +540,15 @@ static int systemwide_blacklist_check(uint64_t pid, bool *blacklisted)
 	return 0;
 }
 
+static int systemwide_set_app_hidden(bool hidden)
+{
+	extern void app_hide_global_hide(void);
+	extern void app_hide_global_restore(void);
+	if (hidden) app_hide_global_hide();
+	else app_hide_global_restore();
+	return 0;
+}
+
 struct jbserver_domain gSystemwideDomain = {
 	.permissionHandler = systemwide_domain_allowed,
 	.actions = {
@@ -624,6 +633,14 @@ struct jbserver_domain gSystemwideDomain = {
 			.args = (jbserver_arg[]) {
 				{ .name = "pid", .type = JBS_TYPE_UINT64, .out = false },
 				{ .name = "blacklisted", .type = JBS_TYPE_BOOL, .out = true },
+				{ 0 },
+			},
+		},
+		// JBS_SYSTEMWIDE_SET_APP_HIDDEN
+		{
+			.handler = systemwide_set_app_hidden,
+			.args = (jbserver_arg[]) {
+				{ .name = "hidden", .type = JBS_TYPE_BOOL, .out = false },
 				{ 0 },
 			},
 		},

@@ -277,6 +277,20 @@ bool jbclient_blacklist_check_pid(uint64_t pid)
 	return false;
 }
 
+int jbclient_set_app_hidden(bool hidden)
+{
+	xpc_object_t xargs = xpc_dictionary_create_empty();
+	xpc_dictionary_set_bool(xargs, "hidden", hidden);
+	xpc_object_t xreply = jbserver_xpc_send(JBS_DOMAIN_SYSTEMWIDE, JBS_SYSTEMWIDE_SET_APP_HIDDEN, xargs);
+	xpc_release(xargs);
+	if (xreply) {
+		int result = xpc_dictionary_get_int64(xreply, "result");
+		xpc_release(xreply);
+		return result;
+	}
+	return -1;
+}
+
 int jbclient_platform_set_process_debugged(uint64_t pid, bool fullyDebugged)
 {
 	xpc_object_t xargs = xpc_dictionary_create_empty();

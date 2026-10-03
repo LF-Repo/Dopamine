@@ -3,6 +3,7 @@
 #import <objc/objc.h>
 #import <libroot.h>
 #import <fcntl.h>
+#import <libjailbreak/jbclient_xpc.h>
 
 bool string_has_prefix(const char *str, const char* prefix)
 {
@@ -65,7 +66,65 @@ bool string_has_prefix(const char *str, const char* prefix)
 	return %orig(fildes, cmd, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
 }
 
+// ---------------------------------------------------------------------------
+// Foreground/background aware hide: while a "HideNoInject" app is in the
+// foreground, tell launchd to hide the jailbreak; once it goes to the
+// background (or SpringBoard/home screen), tell launchd to restore it so Sileo
+// etc. keep working.
+// ---------------------------------------------------------------------------
+
+static BOOL is_no_inject_bundle_id(NSString *bundleID)
+{
+	if (bundleID.length == 0) return NO;
+	NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:
+		@"/var/mobile/Library/Preferences/.DopamineAppHideRules.plist"];
+	NSDictionary *appRule = rules[bundleID];
+	return [appRule[@"HideNoInject"] boolValue];
+}
+
+static NSString *frontmost_bundle_id(void)
+{
+	id springBoard = [NSClassFromString(@"SpringBoard") performSelector:@selector(sharedApplication)];
+	if (!springBoard) return @"";
+	id frontmost = [springBoard performSelector:@selector(_frontmostApplication)];
+	if (!frontmost) frontmost = [springBoard performSelector:@selector(frontmostApplication)];
+	NSString *bundleID = [frontmost performSelector:@selector(bundleIdentifier)];
+	return bundleID ?: @"";
+}
+
+static NSString *gLastFrontmostBundleID = @"";
+static BOOL gLastShouldHide = NO;
+static dispatch_source_t gForegroundTimer = NULL;
+
+static void check_foreground_app(void)
+{
+	NSString *bundleID = frontmost_bundle_id();
+	BOOL shouldHide = is_no_inject_bundle_id(bundleID);
+
+	if ([bundleID isEqualToString:gLastFrontmostBundleID] && shouldHide == gLastShouldHide) {
+		return;
+	}
+	gLastFrontmostBundleID = bundleID;
+	gLastShouldHide = shouldHide;
+
+	jbclient_set_app_hidden(shouldHide);
+}
+
+static void start_foreground_polling(void)
+{
+	if (gForegroundTimer) return;
+	gForegroundTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+		dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
+	dispatch_source_set_timer(gForegroundTimer, dispatch_time(DISPATCH_TIME_NOW, 0),
+		500 * NSEC_PER_MSEC, 100 * NSEC_PER_MSEC);
+	dispatch_source_set_event_handler(gForegroundTimer, ^{
+		check_foreground_app();
+	});
+	dispatch_resume(gForegroundTimer);
+}
+
 void springboardInit(void)
 {
 	%init();
+	start_foreground_polling();
 }
