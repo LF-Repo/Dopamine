@@ -243,10 +243,13 @@ void app_hide_global_hide(void)
 	if (gNoInjectActive) return;
 	gNoInjectActive = true;
 
-	// Fast, safe global hide: remove /var/jb + unmount fakelib. We deliberately do
-	// NOT run the URL-scheme / file-quarantine steps here — those spawn jbctl +
-	// uicache synchronously inside the spawn hook, which blocks launchd (pid 1)
-	// and can hang, leaving the jailbreak stuck in a hidden state.
+	// Quarantine the jailbreak files a bare app can still see (the "suspicious
+	// files" under /var/mobile/Library). This is a pure file-rename operation —
+	// NO uicache — so it is fast and does not hang launchd the way the old
+	// URL-scheme step did. URL schemes are handled per-process by lsd instead.
+	app_hide_run_jbctl("audit", "hide");
+
+	// Remove the /var/jb symlink and unmount fakelib.
 	unlink("/var/jb");
 	unmount("/usr/lib", MNT_FORCE);
 }
@@ -262,7 +265,8 @@ void app_hide_global_restore(void)
 		symlink(jbroot, "/var/jb");
 	}
 
-	// Remount fakelib.
+	// Restore the quarantined files, then remount fakelib.
+	app_hide_run_jbctl("audit", "restore");
 	app_hide_run_jbctl("fakelib", "mount");
 }
 
