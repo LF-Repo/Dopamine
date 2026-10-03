@@ -455,39 +455,37 @@ void app_hide_resurrect_for_jb_app(void)
 	app_hide_do_restore();
 }
 
-// Query a pid's Mach task role (task_category_policy.role) to distinguish a
-// foreground launch (TASK_FOREGROUND_APPLICATION) from a background launch
-// (TASK_UNSPECIFIED / TASK_BACKGROUND_APPLICATION / TASK_NONUI_APPLICATION).
-// Returns the role, or -1 if it can't be queried (task port not available).
-static int app_hide_get_task_role(pid_t pid)
+// Query a pid's app state (proc_pidinfo flavor 22 = PROC_PIDT_APPSTATE), a
+// direct foreground/background signal that does NOT need the task port (unlike
+// task_policy_get, which needs task_for_pid and is denied from launchd).
+// Returns the raw app state, or -1 if it can't be queried.
+static int app_hide_get_app_state(pid_t pid)
 {
-	mach_port_t task = MACH_PORT_NULL;
-	if (task_for_pid(mach_task_self(), pid, &task) != KERN_SUCCESS) {
+	// struct proc_pidappstateinfo is just { uint32_t app_state; }.
+	uint32_t app_state = 0;
+	if (proc_pidinfo(pid, 22 /* PROC_PIDT_APPSTATE */, 0, &app_state, sizeof(app_state)) != sizeof(app_state)) {
 		return -1;
 	}
-	struct task_category_policy policy = {0};
-	mach_msg_type_number_t count = TASK_CATEGORY_POLICY_COUNT;
-	boolean_t get_default = FALSE;
-	kern_return_t kr = task_policy_get(task, TASK_CATEGORY_POLICY, (task_policy_t)&policy, &count, &get_default);
-	mach_port_deallocate(mach_task_self(), task);
-	if (kr != KERN_SUCCESS) return -1;
-	return policy.role;
+	return (int)app_state;
 }
 
 void app_hide_check_role_after_spawn(pid_t pid)
 {
 	if (pid <= 0) return;
-	// The task role is assigned shortly after spawn: foreground apps become
-	// TASK_FOREGROUND_APPLICATION, background apps stay unspecified/background.
+	// The app state is assigned shortly after spawn: foreground apps become
+	// PROC_APPSTATE_ACTIVE (1), background apps stay background/suspended/nonui.
 	// Give the system a moment, then undo the hide if this turned out to be a
 	// background launch (so a background refresh doesn't leave the jailbreak
 	// hidden until the app exits).
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC),
 		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-			int role = app_hide_get_task_role(pid);
-			app_hide_log([NSString stringWithFormat:@"role_check: pid %d role=%d", pid, role]);
-			if (role >= 0 && role != TASK_FOREGROUND_APPLICATION) {
-				app_hide_log([NSString stringWithFormat:@"role_check: pid %d is background, restoring jailbreak", pid]);
+			int appState = app_hide_get_app_state(pid);
+			app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d", pid, appState]);
+			// 1 = PROC_APPSTATE_ACTIVE (foreground). Any other real value (2
+			// inactive / 3 background / 4 suspended / 5 nonui) is a background
+			// launch: undo the hide.
+			if (appState > 0 && appState != 1) {
+				app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d is background, restoring jailbreak", pid]);
 				app_hide_global_restore();
 			}
 		});
