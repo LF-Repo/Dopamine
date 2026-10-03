@@ -339,6 +339,8 @@ static pthread_mutex_t gNoInjectLock = PTHREAD_MUTEX_INITIALIZER;
 static NSMutableSet *gJailbreakAppPids = nil;
 static pthread_mutex_t gJailbreakAppLock = PTHREAD_MUTEX_INITIALIZER;
 
+static void app_hide_kill_jailbreak_apps(void);
+
 static void app_hide_run_jbctl(const char *command, const char *arg)
 {
 	// jbctl carries the bindfs-allow entitlement + root; host a local jbserver so
