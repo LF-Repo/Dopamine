@@ -78,6 +78,7 @@ static BOOL isJailbreakAppName(NSString *appName)
 			@"CocoaTop.app", @"Dopamine.app", @"TrollStore.app",
 			@"Reveil.app", @"PostBox.app", @"Santander.app", @"Cowabunga.app",
 			@"misaka.app", @"iCleaner.app", @"iCleanerPro.app",
+			@"chromatic.app", @"Saily.app",
 		]];
 	});
 	return appName.length > 0 && [set containsObject:appName];
