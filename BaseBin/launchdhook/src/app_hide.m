@@ -138,9 +138,20 @@ void app_hide_commit_pid(void *pidp)
 		pthread_rwlock_unlock(&gStateLock);
 		app_hide_log([NSString stringWithFormat:@"commit pid %d (version %d), blacklist size %lu", pid, pidversion, (unsigned long)gBlacklistedState.count]);
 
-		// Diagnostic: dump the child's POSIX signal dispositions and mach
-		// exception ports so we can see what a "signal handlers set" detector
-		// is actually observing on a bare (no-inject) app.
+		// Diagnostic: read POSIX signal dispositions (pbi_sigignore / pbi_sigcatch).
+		// These fields were removed from the iOS 26 SDK's struct proc_bsdinfo, but
+		// they still exist at fixed offsets 112 / 116 in the iOS 16 runtime struct
+		// (our actual device). Read them via a raw buffer + fixed offsets so the
+		// compiler never sees the removed field names.
+		unsigned char bsdinfoBuf[256] = {0};
+		if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, bsdinfoBuf, sizeof(bsdinfoBuf)) > 0) {
+			uint32_t sigignore = *(uint32_t *)(bsdinfoBuf + 112);
+			uint32_t sigcatch = *(uint32_t *)(bsdinfoBuf + 116);
+			app_hide_log([NSString stringWithFormat:@"  child %d sigignore=0x%x sigcatch=0x%x", pid, sigignore, sigcatch]);
+		}
+
+		// Diagnostic: dump the child's mach exception ports so we can see what a
+		// "signal handlers set" detector observes on a bare (no-inject) app.
 		mach_port_t task = MACH_PORT_NULL;
 		if (task_for_pid(mach_task_self(), pid, &task) != KERN_SUCCESS) {
 			app_hide_log([NSString stringWithFormat:@"  child %d task_for_pid failed", pid]);
