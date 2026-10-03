@@ -227,6 +227,8 @@ void app_hide_init(void)
 // ---------------------------------------------------------------------------
 
 static bool gNoInjectActive = false;
+static int gNoInjectRefCount = 0;
+static pthread_mutex_t gNoInjectLock = PTHREAD_MUTEX_INITIALIZER;
 
 static void app_hide_run_jbctl(const char *command, const char *arg)
 {
@@ -240,8 +242,13 @@ static void app_hide_run_jbctl(const char *command, const char *arg)
 
 void app_hide_global_hide(void)
 {
-	if (gNoInjectActive) return;
+	// Reference-counted: multiple no-inject apps may run concurrently. Only the
+	// first one performs the actual hide; later ones just bump the count.
+	pthread_mutex_lock(&gNoInjectLock);
+	int count = gNoInjectRefCount++;
 	gNoInjectActive = true;
+	pthread_mutex_unlock(&gNoInjectLock);
+	if (count > 0) return;
 
 	// Unmount fakelib FIRST so the re-entrant jbctl spawn below runs without
 	// systemhook injection (same proven pattern as ensure_fakelib_mounted()).
@@ -257,8 +264,19 @@ void app_hide_global_hide(void)
 
 void app_hide_global_restore(void)
 {
-	if (!gNoInjectActive) return;
+	// Only restore once the LAST hidden app has exited.
+	pthread_mutex_lock(&gNoInjectLock);
+	if (gNoInjectRefCount <= 0) {
+		pthread_mutex_unlock(&gNoInjectLock);
+		return;
+	}
+	int count = --gNoInjectRefCount;
+	if (count > 0) {
+		pthread_mutex_unlock(&gNoInjectLock);
+		return;
+	}
 	gNoInjectActive = false;
+	pthread_mutex_unlock(&gNoInjectLock);
 
 	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
 	if (jbroot && jbroot[0]) {
