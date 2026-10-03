@@ -123,6 +123,8 @@ void *app_hide_alloc_pid(void)
 	return pidp;
 }
 
+static void app_hide_log(NSString *msg);
+
 void app_hide_commit_pid(void *pidp)
 {
 	if (!pidp) return;
