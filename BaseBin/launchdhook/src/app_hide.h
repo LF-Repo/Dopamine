@@ -35,6 +35,11 @@ bool app_hide_is_currently_hidden(void);
 bool app_hide_is_jailbreak_app(const char *path);
 void app_hide_resurrect_for_jb_app(void);
 
+// Track a jailbreak app's pid after resurrection; it gets killed when the
+// jailbreak is re-hidden (so it doesn't write into the real jbroot after /var/jb
+// is removed).
+void app_hide_track_jailbreak_app(pid_t pid);
+
 // Schedule a delayed Mach-task-role check for a just-spawned no-inject app:
 // if the app turns out to be a background launch, undo the hide. This fixes
 // background refreshes/pushes from leaving the jailbreak hidden.

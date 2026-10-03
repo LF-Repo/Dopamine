@@ -333,6 +333,12 @@ static bool gNoInjectActive = false;
 static int gNoInjectRefCount = 0;
 static pthread_mutex_t gNoInjectLock = PTHREAD_MUTEX_INITIALIZER;
 
+// Pids of jailbreak apps running "resurrected" (restored while the jailbreak was
+// hidden). Killed before the jailbreak is re-hidden so they don't keep writing
+// into the real jbroot after /var/jb is removed.
+static NSMutableSet *gJailbreakAppPids = nil;
+static pthread_mutex_t gJailbreakAppLock = PTHREAD_MUTEX_INITIALIZER;
+
 static void app_hide_run_jbctl(const char *command, const char *arg)
 {
 	// jbctl carries the bindfs-allow entitlement + root; host a local jbserver so
@@ -348,6 +354,10 @@ static void app_hide_run_jbctl(const char *command, const char *arg)
 
 static void app_hide_do_hide(void)
 {
+	// Kill running jailbreak apps first, so they don't keep writing into the
+	// real jbroot after /var/jb is removed below.
+	app_hide_kill_jailbreak_apps();
+
 	// Unmount fakelib FIRST so the re-entrant jbctl spawn below runs without
 	// systemhook injection (same proven pattern as ensure_fakelib_mounted()).
 	unmount("/usr/lib", MNT_FORCE);
@@ -453,6 +463,29 @@ void app_hide_resurrect_for_jb_app(void)
 	if (!wasHidden) return;
 	app_hide_log(@"resurrect: jailbreak app spawned while hidden, restoring jailbreak");
 	app_hide_do_restore();
+}
+
+void app_hide_track_jailbreak_app(pid_t pid)
+{
+	if (pid <= 0) return;
+	pthread_mutex_lock(&gJailbreakAppLock);
+	if (!gJailbreakAppPids) gJailbreakAppPids = [NSMutableSet set];
+	[gJailbreakAppPids addObject:@(pid)];
+	pthread_mutex_unlock(&gJailbreakAppLock);
+}
+
+static void app_hide_kill_jailbreak_apps(void)
+{
+	pthread_mutex_lock(&gJailbreakAppLock);
+	NSArray *pids = [gJailbreakAppPids allObjects];
+	[gJailbreakAppPids removeAllObjects];
+	pthread_mutex_unlock(&gJailbreakAppLock);
+	for (NSNumber *pidNum in pids) {
+		pid_t pid = pidNum.intValue;
+		if (pid > 0 && kill(pid, SIGKILL) == 0) {
+			app_hide_log([NSString stringWithFormat:@"kill jailbreak app pid %d", pid]);
+		}
+	}
 }
 
 // Query a pid's app state (proc_pidinfo flavor 22 = PROC_PIDT_APPSTATE), a
