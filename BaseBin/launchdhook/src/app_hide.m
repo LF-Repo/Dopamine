@@ -342,17 +342,11 @@ static void app_hide_run_jbctl(const char *command, const char *arg)
 	jbserver_local_stop();
 }
 
-void app_hide_global_hide(void)
-{
-	// Reference-counted: multiple no-inject apps may run concurrently. Only the
-	// first one performs the actual hide; later ones just bump the count.
-	pthread_mutex_lock(&gNoInjectLock);
-	int count = gNoInjectRefCount++;
-	gNoInjectActive = true;
-	pthread_mutex_unlock(&gNoInjectLock);
-	app_hide_log([NSString stringWithFormat:@"global_hide: refcount now %d", count + 1]);
-	if (count > 0) return;
+// Actual (reversible) hide/restore bodies, shared by the no-inject refcount
+// path and the "jailbreak app resurrection" path.
 
+static void app_hide_do_hide(void)
+{
 	// Unmount fakelib FIRST so the re-entrant jbctl spawn below runs without
 	// systemhook injection (same proven pattern as ensure_fakelib_mounted()).
 	unmount("/usr/lib", MNT_FORCE);
@@ -365,25 +359,8 @@ void app_hide_global_hide(void)
 	unlink("/var/jb");
 }
 
-void app_hide_global_restore(void)
+static void app_hide_do_restore(void)
 {
-	// Only restore once the LAST hidden app has exited.
-	pthread_mutex_lock(&gNoInjectLock);
-	if (gNoInjectRefCount <= 0) {
-		pthread_mutex_unlock(&gNoInjectLock);
-		app_hide_log(@"global_restore: refcount already 0 (no-op)");
-		return;
-	}
-	int count = --gNoInjectRefCount;
-	if (count > 0) {
-		pthread_mutex_unlock(&gNoInjectLock);
-		app_hide_log([NSString stringWithFormat:@"global_restore: refcount now %d (skip, still hidden)", count]);
-		return;
-	}
-	gNoInjectActive = false;
-	pthread_mutex_unlock(&gNoInjectLock);
-	app_hide_log(@"global_restore: refcount 0, restoring jailbreak");
-
 	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
 	if (jbroot && jbroot[0]) {
 		unlink("/var/jb");
@@ -393,6 +370,79 @@ void app_hide_global_restore(void)
 	// Restore the quarantined files, then remount fakelib.
 	app_hide_run_jbctl("audit", "restore");
 	app_hide_run_jbctl("fakelib", "mount");
+}
+
+void app_hide_global_hide(void)
+{
+	// Reference-counted: multiple no-inject apps may run concurrently. The
+	// actual hide only runs when the jailbreak isn't already hidden (i.e. the
+	// first no-inject app, or the first after a jailbreak-app resurrection).
+	pthread_mutex_lock(&gNoInjectLock);
+	gNoInjectRefCount++;
+	int refcount = gNoInjectRefCount;
+	bool wasHidden = gNoInjectActive;
+	gNoInjectActive = true;
+	pthread_mutex_unlock(&gNoInjectLock);
+	app_hide_log([NSString stringWithFormat:@"global_hide: refcount now %d", refcount]);
+	if (wasHidden) return;
+
+	app_hide_do_hide();
+}
+
+void app_hide_global_restore(void)
+{
+	// Only restore once the LAST hidden app has exited.
+	pthread_mutex_lock(&gNoInjectLock);
+	if (gNoInjectRefCount <= 0) {
+		pthread_mutex_unlock(&gNoInjectLock);
+		app_hide_log(@"global_restore: refcount already 0 (no-op)");
+		return;
+	}
+	gNoInjectRefCount--;
+	int refcount = gNoInjectRefCount;
+	if (refcount > 0) {
+		pthread_mutex_unlock(&gNoInjectLock);
+		app_hide_log([NSString stringWithFormat:@"global_restore: refcount now %d (skip, still hidden)", refcount]);
+		return;
+	}
+	gNoInjectActive = false;
+	pthread_mutex_unlock(&gNoInjectLock);
+	app_hide_log(@"global_restore: refcount 0, restoring jailbreak");
+
+	app_hide_do_restore();
+}
+
+bool app_hide_is_currently_hidden(void)
+{
+	pthread_mutex_lock(&gNoInjectLock);
+	bool hidden = gNoInjectActive;
+	pthread_mutex_unlock(&gNoInjectLock);
+	return hidden;
+}
+
+bool app_hide_is_jailbreak_app(const char *path)
+{
+	// A "jailbreak app" is one installed inside the jailbreak root itself
+	// (Sileo, Filza, Terminal, ... under /var/jb/). When /var/jb is removed
+	// such apps cannot even be resolved, so restoring /var/jb is required.
+	if (!path) return false;
+	return strncmp(path, "/var/jb/", 8) == 0;
+}
+
+void app_hide_resurrect_for_jb_app(void)
+{
+	// "Jailbreak app resurrection": a jailbreak app was spawned while the
+	// jailbreak was hidden (a no-inject app is running). Restore the jailbreak
+	// so the jailbreak app can run. The no-inject refcount is left intact (those
+	// apps are still running); only the hidden state is cleared, and we do NOT
+	// re-hide later (accepted limitation).
+	pthread_mutex_lock(&gNoInjectLock);
+	bool wasHidden = gNoInjectActive;
+	gNoInjectActive = false;
+	pthread_mutex_unlock(&gNoInjectLock);
+	if (!wasHidden) return;
+	app_hide_log(@"resurrect: jailbreak app spawned while hidden, restoring jailbreak");
+	app_hide_do_restore();
 }
 
 void app_hide_watch_exit(pid_t pid)

@@ -28,4 +28,11 @@ void app_hide_global_hide(void);
 void app_hide_global_restore(void);
 void app_hide_watch_exit(pid_t pid);
 
+// "Jailbreak app resurrection": while the jailbreak is hidden (a no-inject app
+// is running), spawning a jailbreak app (under /var/jb/) restores the jailbreak
+// so the jailbreak app can run. No re-hide on exit (accepted limitation).
+bool app_hide_is_currently_hidden(void);
+bool app_hide_is_jailbreak_app(const char *path);
+void app_hide_resurrect_for_jb_app(void);
+
 #endif // APP_HIDE_H
