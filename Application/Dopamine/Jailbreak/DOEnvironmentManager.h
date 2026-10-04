@@ -96,10 +96,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID;
 - (NSArray<NSString *> *)allEnvironmentHiddenBundleIDs;
 
-- (BOOL)isHideJailbreakURLSchemesEnabled;
-- (void)setHideJailbreakURLSchemesEnabled:(BOOL)enabled;
-- (BOOL)isHideThirdPartyURLSchemesEnabled;
-- (void)setHideThirdPartyURLSchemesEnabled:(BOOL)enabled;
+- (void)mountDictionary:(NSDictionary *)dictionary writeToFile:(NSString *)path;
+- (void)fakeMount:(NSString *)path unmount:(BOOL)unmount shouldDeleteMntFiles:(BOOL)shouldDeleteMntFiles;
 @end
 
 NS_ASSUME_NONNULL_END

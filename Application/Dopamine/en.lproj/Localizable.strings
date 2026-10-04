@@ -129,3 +129,17 @@
 "Status_Title_Select_Package_Managers" = "Select Package Manager(s)";
 "Select_Package_Managers_Install_Message" = "If you are unsure which one to select, select Sileo";
 "Continue" = "Continue";
+
+// mount
+"Input_Mmount_Title" = "Add Mount";
+"Input_Unmount_Title" = "Manage Mounts";
+"Input_Mount_Title" = "Enter original path";
+"Error_Mount_Body" = "Target folder does not exist";
+"Select_Mount_Title" = "Select a path to manage";
+"Button_Delete_Path_Only" = "Delete Path Only";
+"Button_Delete" = "Unmount";
+"Button_View" = "View in Filza";
+"Button_Mount" = "Confirm";
+"Mount_Settings_Footer" = "Bind-mount a folder to a jailbreak-controlled copy (stored under /var/jb/mnt).";
+"Error_Mount_Empty" = "Please enter a folder path.";
+"Empty_Mount_List" = "No mounts yet.";
