@@ -8,6 +8,7 @@
 #import "DOMainViewController.h"
 #import "DOUIManager.h"
 #import "DOEnvironmentManager.h"
+#import "DOPreferenceManager.h"
 #import "DOJailbreaker.h"
 #import "DOGlobalAppearance.h"
 #import "DOActionMenuButton.h"
@@ -15,6 +16,7 @@
 #import "DOLogCrashViewController.h"
 #import <pthread.h>
 #import <sys/sysctl.h>
+#import <sys/time.h>
 #import <libjailbreak/libjailbreak.h>
 
 @interface DOMainViewController ()
@@ -74,10 +76,20 @@
     }
 
     //Header
-    DOHeaderView *headerView = [[DOHeaderView alloc] initWithImage: [UIImage imageNamed:@"Dopamine"] subtitles: @[
-        [DOGlobalAppearance mainSubtitleString:[[DOEnvironmentManager sharedManager] versionSupportString]],
-        [DOGlobalAppearance secondarySubtitleString:DOLocalizedString(@"Credits_Made_By")],
-    ]];
+    NSMutableArray<NSAttributedString *> *headerSubtitles = [NSMutableArray array];
+    [headerSubtitles addObject:[DOGlobalAppearance mainSubtitleString:[[DOEnvironmentManager sharedManager] versionSupportString]]];
+    [headerSubtitles addObject:[DOGlobalAppearance secondarySubtitleString:DOLocalizedString(@"Credits_Made_By")]];
+
+    if ([[DOPreferenceManager sharedManager] boolPreferenceValueForKey:@"showUptime" fallback:NO]) {
+        NSString *uptime = [self systemUptimeString];
+        if (uptime) [headerSubtitles addObject:[DOGlobalAppearance secondarySubtitleString:uptime]];
+    }
+    if ([[DOPreferenceManager sharedManager] boolPreferenceValueForKey:@"showVersion" fallback:NO]) {
+        NSString *version = [NSString stringWithFormat:@"Dopamine %@", [[DOEnvironmentManager sharedManager] appVersionDisplayString]];
+        [headerSubtitles addObject:[DOGlobalAppearance secondarySubtitleString:version]];
+    }
+
+    DOHeaderView *headerView = [[DOHeaderView alloc] initWithImage: [UIImage imageNamed:@"Dopamine"] subtitles: headerSubtitles];
     
     [stackView addArrangedSubview:headerView];
 
@@ -171,6 +183,24 @@
             });
         }
     });
+}
+
+- (NSString *)systemUptimeString
+{
+    struct timeval boottime;
+    size_t len = sizeof(boottime);
+    int mib[2] = { CTL_KERN, KERN_BOOTTIME };
+    if (sysctl(mib, 2, &boottime, &len, NULL, 0) != 0) {
+        return nil;
+    }
+
+    NSTimeInterval uptime = [[NSDate date] timeIntervalSince1970] - boottime.tv_sec;
+    long totalSeconds = (long)uptime;
+    long days = totalSeconds / 86400;
+    long hours = (totalSeconds % 86400) / 3600;
+    long minutes = (totalSeconds % 3600) / 60;
+
+    return [NSString stringWithFormat:DOLocalizedString(@"System_Uptime_Format"), days, hours, minutes];
 }
 
 - (NSString *)jailbreakButtonTitle
