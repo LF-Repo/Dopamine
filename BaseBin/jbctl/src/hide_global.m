@@ -229,7 +229,7 @@ static void runJailbreakLibraryAudit(void)
 	NSDictionary<NSString *, NSDictionary *> *rules = @{
 		@"/var/mobile/Library": @{
 			@"whitelist": @[@"Accessibility", @"CoreBrightness", @"Keyboard", @"Preferences", @"Voicemail", @"Accounts", @"CoreDuet", @"KeyboardServices", @"PrivacyAccounting", @"WatchConnectivity", @"AddressBook", @"CoreFollowUp", @"LASD", @"Recents", @"Weather", @"AggregateDictionary", @"CountryModeling", @"Reminders", @"WebClips", @"CrashReporter", @"Logs", @"ReplayKit", @"WebKit", @"Application Support", @"MediaRemote", @"Safari", @"Caches", @"SplashBoard", @"MobileInstallation", @"SoftwareUpdate", @"BulletinBoard", @"MobileContainerManager", @"TCC", @"Settings", @"Cookies", @"Passes", @"UserNotifications", @"ApplicationSync", @"DataDeliveryServices", @"MediaStream", @"SafeHarbor", @"Wallet", @"Maps", @"Phone"],
-			@"blacklist": @[@"Sileo", @"Filza", @"Flex3", @"SBSettings", @"iCleaner"]
+			@"blacklist": @[@"Sileo", @"Filza", @"Flex3", @"SBSettings", @"iCleaner", @"AppTools", @"RootHide", @"NiceiOS", @"Cydia"]
 		},
 		@"/var/mobile/Library/Preferences": @{
 			@"default": @"blacklist",
@@ -280,7 +280,7 @@ static void runJailbreakLibraryAudit(void)
 			@"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.hbang.Terminal", @"xyz.willy.Zebra"]
 		},
 		@"/var/mobile/Documents": @{
-			@"blacklist": @[@"DumpDecrypter", @"Dumplpa"]
+			@"blacklist": @[@"DumpDecrypter", @"Dumplpa", @"wiki.qaq.chromatic", @"TheosProject", @"DebBackup", @"Settings_Customizer", @"Background_Files", @"ProGestureConfigs", @"Saved_Fonts", @"Included_Audio", @"Saved_Operations", @"Saved_Locks", @"Anilaunch", @"AD-deb", @"Debra", @".Xinaf1re", @"PerfectDynamiclsland", @"Cowabunga_Audio", @".DynamicCowBackups", @".PlampyUIPro"]
 		},
 		@"/var/mobile": @{
 			@"blacklist": @[@".DO-NOT-DELETE-Cowabunga", @".Derootifier", @"Helix", @".ssh", @".cache"]
