@@ -356,10 +356,10 @@
 
                 // ===== Hide Settings 分组 =====
                 PSSpecifier *hideSettingsGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
-                hideSettingsGroupSpecifier.name = @"Hide Settings";
+                hideSettingsGroupSpecifier.name = DOLocalizedString(@"Section_Hide_Settings");
                 [specifiers addObject:hideSettingsGroupSpecifier];
 
-                PSSpecifier *disableCrashReporterSpecifier = [PSSpecifier preferenceSpecifierNamed:@"Disable Crash Reporter" target:self set:@selector(setCrashReporterDisabled:specifier:) get:@selector(readCrashReporterDisabled:) detail:nil cell:PSSwitchCell edit:nil];
+                PSSpecifier *disableCrashReporterSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Disable_Crash_Reporter") target:self set:@selector(setCrashReporterDisabled:specifier:) get:@selector(readCrashReporterDisabled:) detail:nil cell:PSSwitchCell edit:nil];
                 [disableCrashReporterSpecifier setProperty:@YES forKey:@"enabled"];
                 [disableCrashReporterSpecifier setProperty:@"crashReporterDisabled" forKey:@"key"];
                 [disableCrashReporterSpecifier setProperty:@NO forKey:@"default"];
@@ -382,7 +382,7 @@
                 [specifiers addObject:appHideSpecifier];
 
                 PSSpecifier *mountGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
-                mountGroupSpecifier.name = @"Mount Settings";
+                mountGroupSpecifier.name = DOLocalizedString(@"Section_Mount_Settings");
                 [mountGroupSpecifier setProperty:DOLocalizedString(@"Mount_Settings_Footer") forKey:@"footerText"];
                 [specifiers addObject:mountGroupSpecifier];
 
@@ -390,7 +390,7 @@
                 [mountSpecifier setProperty:@"Input_Mmount_Title" forKey:@"title"];
                 [mountSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
                 [mountSpecifier setProperty:buttonHeight forKey:@"height"];
-                [mountSpecifier setProperty:@"doc" forKey:@"image"];
+                [mountSpecifier setProperty:@"folder.badge.plus" forKey:@"image"];
                 [mountSpecifier setProperty:@"mountPressed" forKey:@"action"];
                 [specifiers addObject:mountSpecifier];
 
@@ -398,7 +398,7 @@
                 [unmountSpecifier setProperty:@"Input_Unmount_Title" forKey:@"title"];
                 [unmountSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
                 [unmountSpecifier setProperty:buttonHeight forKey:@"height"];
-                [unmountSpecifier setProperty:@"trash" forKey:@"image"];
+                [unmountSpecifier setProperty:@"folder.badge.gearshape" forKey:@"image"];
                 [unmountSpecifier setProperty:@"unmountPressed" forKey:@"action"];
                 [specifiers addObject:unmountSpecifier];
             }
@@ -821,7 +821,7 @@
 
 - (void)mountPressed
 {
-    UIAlertController *inputAlertController = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Input_Mmount_Title") message:DOLocalizedString(@"Input_Mount_Title") preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *inputAlertController = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Input_Mmount_Title") message:DOLocalizedString(@"Mount_Input_Message") preferredStyle:UIAlertControllerStyleAlert];
     
     [inputAlertController addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
         textField.placeholder = DOLocalizedString(@"Input_Mount_Title");
@@ -966,7 +966,7 @@
     NSArray<NSString *> *current = [env allInjectionBlockedBundleIDs];
     NSString *currentStr = [current componentsJoinedByString:@", "];
 
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Block App Injection"
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Block App Injection")
                                                                    message:@"Enter bundle IDs to block injection from, separated by commas. Changes take effect after the target app is restarted."
                                                             preferredStyle:UIAlertControllerStyleAlert];
 
@@ -1028,7 +1028,7 @@
 {
     [super viewDidLoad];
 
-    self.title = @"Hide for App";
+    self.title = DOLocalizedString(@"Hide for App");
     self.tableView.rowHeight = 64;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.tableView.separatorInset = UIEdgeInsetsMake(0, 68, 0, 0);
