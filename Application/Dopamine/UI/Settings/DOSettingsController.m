@@ -243,6 +243,12 @@
             [tweakInjectionSpecifier setProperty:@"tweakInjectionEnabled" forKey:@"key"];
             [tweakInjectionSpecifier setProperty:@YES forKey:@"default"];
             [specifiers addObject:tweakInjectionSpecifier];
+
+            PSSpecifier *disableCrashReporterSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Disable_Crash_Reporter") target:self set:@selector(setCrashReporterDisabled:specifier:) get:@selector(readCrashReporterDisabled:) detail:nil cell:PSSwitchCell edit:nil];
+            [disableCrashReporterSpecifier setProperty:@YES forKey:@"enabled"];
+            [disableCrashReporterSpecifier setProperty:@"crashReporterDisabled" forKey:@"key"];
+            [disableCrashReporterSpecifier setProperty:@NO forKey:@"default"];
+            [specifiers addObject:disableCrashReporterSpecifier];
             
             if (!envManager.isJailbroken) {
                 PSSpecifier *verboseLogSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Verbose_Logs") target:self set:defSetter get:defGetter detail:nil cell:PSSwitchCell edit:nil];
@@ -359,12 +365,6 @@
                 hideSettingsGroupSpecifier.name = DOLocalizedString(@"Section_Hide_Settings");
                 [specifiers addObject:hideSettingsGroupSpecifier];
 
-                PSSpecifier *disableCrashReporterSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Disable_Crash_Reporter") target:self set:@selector(setCrashReporterDisabled:specifier:) get:@selector(readCrashReporterDisabled:) detail:nil cell:PSSwitchCell edit:nil];
-                [disableCrashReporterSpecifier setProperty:@YES forKey:@"enabled"];
-                [disableCrashReporterSpecifier setProperty:@"crashReporterDisabled" forKey:@"key"];
-                [disableCrashReporterSpecifier setProperty:@NO forKey:@"default"];
-                [specifiers addObject:disableCrashReporterSpecifier];
-
                 PSSpecifier *injectionBlockSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
                 [injectionBlockSpecifier setProperty:@"Block App Injection" forKey:@"title"];
                 [injectionBlockSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
@@ -416,6 +416,18 @@
         [themeSpecifier setProperty:@"themeIdentifiers" forKey:@"valuesDataSource"];
         [themeSpecifier setProperty:@"themeNames" forKey:@"titlesDataSource"];
         [specifiers addObject:themeSpecifier];
+
+        PSSpecifier *showUptimeSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Show_Uptime") target:self set:defSetter get:defGetter detail:nil cell:PSSwitchCell edit:nil];
+        [showUptimeSpecifier setProperty:@YES forKey:@"enabled"];
+        [showUptimeSpecifier setProperty:@"showUptime" forKey:@"key"];
+        [showUptimeSpecifier setProperty:@NO forKey:@"default"];
+        [specifiers addObject:showUptimeSpecifier];
+
+        PSSpecifier *showVersionSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Show_Version") target:self set:defSetter get:defGetter detail:nil cell:PSSwitchCell edit:nil];
+        [showVersionSpecifier setProperty:@YES forKey:@"enabled"];
+        [showVersionSpecifier setProperty:@"showVersion" forKey:@"key"];
+        [showVersionSpecifier setProperty:@NO forKey:@"default"];
+        [specifiers addObject:showVersionSpecifier];
 
         PSSpecifier *bootlogoGropSpecifier = [PSSpecifier emptyGroupSpecifier];
         bootlogoGropSpecifier.name = DOLocalizedString(@"Section_Boot_Logo");

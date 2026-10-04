@@ -64,6 +64,11 @@
 "Disable_Crash_Reporter" = "禁用崩溃报告";
 "Block App Injection" = "阻止 App 注入";
 "Hide for App" = "按 App 隐藏";
+"Section_Boot_Logo" = "启动画面";
+"Reboot Device" = "重启设备";
+"Show_Uptime" = "显示系统运行时间";
+"Show_Version" = "显示 Dopamine 版本";
+"System_Uptime_Format" = "已运行：%ld 天 %ld 小时 %ld 分钟";
 "Jetsam_Description" = "Jetsam 是一个系统守护进程，它会自动终止超过指定内存限制的进程。当安装了大量插件后，某些进程可能在启动时或启动后没多久内存使用超出限制，被 Jetsam 终止，导致进程循环崩溃。你可以选择一个倍数来扩大所有带内存限制进程的限制。如果你的系统在安装了大量插件之后出现频繁崩溃或者各种异常行为，请适当地增加这个倍数。但为了不对系统内存使用产生负面影响，建议选择能够使系统稳定运行的最低倍数。";
 
 // Settings Alerts
