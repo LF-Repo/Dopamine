@@ -1,8 +1,10 @@
 #import <Foundation/Foundation.h>
 #import <substrate.h>
 #import <objc/objc.h>
+#import <objc/runtime.h>
 #import <libroot.h>
 #import <fcntl.h>
+#import <libjailbreak/jbclient_xpc.h>
 
 bool string_has_prefix(const char *str, const char* prefix)
 {
@@ -18,6 +20,16 @@ bool string_has_prefix(const char *str, const char* prefix)
 	}
 
 	return !strncmp(str, prefix, prefix_len);
+}
+
+// A bundle path belongs to a jailbreak app when it lives under /var/jb
+// (standard rootless symlink) or under the resolved preboot procursus root.
+static bool isJailbreakBundlePath(const char *path)
+{
+	if (!path) return false;
+	if (strncmp(path, "/var/jb/", 8) == 0) return true;
+	if (strstr(path, "/procursus/")) return true;
+	return false;
 }
 
 @interface XBSnapshotContainerIdentity : NSObject <NSCopying>
@@ -64,6 +76,39 @@ bool string_has_prefix(const char *str, const char* prefix)
 	va_end(a);
 	return %orig(fildes, cmd, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
 }
+
+static const void *kDenyQueryTagKey = &kDenyQueryTagKey;
+
+%hook FBSApplicationLibrary
+- (id)applicationInfoForBundleIdentifier:(NSString *)bundleIdentifier
+{
+	id result = %orig;
+	NSNumber *tag = objc_getAssociatedObject(bundleIdentifier, kDenyQueryTagKey);
+	if (tag && tag.boolValue) {
+		NSURL *executableURL = [result performSelector:@selector(executableURL)];
+		if (result && executableURL && isJailbreakBundlePath(executableURL.path.fileSystemRepresentation)) {
+			return nil;
+		}
+	}
+	return result;
+}
+%end
+
+%hook FBSystemService
+- (void *)openApplication:(NSString *)bundleIdentifier withOptions:(id)options originator:(id)originator requestID:(void *)requestID completion:(void *)completion
+{
+	id currentContext = [NSClassFromString(@"BSServiceConnection") performSelector:@selector(currentContext)];
+	id remoteProcess = [currentContext performSelector:@selector(remoteProcess)];
+	NSNumber *_pid = [remoteProcess valueForKey:@"_pid"];
+	pid_t pid = _pid.intValue;
+
+	if (jbclient_blacklist_check_pid(pid)) {
+		objc_setAssociatedObject(bundleIdentifier, kDenyQueryTagKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	}
+
+	return %orig;
+}
+%end
 
 void springboardInit(void)
 {
