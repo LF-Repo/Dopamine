@@ -1518,28 +1518,6 @@ extern char **environ;
 }
 #pragma mark - URL Scheme Hiding
 
-- (BOOL)isHideJailbreakURLSchemesEnabled
-{
-    return [[DOPreferenceManager sharedManager] boolPreferenceValueForKey:@"hideJailbreakURLSchemes" fallback:NO];
-}
-
-- (void)setHideJailbreakURLSchemesEnabled:(BOOL)enabled
-{
-    [[DOPreferenceManager sharedManager] setPreferenceValue:@(enabled) forKey:@"hideJailbreakURLSchemes"];
-    [self applyURLSchemeHiding:[self jbURLTargets] useJbPath:YES hide:enabled];
-}
-
-- (BOOL)isHideThirdPartyURLSchemesEnabled
-{
-    return [[DOPreferenceManager sharedManager] boolPreferenceValueForKey:@"hideOtherURLSchemes" fallback:NO];
-}
-
-- (void)setHideThirdPartyURLSchemesEnabled:(BOOL)enabled
-{
-    [[DOPreferenceManager sharedManager] setPreferenceValue:@(enabled) forKey:@"hideOtherURLSchemes"];
-    [self applyURLSchemeHiding:[self thirdPartyURLTargets] useJbPath:NO hide:enabled];
-}
-
 - (NSDictionary *)jbURLTargets
 {
     return @{
@@ -1721,6 +1699,33 @@ extern char **environ;
 
             [self refreshLaunchServicesForPaths:modified];
             NSLog(@"[URLHide] refreshed %lu apps", (unsigned long)modified.count);
+        }];
+    }];
+}
+
+- (void)mountDictionary:(NSDictionary *)dictionary writeToFile:(NSString *)path
+{
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            [dictionary writeToFile:path atomically:YES];
+        }];
+    }];
+}
+
+- (void)fakeMount:(NSString *)path unmount:(BOOL)unmount shouldDeleteMntFiles:(BOOL)shouldDeleteMntFiles
+{
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            if (unmount) {
+                exec_cmd(JBROOT_PATH("/basebin/jbctl"), "internal", "unmount", path.fileSystemRepresentation, NULL);
+            } else {
+                exec_cmd(JBROOT_PATH("/basebin/jbctl"), "internal", "mount", path.fileSystemRepresentation, NULL);
+            }
+            
+            if (shouldDeleteMntFiles) {
+                NSString *targetPath = JBROOT_PATH([@"/mnt" stringByAppendingString:path]);
+                [[NSFileManager defaultManager] removeItemAtPath:targetPath error:nil];
+            }
         }];
     }];
 }

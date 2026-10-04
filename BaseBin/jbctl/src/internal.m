@@ -94,6 +94,53 @@ int fakelib_set_mounted(bool mounted)
 	return r;
 }
 
+bool fakePath_is_mounted(const char *path)
+{
+	struct statfs fsb;
+    if (statfs(path, &fsb) != 0) return NO;
+    return strcmp(fsb.f_mntonname, path) == 0;
+}
+
+void initMountPath(NSString *mountPath)
+{
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    bool new = NO;
+
+    if([fileManager fileExistsAtPath:mountPath]){
+        NSString *newPath = [NSString stringWithFormat:@"%@%@", JBROOT_PATH(@"/mnt"), mountPath];
+
+        if (![fileManager fileExistsAtPath:newPath]) {
+            [fileManager createDirectoryAtPath:newPath withIntermediateDirectories:YES attributes:nil error:nil];
+            new = YES;
+        } else if([fileManager contentsOfDirectoryAtPath:newPath error:nil].count == 0){
+            new = YES;
+        }
+
+        if(new){
+            NSString *tmpPath = [NSString stringWithFormat:@"%@_tmp", newPath];
+            [fileManager copyItemAtPath:mountPath toPath:tmpPath error:nil];
+            [fileManager removeItemAtPath:newPath error:nil];
+            [fileManager moveItemAtPath:tmpPath toPath:newPath error:nil];
+        }
+    }
+}
+
+int fakePath_mount(bool mount, const char *path)
+{
+	int r = 0;
+	if (mount != fakePath_is_mounted(path)) {
+		if (mount) {
+			initMountPath([NSString stringWithUTF8String:path]);
+			NSString *newMountPath = [NSString stringWithFormat:@"%@%s", JBROOT_PATH(@"/mnt"), path];
+			r = mount_unsandboxed("bindfs", path, MNT_RDONLY, (void *)newMountPath.UTF8String);
+		}
+		else {
+			r = unmount_unsandboxed(path, MNT_FORCE);
+		}
+	}
+	return r;
+}
+
 int jbctl_handle_internal(const char *command, int argc, char* argv[])
 {
 	if (!strcmp(command, "launchd_stash_port")) {
@@ -201,6 +248,18 @@ int jbctl_handle_internal(const char *command, int argc, char* argv[])
 		if (argc > 1) {
 			if (!strcmp(argv[1], "hide")) return hide_global_audit_hide();
 			else if (!strcmp(argv[1], "restore")) return hide_global_audit_restore();
+		}
+		return -1;
+	}
+	else if (!strcmp(command, "mount")) {
+		if (argc > 1) {
+			return fakePath_mount(true, argv[1]);
+		}
+		return -1;
+	}
+	else if (!strcmp(command, "unmount")) {
+		if (argc > 1) {
+			return fakePath_mount(false, argv[1]);
 		}
 		return -1;
 	}

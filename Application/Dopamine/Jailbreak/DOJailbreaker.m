@@ -37,6 +37,7 @@
 #import "clock_alarm.h"
 #import <IOSurface/IOSurfaceRef.h>
 int posix_spawnattr_set_registered_ports_np(posix_spawnattr_t * __restrict attr, mach_port_t portarray[], uint32_t count);
+void fake_mount(void);
 
 #define kCFPreferencesNoContainer CFSTR("kCFPreferencesNoContainer")
 void _CFPreferencesSetValueWithContainer(CFStringRef key, CFPropertyListRef value, CFStringRef applicationID, CFStringRef userName, CFStringRef hostName, CFStringRef containerPath);
@@ -457,7 +458,7 @@ void *boomerang_server(struct boomerang_info *info)
     if (r != 0) {
         return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedInitFakeLib userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Mounting fakelib failed with error: %d", r]}];
     }
-    
+    fake_mount();
     // Now that fakelib is up, we want to make systemhook inject into any binary we spawn
     setenv("DYLD_INSERT_LIBRARIES", "/usr/lib/systemhook.dylib", 1);
     return nil;
@@ -872,6 +873,21 @@ void *boomerang_server(struct boomerang_info *info)
     CFRelease(surface);
     
     printf("preserved port? %d\n", kr);
+}
+
+void fake_mount(void)
+{
+    NSString *filePath = JBROOT_PATH(@"/mnt/newFakePath.plist");
+    if ([[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
+        NSDictionary *decodedDict = [NSDictionary dictionaryWithContentsOfFile:filePath];
+
+        if (decodedDict && [decodedDict[@"path"] isKindOfClass:[NSArray class]]) {
+            NSArray *paths = decodedDict[@"path"];
+            for (NSString *path in paths) {
+                [[DOEnvironmentManager sharedManager] fakeMount:path unmount:NO shouldDeleteMntFiles:NO];
+            }
+        }
+    }
 }
 
 @end
