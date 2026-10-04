@@ -325,20 +325,22 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			// globally (remove /var/jb + unmount fakelib), bare-spawn the app
 			// (no systemhook injection at all), and restore when it exits.
 			//
-			// Foreground vs background: the spawn attr field at offset 0x58 is
-			// 1 for a foreground (interactive) launch and 6 for a background
-			// launch. Skip the global hide for background launches so a
-			// background refresh doesn't hide the jailbreak (and doesn't kill
+			// Foreground vs background via psa_darwin_role (PRIO_DARWIN_ROLE) at
+			// offset 0x58 in struct _posix_spawnattr:
+			//   0=DEFAULT, 1=UI_FOCAL, 2=UI  -> foreground (hide)
+			//   3=NON_UI, 4=THROTTLE, 5=UTILITY, 6=BACKGROUND -> background (skip)
+			// Skip the global hide for background launches so a background
+			// refresh/prewarm doesn't hide the jailbreak (and doesn't kill
 			// running jailbreak apps via the re-hide path).
-			int launchKind = -1;
+			int darwinRole = -1;
 			if (desc && desc->attrp) {
-				memcpy(&launchKind, (char *)desc->attrp + 0x58, sizeof(launchKind));
+				memcpy(&darwinRole, (char *)desc->attrp + 0x58, sizeof(darwinRole));
 			}
 			FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-			if (f) { fprintf(f, "launch_kind=%d\n", launchKind); fclose(f); }
+			if (f) { fprintf(f, "darwin_role=%d\n", darwinRole); fclose(f); }
 
-			if (launchKind == 6) {
-				// Background launch: bare spawn (no injection), but no global hide.
+			if (darwinRole >= 3) {
+				// Background/non-ui launch: bare spawn (no injection), but no global hide.
 				pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
 				int r = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, (char *const *)envp);
 				pid_t childPid = *blacklistedPidp;
