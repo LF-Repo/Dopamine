@@ -324,24 +324,31 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			// RootHide-style no-injection mode: temporarily hide the jailbreak
 			// globally (remove /var/jb + unmount fakelib), bare-spawn the app
 			// (no systemhook injection at all), and restore when it exits.
-			app_hide_global_hide();
-			// Diagnostic: log the spawn coalition role (a pre-spawn foreground/
-			// background signal) so we can learn which role values map to each.
-			// Dump the spawn attribute struct (first 256 bytes as u64s) to locate
-			// the launch_type field that distinguishes foreground/background.
+			//
+			// Foreground vs background: the spawn attr field at offset 0x58 is
+			// 1 for a foreground (interactive) launch and 6 for a background
+			// launch. Skip the global hide for background launches so a
+			// background refresh doesn't hide the jailbreak (and doesn't kill
+			// running jailbreak apps via the re-hide path).
+			int launchKind = -1;
 			if (desc && desc->attrp) {
-				FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-				if (f) {
-					const uint64_t *u = (const uint64_t *)desc->attrp;
-					fprintf(f, "attr:");
-					for (int i = 0; i < 32; i++) fprintf(f, " %016llx", (unsigned long long)u[i]);
-					fprintf(f, "\n");
-					fclose(f);
-				}
-			} else {
-				FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-				if (f) { fprintf(f, "spawn attr NULL\n"); fclose(f); }
+				memcpy(&launchKind, (char *)desc->attrp + 0x58, sizeof(launchKind));
 			}
+			FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
+			if (f) { fprintf(f, "launch_kind=%d\n", launchKind); fclose(f); }
+
+			if (launchKind == 6) {
+				// Background launch: bare spawn (no injection), but no global hide.
+				pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
+				int r = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, (char *const *)envp);
+				pid_t childPid = *blacklistedPidp;
+				if (pid) *pid = childPid;
+				app_hide_commit_pid(blacklistedPidp);
+				return r;
+			}
+
+			// Foreground launch: global hide + bare spawn + restore on exit.
+			app_hide_global_hide();
 			pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
 			int r = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, (char *const *)envp);
 			pid_t childPid = *blacklistedPidp;
