@@ -30,9 +30,7 @@
 }
 
 // ---------------------------------------------------------------------------
-// RootHide-style URL scheme hiding for "hidden" apps (ported from
-// roothidehooks/lsd.x). lsd is injected by systemhook, so we can filter
-// canOpenURL:/openURL: for blacklisted pids without injecting the app itself.
+// RootHide-style URL scheme hiding for "hidden" apps
 // ---------------------------------------------------------------------------
 
 @interface LSApplicationProxy : NSObject
@@ -66,8 +64,6 @@ static BOOL isJailbreakBundleIdentifier(NSString *bundleID)
 	return bundleID.length > 0 && [set containsObject:bundleID];
 }
 
-// TrollStore / jailbreak utility apps have bundle ids that vary, so also match
-// on the .app directory name (same idea as the fork's hideJailbreakURLSchemes).
 static BOOL isJailbreakAppName(NSString *appName)
 {
 	static NSSet<NSString *> *set = nil;
@@ -84,8 +80,6 @@ static BOOL isJailbreakAppName(NSString *appName)
 	return appName.length > 0 && [set containsObject:appName];
 }
 
-// A bundle path belongs to a jailbreak app when it lives under /var/jb
-// (standard rootless symlink) or under the resolved preboot procursus root.
 static BOOL isJailbreakBundlePath(const char *path)
 {
 	if (!path) return NO;
@@ -148,8 +142,7 @@ static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 	return %orig;
 }
 
-%end //%hook _LSCanOpenURLManager
-
+%end
 
 @interface _LSDOpenClient : NSObject
 - (NSXPCConnection *)XPCConnection;
@@ -185,14 +178,7 @@ static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 	%orig;
 }
 
-%end //%hook _LSDOpenClient
-
-// ===========================================================================
-// UTType hiding + extension/plugin hiding (ported from roothidehooks/lsd.x).
-// Hides jailbreak apps' document types and extensions from "hidden"
-// (blacklisted) apps so LSApplicationWorkspace / UIDocument* / extension
-// queries don't reveal jailbreak apps.
-// ===========================================================================
+%end
 
 %hook _LSURLOverride
 -(id)initWithOriginalURL:(NSURL*)url
@@ -205,7 +191,9 @@ static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 }
 %end
 
-// --- 将原本在 %group 内的声明、变量、函数全部移到全局 ---
+// ===========================================================================
+// UTType hiding + extension/plugin hiding
+// ===========================================================================
 
 @interface UTTypeRecord : NSObject
 + (id)typeRecordWithIdentifier:(id)identifier;
@@ -287,66 +275,81 @@ static BOOL utrUnitIsJailbreak(void* db, intptr_t unitID)
 	return result;
 }
 
+// ---------------------------------------------------------------------------
+// C function hooks — 直接使用 MSHookFunction，避免在 %group 内使用 %hookf
+// ---------------------------------------------------------------------------
+
 typedef intptr_t (^UTREnumBlock)(intptr_t a2, intptr_t unitID, const void* unitBytes, void* a5);
 typedef void (^UTRConformBlock)(intptr_t unitID, const void* unitBytes, intptr_t kind, unsigned char* outStop);
 
+static void (*orig__UTEnumerateTypesForTag)(void* db, void* tagClass, void* tag, id block);
+static void (*orig__UTEnumerateTypesForIdentifier)(void* db, long identStrId, id block);
+static void (*orig__UTTypeSearchConformingTypesWithBlock)(void* db, long unitID, long flags, long arg4, id block);
+static void (*orig__UTTypeSearchConformsToTypesWithBlock)(void* db, long unitID, long flags, long arg4, id block);
+static void (*orig__LSSchemaCacheRead)(void* a1, id block);
+static void (*orig__LSSchemaCacheWrite)(void* a1, id block);
+
+static void hook__UTEnumerateTypesForTag(void* db, void* tagClass, void* tag, id block)
+{
+	if (!utrFilterActive() || !block) { orig__UTEnumerateTypesForTag(db, tagClass, tag, block); return; }
+	UTREnumBlock origBlock = (UTREnumBlock)block;
+	UTREnumBlock wrapper = ^intptr_t(intptr_t a2, intptr_t unitID, const void* unitBytes, void* a5) {
+		if (utrUnitIsJailbreak(db, unitID)) return 0;
+		return origBlock(a2, unitID, unitBytes, a5);
+	};
+	orig__UTEnumerateTypesForTag(db, tagClass, tag, wrapper);
+}
+
+static void hook__UTEnumerateTypesForIdentifier(void* db, long identStrId, id block)
+{
+	if (!utrFilterActive() || !block) { orig__UTEnumerateTypesForIdentifier(db, identStrId, block); return; }
+	UTREnumBlock origBlock = (UTREnumBlock)block;
+	UTREnumBlock wrapper = ^intptr_t(intptr_t a2, intptr_t unitID, const void* unitBytes, void* a5) {
+		if (utrUnitIsJailbreak(db, unitID)) return 0;
+		return origBlock(a2, unitID, unitBytes, a5);
+	};
+	orig__UTEnumerateTypesForIdentifier(db, identStrId, wrapper);
+}
+
+static void hook__UTTypeSearchConformingTypesWithBlock(void* db, long unitID, long flags, long arg4, id block)
+{
+	if (!utrFilterActive() || !block) { orig__UTTypeSearchConformingTypesWithBlock(db, unitID, flags, arg4, block); return; }
+	UTRConformBlock origBlock = (UTRConformBlock)block;
+	UTRConformBlock wrapper = ^void(intptr_t uid, const void* unitBytes, intptr_t kind, unsigned char* outStop) {
+		if (utrUnitIsJailbreak(db, uid)) return;
+		origBlock(uid, unitBytes, kind, outStop);
+	};
+	orig__UTTypeSearchConformingTypesWithBlock(db, unitID, flags, arg4, wrapper);
+}
+
+static void hook__UTTypeSearchConformsToTypesWithBlock(void* db, long unitID, long flags, long arg4, id block)
+{
+	if (!utrFilterActive() || !block) { orig__UTTypeSearchConformsToTypesWithBlock(db, unitID, flags, arg4, block); return; }
+	UTRConformBlock origBlock = (UTRConformBlock)block;
+	UTRConformBlock wrapper = ^void(intptr_t uid, const void* unitBytes, intptr_t kind, unsigned char* outStop) {
+		if (utrUnitIsJailbreak(db, uid)) return;
+		origBlock(uid, unitBytes, kind, outStop);
+	};
+	orig__UTTypeSearchConformsToTypesWithBlock(db, unitID, flags, arg4, wrapper);
+}
+
+static void hook__LSSchemaCacheRead(void* a1, id block)
+{
+	if (utrFilterActive()) return;
+	orig__LSSchemaCacheRead(a1, block);
+}
+
+static void hook__LSSchemaCacheWrite(void* a1, id block)
+{
+	if (utrFilterActive()) return;
+	orig__LSSchemaCacheWrite(a1, block);
+}
+
+// ---------------------------------------------------------------------------
+// %group 内只保留纯 ObjC 方法 hook
+// ---------------------------------------------------------------------------
+
 %group UTTypeHooks
-
-%hookf(void, _UTEnumerateTypesForTag, void* db, void* tagClass, void* tag, id block)
-{
-	if (!utrFilterActive() || !block) { %orig; return; }
-	UTREnumBlock orig = (UTREnumBlock)block;
-	UTREnumBlock wrapper = ^intptr_t(intptr_t a2, intptr_t unitID, const void* unitBytes, void* a5) {
-		if (utrUnitIsJailbreak(db, unitID)) return 0;
-		return orig(a2, unitID, unitBytes, a5);
-	};
-	%orig(db, tagClass, tag, wrapper);
-}
-
-%hookf(void, _UTEnumerateTypesForIdentifier, void* db, long identStrId, id block)
-{
-	if (!utrFilterActive() || !block) { %orig; return; }
-	UTREnumBlock orig = (UTREnumBlock)block;
-	UTREnumBlock wrapper = ^intptr_t(intptr_t a2, intptr_t unitID, const void* unitBytes, void* a5) {
-		if (utrUnitIsJailbreak(db, unitID)) return 0;
-		return orig(a2, unitID, unitBytes, a5);
-	};
-	%orig(db, identStrId, wrapper);
-}
-
-%hookf(void, _UTTypeSearchConformingTypesWithBlock, void* db, long unitID, long flags, long arg4, id block)
-{
-	if (!utrFilterActive() || !block) { %orig; return; }
-	UTRConformBlock orig = (UTRConformBlock)block;
-	UTRConformBlock wrapper = ^void(intptr_t uid, const void* unitBytes, intptr_t kind, unsigned char* outStop) {
-		if (utrUnitIsJailbreak(db, uid)) return;
-		orig(uid, unitBytes, kind, outStop);
-	};
-	%orig(db, unitID, flags, arg4, wrapper);
-}
-
-%hookf(void, _UTTypeSearchConformsToTypesWithBlock, void* db, long unitID, long flags, long arg4, id block)
-{
-	if (!utrFilterActive() || !block) { %orig; return; }
-	UTRConformBlock orig = (UTRConformBlock)block;
-	UTRConformBlock wrapper = ^void(intptr_t uid, const void* unitBytes, intptr_t kind, unsigned char* outStop) {
-		if (utrUnitIsJailbreak(db, uid)) return;
-		orig(uid, unitBytes, kind, outStop);
-	};
-	%orig(db, unitID, flags, arg4, wrapper);
-}
-
-%hookf(void, _LSSchemaCacheRead, void* a1, id block)
-{
-	if (utrFilterActive()) return;
-	%orig(a1, block);
-}
-
-%hookf(void, _LSSchemaCacheWrite, void* a1, id block)
-{
-	if (utrFilterActive()) return;
-	%orig(a1, block);
-}
 
 %hook _LSDReadClient
 - (void)getTypeRecordWithTag:(id)tag ofClass:(id)_class conformingToIdentifier:(id)identifier completionHandler:(void(^)(id))handler
@@ -481,22 +484,38 @@ void lsdInit(void)
 		  _LSURLOverride = objc_getClass("_LSURLOverride"),
 		  _LSQueryContext = objc_getClass("_LSQueryContext"));
 
-	// UTType hiding group (CoreServices C functions). Best-effort: only install
-	// if every symbol resolves.
+	// UTType hiding group (CoreServices C functions).
+	// 注意：C 函数 hook 不再放在 %group 内，直接用 MSHookFunction 安装。
 	void* _LSSchemaCacheRead = MSFindSymbol(coreServicesImage, "__LSSchemaCacheRead");
 	void* _LSSchemaCacheWrite = MSFindSymbol(coreServicesImage, "__LSSchemaCacheWrite");
 	void* _UTEnumerateTypesForTag = MSFindSymbol(coreServicesImage, "__UTEnumerateTypesForTag");
 	void* _UTEnumerateTypesForIdentifier = MSFindSymbol(coreServicesImage, "__UTEnumerateTypesForIdentifier");
 	void* _UTTypeSearchConformingTypesWithBlock = MSFindSymbol(coreServicesImage, "__UTTypeSearchConformingTypesWithBlock");
 	void* _UTTypeSearchConformsToTypesWithBlock = MSFindSymbol(coreServicesImage, "__UTTypeSearchConformsToTypesWithBlock");
-	if(_LSSchemaCacheRead && _LSSchemaCacheWrite && _UTEnumerateTypesForTag && _UTEnumerateTypesForIdentifier && _UTTypeSearchConformingTypesWithBlock && _UTTypeSearchConformsToTypesWithBlock)
-	{
+
+	if (_LSSchemaCacheRead) {
+		MSHookFunction(_LSSchemaCacheRead, (void*)hook__LSSchemaCacheRead, (void**)&orig__LSSchemaCacheRead);
+	}
+	if (_LSSchemaCacheWrite) {
+		MSHookFunction(_LSSchemaCacheWrite, (void*)hook__LSSchemaCacheWrite, (void**)&orig__LSSchemaCacheWrite);
+	}
+	if (_UTEnumerateTypesForTag) {
+		MSHookFunction(_UTEnumerateTypesForTag, (void*)hook__UTEnumerateTypesForTag, (void**)&orig__UTEnumerateTypesForTag);
+	}
+	if (_UTEnumerateTypesForIdentifier) {
+		MSHookFunction(_UTEnumerateTypesForIdentifier, (void*)hook__UTEnumerateTypesForIdentifier, (void**)&orig__UTEnumerateTypesForIdentifier);
+	}
+	if (_UTTypeSearchConformingTypesWithBlock) {
+		MSHookFunction(_UTTypeSearchConformingTypesWithBlock, (void*)hook__UTTypeSearchConformingTypesWithBlock, (void**)&orig__UTTypeSearchConformingTypesWithBlock);
+	}
+	if (_UTTypeSearchConformsToTypesWithBlock) {
+		MSHookFunction(_UTTypeSearchConformsToTypesWithBlock, (void*)hook__UTTypeSearchConformsToTypesWithBlock, (void**)&orig__UTTypeSearchConformsToTypesWithBlock);
+	}
+
+	// UTTypeHooks group：只包含 _LSDReadClient 的 ObjC 方法 hook
+	Class _LSDReadClientClass = objc_getClass("_LSDReadClient");
+	if (_LSDReadClientClass) {
 		%init(UTTypeHooks,
-			  _LSSchemaCacheRead=_LSSchemaCacheRead,
-			  _LSSchemaCacheWrite=_LSSchemaCacheWrite,
-			  _UTEnumerateTypesForTag=_UTEnumerateTypesForTag,
-			  _UTEnumerateTypesForIdentifier=_UTEnumerateTypesForIdentifier,
-			  _UTTypeSearchConformingTypesWithBlock=_UTTypeSearchConformingTypesWithBlock,
-			  _UTTypeSearchConformsToTypesWithBlock=_UTTypeSearchConformsToTypesWithBlock);
+			  _LSDReadClient = _LSDReadClientClass);
 	}
 }
