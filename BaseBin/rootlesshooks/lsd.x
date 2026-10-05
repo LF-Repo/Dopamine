@@ -4,8 +4,35 @@
 #import <libroot.h>
 #import <objc/runtime.h>
 
+%hookf(NSURL *, _LSGetInboxURLForBundleIdentifier, NSString *bundleIdentifier)
+{
+	NSURL *origURL = %orig;
+	if (![bundleIdentifier hasPrefix:@"com.apple"] && [origURL.path hasPrefix:@"/var/mobile/Library/Application Support/Containers/"]) {
+		return [NSURL fileURLWithPath:JBROOT_PATH_NSSTRING(origURL.path)];
+	}
+	return origURL;
+}
+
+%hookf(int, _LSServer_RebuildApplicationDatabases)
+{
+	int r = %orig;
+
+	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+		// Ensure jailbreak apps are readded to icon cache after the system reloads it
+		// A bit hacky, but works
+		const char *uicachePath = JBROOT_PATH_CSTRING("/usr/bin/uicache");
+		if (!access(uicachePath, F_OK)) {
+			exec_cmd(uicachePath, "-a", NULL);
+		}
+	});
+
+	return r;
+}
+
 // ---------------------------------------------------------------------------
-// 所有 @interface 声明
+// RootHide-style URL scheme hiding for "hidden" apps (ported from
+// roothidehooks/lsd.x). lsd is injected by systemhook, so we can filter
+// canOpenURL:/openURL: for blacklisted pids without injecting the app itself.
 // ---------------------------------------------------------------------------
 
 @interface LSApplicationProxy : NSObject
@@ -18,46 +45,6 @@
 + (LSApplicationWorkspace*)defaultWorkspace;
 - (NSArray*)applicationsAvailableForHandlingURLScheme:(NSString*)scheme;
 @end
-
-@interface _LSDOpenClient : NSObject
-- (NSXPCConnection *)XPCConnection;
-@end
-
-@interface UTTypeRecord : NSObject
-+ (id)typeRecordWithIdentifier:(id)identifier;
-- (unsigned int)tableID;
-@end
-
-@interface _UTDeclaredTypeRecord : NSObject
-- (id)_initWithContext:(void*)ctx tableID:(unsigned int)tableID unitID:(unsigned int)unitID;
-- (BOOL)isDeclared;
-- (BOOL)isCoreType;
-- (BOOL)isInPublicDomain;
-- (id)identifier;
-- (id)declaringBundleRecord;
-- (unsigned int)unitID;
-- (unsigned int)_rawFlags;
-@end
-
-@interface LSBundleRecord : NSObject
-- (NSURL*)URL;
-@end
-
-@interface _LSDReadClient : NSObject
-- (NSXPCConnection*)XPCConnection;
-@end
-
-@interface LSPlugInQueryWithUnits : NSObject
--(id)initWithPlugInUnits:(id)units forDatabaseWithUUID:(id)dbUUID;
-@end
-
-@interface _LSQueryContext : NSObject
--(NSMutableDictionary*)_resolveQueries:(NSMutableSet*)queries XPCConnection:(NSXPCConnection*)connection error:(NSError**)perror;
-@end
-
-// ---------------------------------------------------------------------------
-// 所有 C 函数、全局变量、typedef
-// ---------------------------------------------------------------------------
 
 static BOOL isJailbreakBundleIdentifier(NSString *bundleID)
 {
@@ -79,6 +66,8 @@ static BOOL isJailbreakBundleIdentifier(NSString *bundleID)
 	return bundleID.length > 0 && [set containsObject:bundleID];
 }
 
+// TrollStore / jailbreak utility apps have bundle ids that vary, so also match
+// on the .app directory name (same idea as the fork's hideJailbreakURLSchemes).
 static BOOL isJailbreakAppName(NSString *appName)
 {
 	static NSSet<NSString *> *set = nil;
@@ -95,6 +84,8 @@ static BOOL isJailbreakAppName(NSString *appName)
 	return appName.length > 0 && [set containsObject:appName];
 }
 
+// A bundle path belongs to a jailbreak app when it lives under /var/jb
+// (standard rootless symlink) or under the resolved preboot procursus root.
 static BOOL isJailbreakBundlePath(const char *path)
 {
 	if (!path) return NO;
@@ -125,7 +116,121 @@ static BOOL isJailbreakURLScheme(NSString *scheme)
 
 static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 
-// UTType 相关全局变量和函数
+%hook _LSCanOpenURLManager
+
+-(void*)getIsURL:(NSURL*)url alwaysCheckable:(BOOL*)pCheckable hasHandler:(BOOL*)pHasHandler
+{
+	BOOL _checkable = NO;
+	BOOL _hasHandler = NO;
+	void* result = %orig(url, &_checkable, &_hasHandler);
+
+	if (_checkable || _hasHandler) {
+		NSNumber *tag = objc_getAssociatedObject(url, kBlockSchemeTagKey);
+		if (tag && tag.boolValue) {
+			_hasHandler = NO;
+			_checkable = NO;
+		}
+	}
+
+	if (pCheckable) *pCheckable = _checkable;
+	if (pHasHandler) *pHasHandler = _hasHandler;
+	return result;
+}
+
+- (BOOL)canOpenURL:(NSURL*)url publicSchemes:(BOOL)ispublic privateSchemes:(BOOL)isprivate XPCConnection:(NSXPCConnection*)connection error:(NSError**)perror
+{
+	if (connection) {
+		pid_t pid = connection.processIdentifier;
+		if (jbclient_blacklist_check_pid(pid) && isJailbreakURLScheme(url.scheme)) {
+			objc_setAssociatedObject(url, kBlockSchemeTagKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		}
+	}
+	return %orig;
+}
+
+%end //%hook _LSCanOpenURLManager
+
+
+@interface _LSDOpenClient : NSObject
+- (NSXPCConnection *)XPCConnection;
+@end
+
+%hook _LSDOpenClient
+
+// 16.2+
+-(void)openURL:(NSURL*)url fileHandle:(id)fileHandle options:(id)options completionHandler:(void(^)(BOOL,NSError*))completionHandler
+{
+	NSXPCConnection *conn = [self XPCConnection];
+	if (conn) {
+		pid_t pid = [conn processIdentifier];
+		if (jbclient_blacklist_check_pid(pid) && isJailbreakURLScheme(url.scheme)) {
+			if (completionHandler) completionHandler(NO, nil);
+			return;
+		}
+	}
+	%orig;
+}
+
+// 15.0~16.0
+- (void)openURL:(NSURL*)url options:(id)options completionHandler:(void(^)(BOOL,NSError*))completionHandler
+{
+	NSXPCConnection *conn = [self XPCConnection];
+	if (conn) {
+		pid_t pid = [conn processIdentifier];
+		if (jbclient_blacklist_check_pid(pid) && isJailbreakURLScheme(url.scheme)) {
+			if (completionHandler) completionHandler(NO, nil);
+			return;
+		}
+	}
+	%orig;
+}
+
+%end //%hook _LSDOpenClient
+
+// ===========================================================================
+// UTType hiding + extension/plugin hiding (ported from roothidehooks/lsd.x).
+// Hides jailbreak apps' document types and extensions from "hidden"
+// (blacklisted) apps so LSApplicationWorkspace / UIDocument* / extension
+// queries don't reveal jailbreak apps.
+// ===========================================================================
+
+%hook _LSURLOverride
+-(id)initWithOriginalURL:(NSURL*)url
+{
+	NSNumber *tag = objc_getAssociatedObject(url, kBlockSchemeTagKey);
+	if (tag && tag.boolValue) {
+		return nil;
+	}
+	return %orig;
+}
+%end
+
+// --- 将原本在 %group 内的声明、变量、函数全部移到全局 ---
+
+@interface UTTypeRecord : NSObject
++ (id)typeRecordWithIdentifier:(id)identifier;
+- (unsigned int)tableID;
+@end
+
+@interface _UTDeclaredTypeRecord : NSObject
+- (id)_initWithContext:(void*)ctx tableID:(unsigned int)tableID unitID:(unsigned int)unitID;
+- (BOOL)isDeclared;
+- (BOOL)isCoreType;
+- (BOOL)isInPublicDomain;
+- (id)identifier;
+- (id)declaringBundleRecord;
+- (unsigned int)unitID;
+- (unsigned int)_rawFlags;
+@end
+
+@interface LSBundleRecord : NSObject
+- (NSURL*)URL;
+@end
+
+@interface _LSDReadClient : NSObject
+- (NSXPCConnection*)XPCConnection;
+@end
+
 static __thread BOOL g_utrHide = NO;
 static __thread int g_utrBusy = 0;
 
@@ -184,110 +289,6 @@ static BOOL utrUnitIsJailbreak(void* db, intptr_t unitID)
 
 typedef intptr_t (^UTREnumBlock)(intptr_t a2, intptr_t unitID, const void* unitBytes, void* a5);
 typedef void (^UTRConformBlock)(intptr_t unitID, const void* unitBytes, intptr_t kind, unsigned char* outStop);
-
-// ---------------------------------------------------------------------------
-// Logos Hook 部分
-// ---------------------------------------------------------------------------
-
-%hookf(NSURL *, _LSGetInboxURLForBundleIdentifier, NSString *bundleIdentifier)
-{
-	NSURL *origURL = %orig;
-	if (![bundleIdentifier hasPrefix:@"com.apple"] && [origURL.path hasPrefix:@"/var/mobile/Library/Application Support/Containers/"]) {
-		return [NSURL fileURLWithPath:JBROOT_PATH_NSSTRING(origURL.path)];
-	}
-	return origURL;
-}
-
-%hookf(int, _LSServer_RebuildApplicationDatabases)
-{
-	int r = %orig;
-
-	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-		const char *uicachePath = JBROOT_PATH_CSTRING("/usr/bin/uicache");
-		if (!access(uicachePath, F_OK)) {
-			exec_cmd(uicachePath, "-a", NULL);
-		}
-	});
-
-	return r;
-}
-
-%hook _LSCanOpenURLManager
-
--(void*)getIsURL:(NSURL*)url alwaysCheckable:(BOOL*)pCheckable hasHandler:(BOOL*)pHasHandler
-{
-	BOOL _checkable = NO;
-	BOOL _hasHandler = NO;
-	void* result = %orig(url, &_checkable, &_hasHandler);
-
-	if (_checkable || _hasHandler) {
-		NSNumber *tag = objc_getAssociatedObject(url, kBlockSchemeTagKey);
-		if (tag && tag.boolValue) {
-			_hasHandler = NO;
-			_checkable = NO;
-		}
-	}
-
-	if (pCheckable) *pCheckable = _checkable;
-	if (pHasHandler) *pHasHandler = _hasHandler;
-	return result;
-}
-
-- (BOOL)canOpenURL:(NSURL*)url publicSchemes:(BOOL)ispublic privateSchemes:(BOOL)isprivate XPCConnection:(NSXPCConnection*)connection error:(NSError**)perror
-{
-	if (connection) {
-		pid_t pid = connection.processIdentifier;
-		if (jbclient_blacklist_check_pid(pid) && isJailbreakURLScheme(url.scheme)) {
-			objc_setAssociatedObject(url, kBlockSchemeTagKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-		}
-	}
-	return %orig;
-}
-
-%end //%hook _LSCanOpenURLManager
-
-%hook _LSDOpenClient
-
-// 16.2+
--(void)openURL:(NSURL*)url fileHandle:(id)fileHandle options:(id)options completionHandler:(void(^)(BOOL,NSError*))completionHandler
-{
-	NSXPCConnection *conn = [self XPCConnection];
-	if (conn) {
-		pid_t pid = [conn processIdentifier];
-		if (jbclient_blacklist_check_pid(pid) && isJailbreakURLScheme(url.scheme)) {
-			if (completionHandler) completionHandler(NO, nil);
-			return;
-		}
-	}
-	%orig;
-}
-
-// 15.0~16.0
-- (void)openURL:(NSURL*)url options:(id)options completionHandler:(void(^)(BOOL,NSError*))completionHandler
-{
-	NSXPCConnection *conn = [self XPCConnection];
-	if (conn) {
-		pid_t pid = [conn processIdentifier];
-		if (jbclient_blacklist_check_pid(pid) && isJailbreakURLScheme(url.scheme)) {
-			if (completionHandler) completionHandler(NO, nil);
-			return;
-		}
-	}
-	%orig;
-}
-
-%end //%hook _LSDOpenClient
-
-%hook _LSURLOverride
--(id)initWithOriginalURL:(NSURL*)url
-{
-	NSNumber *tag = objc_getAssociatedObject(url, kBlockSchemeTagKey);
-	if (tag && tag.boolValue) {
-		return nil;
-	}
-	return %orig;
-}
-%end
 
 %group UTTypeHooks
 
@@ -399,6 +400,14 @@ typedef void (^UTRConformBlock)(intptr_t unitID, const void* unitBytes, intptr_t
 
 %hook _LSQueryContext
 
+@interface LSPlugInQueryWithUnits : NSObject
+-(id)initWithPlugInUnits:(id)units forDatabaseWithUUID:(id)dbUUID;
+@end
+
+@interface _LSQueryContext : NSObject
+-(NSMutableDictionary*)_resolveQueries:(NSMutableSet*)queries XPCConnection:(NSXPCConnection*)connection error:(NSError**)perror;
+@end
+
 -(NSMutableDictionary*)_resolveQueries:(NSMutableSet*)queries XPCConnection:(NSXPCConnection*)connection error:(NSError**)perror
 {
 	NSMutableDictionary* result = %orig;
@@ -459,10 +468,6 @@ typedef void (^UTRConformBlock)(intptr_t unitID, const void* unitBytes, intptr_t
 	return result;
 }
 %end
-
-// ---------------------------------------------------------------------------
-// 初始化函数
-// ---------------------------------------------------------------------------
 
 void lsdInit(void)
 {
