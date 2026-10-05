@@ -28,7 +28,7 @@
 }
 
 // ---------------------------------------------------------------------------
-// RootHide-style URL scheme hiding for "hidden" apps
+// RootHide-style URL scheme hiding
 // ---------------------------------------------------------------------------
 
 @interface LSApplicationProxy : NSObject
@@ -220,13 +220,13 @@ static __thread int g_utrBusy = 0;
 
 static BOOL utrFilterActive(void) { return g_utrHide && !g_utrBusy; }
 
-static pid_t utrClientPid(_LSDReadClient* client)
+static pid_t utrClientPid(id client)
 {
 	NSXPCConnection* conn = [client XPCConnection];
 	return conn ? conn.processIdentifier : -1;
 }
 
-static BOOL utrHideClientBlacklisted(_LSDReadClient* client)
+static BOOL utrHideClientBlacklisted(id client)
 {
 	pid_t pid = utrClientPid(client);
 	return (pid > 0 && jbclient_blacklist_check_pid(pid));
@@ -272,7 +272,7 @@ static BOOL utrUnitIsJailbreak(void* db, intptr_t unitID)
 }
 
 // ---------------------------------------------------------------------------
-// C function hooks — 直接使用 MSHookFunction，避免 %group / %hookf 展开问题
+// C function hooks (via MSHookFunction)
 // ---------------------------------------------------------------------------
 
 typedef intptr_t (^UTREnumBlock)(intptr_t a2, intptr_t unitID, const void* unitBytes, void* a5);
@@ -342,58 +342,68 @@ static void hook__LSSchemaCacheWrite(void* a1, id block)
 }
 
 // ---------------------------------------------------------------------------
-// _LSDReadClient：顶层 %hook，不再放进 %group
+// _LSDReadClient hooks (via MSHookMessageEx — 不经过 Logos 展开)
 // ---------------------------------------------------------------------------
 
-%hook _LSDReadClient
+static void (*orig_lsd_getTypeRecordWithTag)(id self, SEL _cmd, id tag, id klass, id identifier, void(^handler)(id));
+static void (*orig_lsd_getTypeRecordsWithTag)(id self, SEL _cmd, id tag, id klass, id identifier, void(^handler)(id));
+static void (*orig_lsd_getTypeRecordWithIdentifier)(id self, SEL _cmd, id identifier, BOOL allowUndeclared, void(^handler)(id));
+static void (*orig_lsd_getTypeRecordsWithIdentifiers)(id self, SEL _cmd, id identifiers, void(^handler)(id));
+static void (*orig_lsd_getTypeRecordForImportedTypeWithIdentifier)(id self, SEL _cmd, id identifier, id conforming, void(^handler)(id));
+static void (*orig_lsd_getRelatedTypesOfTypeWithIdentifier)(id self, SEL _cmd, id identifier, NSInteger degree, void(^handler)(id, id));
+static void (*orig_lsd_getWhetherTypeIdentifier)(id self, SEL _cmd, id identifier, id other, void(^handler)(id));
+static void (*orig_lsd_getResourceValuesForKeys)(id self, SEL _cmd, id keys, id url, id locs, void(^handler)(id, id, id));
+static void (*orig_lsd_getBoundIconInfoForDocumentProxy)(id self, SEL _cmd, id documentProxy, void(^handler)(id, id));
 
-- (void)getTypeRecordWithTag:(id)tag ofClass:(id)_class conformingToIdentifier:(id)identifier completionHandler:(void(^)(id))handler
+static void hook_lsd_getTypeRecordWithTag(id self, SEL _cmd, id tag, id klass, id identifier, void(^handler)(id))
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
-	g_utrHide = YES; %orig; g_utrHide = NO;
+	if (!utrHideClientBlacklisted(self)) { orig_lsd_getTypeRecordWithTag(self, _cmd, tag, klass, identifier, handler); return; }
+	g_utrHide = YES; orig_lsd_getTypeRecordWithTag(self, _cmd, tag, klass, identifier, handler); g_utrHide = NO;
 }
-- (void)getTypeRecordsWithTag:(id)tag ofClass:(id)_class conformingToIdentifier:(id)identifier completionHandler:(void(^)(id))handler
+static void hook_lsd_getTypeRecordsWithTag(id self, SEL _cmd, id tag, id klass, id identifier, void(^handler)(id))
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
-	g_utrHide = YES; %orig; g_utrHide = NO;
+	if (!utrHideClientBlacklisted(self)) { orig_lsd_getTypeRecordsWithTag(self, _cmd, tag, klass, identifier, handler); return; }
+	g_utrHide = YES; orig_lsd_getTypeRecordsWithTag(self, _cmd, tag, klass, identifier, handler); g_utrHide = NO;
 }
-- (void)getTypeRecordWithIdentifier:(id)identifier allowUndeclared:(BOOL)allowUndeclared completionHandler:(void(^)(id))handler
+static void hook_lsd_getTypeRecordWithIdentifier(id self, SEL _cmd, id identifier, BOOL allowUndeclared, void(^handler)(id))
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
-	g_utrHide = YES; %orig; g_utrHide = NO;
+	if (!utrHideClientBlacklisted(self)) { orig_lsd_getTypeRecordWithIdentifier(self, _cmd, identifier, allowUndeclared, handler); return; }
+	g_utrHide = YES; orig_lsd_getTypeRecordWithIdentifier(self, _cmd, identifier, allowUndeclared, handler); g_utrHide = NO;
 }
-- (void)getTypeRecordsWithIdentifiers:(id)identifiers completionHandler:(void(^)(id))handler
+static void hook_lsd_getTypeRecordsWithIdentifiers(id self, SEL _cmd, id identifiers, void(^handler)(id))
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
-	g_utrHide = YES; %orig; g_utrHide = NO;
+	if (!utrHideClientBlacklisted(self)) { orig_lsd_getTypeRecordsWithIdentifiers(self, _cmd, identifiers, handler); return; }
+	g_utrHide = YES; orig_lsd_getTypeRecordsWithIdentifiers(self, _cmd, identifiers, handler); g_utrHide = NO;
 }
-- (void)getTypeRecordForImportedTypeWithIdentifier:(id)identifier conformingToIdentifier:(id)conforming completionHandler:(void(^)(id))handler
+static void hook_lsd_getTypeRecordForImportedTypeWithIdentifier(id self, SEL _cmd, id identifier, id conforming, void(^handler)(id))
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
-	g_utrHide = YES; %orig; g_utrHide = NO;
+	if (!utrHideClientBlacklisted(self)) { orig_lsd_getTypeRecordForImportedTypeWithIdentifier(self, _cmd, identifier, conforming, handler); return; }
+	g_utrHide = YES; orig_lsd_getTypeRecordForImportedTypeWithIdentifier(self, _cmd, identifier, conforming, handler); g_utrHide = NO;
 }
-- (void)getRelatedTypesOfTypeWithIdentifier:(id)identifier maximumDegreeOfSeparation:(NSInteger)degree completionHandler:(void(^)(id, id))handler
+static void hook_lsd_getRelatedTypesOfTypeWithIdentifier(id self, SEL _cmd, id identifier, NSInteger degree, void(^handler)(id, id))
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
-	g_utrHide = YES; %orig; g_utrHide = NO;
+	if (!utrHideClientBlacklisted(self)) { orig_lsd_getRelatedTypesOfTypeWithIdentifier(self, _cmd, identifier, degree, handler); return; }
+	g_utrHide = YES; orig_lsd_getRelatedTypesOfTypeWithIdentifier(self, _cmd, identifier, degree, handler); g_utrHide = NO;
 }
-- (void)getWhetherTypeIdentifier:(id)identifier conformsToTypeIdentifier:(id)other completionHandler:(void(^)(id))handler
+static void hook_lsd_getWhetherTypeIdentifier(id self, SEL _cmd, id identifier, id other, void(^handler)(id))
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
-	g_utrHide = YES; %orig; g_utrHide = NO;
+	if (!utrHideClientBlacklisted(self)) { orig_lsd_getWhetherTypeIdentifier(self, _cmd, identifier, other, handler); return; }
+	g_utrHide = YES; orig_lsd_getWhetherTypeIdentifier(self, _cmd, identifier, other, handler); g_utrHide = NO;
 }
-- (void)getResourceValuesForKeys:(id)keys URL:(id)url preferredLocalizations:(id)locs completionHandler:(void(^)(id, id, id))handler
+static void hook_lsd_getResourceValuesForKeys(id self, SEL _cmd, id keys, id url, id locs, void(^handler)(id, id, id))
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
-	g_utrHide = YES; %orig; g_utrHide = NO;
+	if (!utrHideClientBlacklisted(self)) { orig_lsd_getResourceValuesForKeys(self, _cmd, keys, url, locs, handler); return; }
+	g_utrHide = YES; orig_lsd_getResourceValuesForKeys(self, _cmd, keys, url, locs, handler); g_utrHide = NO;
 }
-- (void)getBoundIconInfoForDocumentProxy:(id)documentProxy completionHandler:(void(^)(id, id))handler
+static void hook_lsd_getBoundIconInfoForDocumentProxy(id self, SEL _cmd, id documentProxy, void(^handler)(id, id))
 {
-	if (!utrHideClientBlacklisted(self)) { %orig; return; }
-	g_utrHide = YES; %orig; g_utrHide = NO;
+	if (!utrHideClientBlacklisted(self)) { orig_lsd_getBoundIconInfoForDocumentProxy(self, _cmd, documentProxy, handler); return; }
+	g_utrHide = YES; orig_lsd_getBoundIconInfoForDocumentProxy(self, _cmd, documentProxy, handler); g_utrHide = NO;
 }
 
-%end
+// ---------------------------------------------------------------------------
+// _LSQueryContext (plugin/extension hiding) — 无 block 参数，Logos 可处理
+// ---------------------------------------------------------------------------
 
 %hook _LSQueryContext
 
@@ -470,16 +480,38 @@ void lsdInit(void)
 {
 	MSImageRef coreServicesImage = MSGetImageByName("/System/Library/Frameworks/CoreServices.framework/CoreServices");
 
-	// 主 %init：包含所有 ObjC hook，包括 _LSDReadClient（不再使用 %group）
+	// ObjC hooks via Logos（不带 block 参数的类）
 	%init(_LSGetInboxURLForBundleIdentifier = MSFindSymbol(coreServicesImage, "__LSGetInboxURLForBundleIdentifier"),
 		  _LSServer_RebuildApplicationDatabases = MSFindSymbol(coreServicesImage, "__LSServer_RebuildApplicationDatabases"),
 		  _LSCanOpenURLManager = objc_getClass("_LSCanOpenURLManager"),
 		  _LSDOpenClient = objc_getClass("_LSDOpenClient"),
 		  _LSURLOverride = objc_getClass("_LSURLOverride"),
-		  _LSQueryContext = objc_getClass("_LSQueryContext"),
-		  _LSDReadClient = objc_getClass("_LSDReadClient"));
+		  _LSQueryContext = objc_getClass("_LSQueryContext"));
 
-	// UTType hiding 的 C 函数 hook：直接用 MSHookFunction 安装
+	// _LSDReadClient：手动 MSHookMessageEx 安装（避免 Logos 展开 block 参数出错）
+	Class lsdReadClient = objc_getClass("_LSDReadClient");
+	if (lsdReadClient) {
+		MSHookMessageEx(lsdReadClient, @selector(getTypeRecordWithTag:ofClass:conformingToIdentifier:completionHandler:),
+			(IMP)hook_lsd_getTypeRecordWithTag, (IMP*)&orig_lsd_getTypeRecordWithTag);
+		MSHookMessageEx(lsdReadClient, @selector(getTypeRecordsWithTag:ofClass:conformingToIdentifier:completionHandler:),
+			(IMP)hook_lsd_getTypeRecordsWithTag, (IMP*)&orig_lsd_getTypeRecordsWithTag);
+		MSHookMessageEx(lsdReadClient, @selector(getTypeRecordWithIdentifier:allowUndeclared:completionHandler:),
+			(IMP)hook_lsd_getTypeRecordWithIdentifier, (IMP*)&orig_lsd_getTypeRecordWithIdentifier);
+		MSHookMessageEx(lsdReadClient, @selector(getTypeRecordsWithIdentifiers:completionHandler:),
+			(IMP)hook_lsd_getTypeRecordsWithIdentifiers, (IMP*)&orig_lsd_getTypeRecordsWithIdentifiers);
+		MSHookMessageEx(lsdReadClient, @selector(getTypeRecordForImportedTypeWithIdentifier:conformingToIdentifier:completionHandler:),
+			(IMP)hook_lsd_getTypeRecordForImportedTypeWithIdentifier, (IMP*)&orig_lsd_getTypeRecordForImportedTypeWithIdentifier);
+		MSHookMessageEx(lsdReadClient, @selector(getRelatedTypesOfTypeWithIdentifier:maximumDegreeOfSeparation:completionHandler:),
+			(IMP)hook_lsd_getRelatedTypesOfTypeWithIdentifier, (IMP*)&orig_lsd_getRelatedTypesOfTypeWithIdentifier);
+		MSHookMessageEx(lsdReadClient, @selector(getWhetherTypeIdentifier:conformsToTypeIdentifier:completionHandler:),
+			(IMP)hook_lsd_getWhetherTypeIdentifier, (IMP*)&orig_lsd_getWhetherTypeIdentifier);
+		MSHookMessageEx(lsdReadClient, @selector(getResourceValuesForKeys:URL:preferredLocalizations:completionHandler:),
+			(IMP)hook_lsd_getResourceValuesForKeys, (IMP*)&orig_lsd_getResourceValuesForKeys);
+		MSHookMessageEx(lsdReadClient, @selector(getBoundIconInfoForDocumentProxy:completionHandler:),
+			(IMP)hook_lsd_getBoundIconInfoForDocumentProxy, (IMP*)&orig_lsd_getBoundIconInfoForDocumentProxy);
+	}
+
+	// C 函数 hooks
 	void* _LSSchemaCacheRead = MSFindSymbol(coreServicesImage, "__LSSchemaCacheRead");
 	void* _LSSchemaCacheWrite = MSFindSymbol(coreServicesImage, "__LSSchemaCacheWrite");
 	void* _UTEnumerateTypesForTag = MSFindSymbol(coreServicesImage, "__UTEnumerateTypesForTag");
@@ -487,22 +519,10 @@ void lsdInit(void)
 	void* _UTTypeSearchConformingTypesWithBlock = MSFindSymbol(coreServicesImage, "__UTTypeSearchConformingTypesWithBlock");
 	void* _UTTypeSearchConformsToTypesWithBlock = MSFindSymbol(coreServicesImage, "__UTTypeSearchConformsToTypesWithBlock");
 
-	if (_LSSchemaCacheRead) {
-		MSHookFunction(_LSSchemaCacheRead, (void*)hook__LSSchemaCacheRead, (void**)&orig__LSSchemaCacheRead);
-	}
-	if (_LSSchemaCacheWrite) {
-		MSHookFunction(_LSSchemaCacheWrite, (void*)hook__LSSchemaCacheWrite, (void**)&orig__LSSchemaCacheWrite);
-	}
-	if (_UTEnumerateTypesForTag) {
-		MSHookFunction(_UTEnumerateTypesForTag, (void*)hook__UTEnumerateTypesForTag, (void**)&orig__UTEnumerateTypesForTag);
-	}
-	if (_UTEnumerateTypesForIdentifier) {
-		MSHookFunction(_UTEnumerateTypesForIdentifier, (void*)hook__UTEnumerateTypesForIdentifier, (void**)&orig__UTEnumerateTypesForIdentifier);
-	}
-	if (_UTTypeSearchConformingTypesWithBlock) {
-		MSHookFunction(_UTTypeSearchConformingTypesWithBlock, (void*)hook__UTTypeSearchConformingTypesWithBlock, (void**)&orig__UTTypeSearchConformingTypesWithBlock);
-	}
-	if (_UTTypeSearchConformsToTypesWithBlock) {
-		MSHookFunction(_UTTypeSearchConformsToTypesWithBlock, (void*)hook__UTTypeSearchConformsToTypesWithBlock, (void**)&orig__UTTypeSearchConformsToTypesWithBlock);
-	}
+	if (_LSSchemaCacheRead)  MSHookFunction(_LSSchemaCacheRead,  (void*)hook__LSSchemaCacheRead,  (void**)&orig__LSSchemaCacheRead);
+	if (_LSSchemaCacheWrite) MSHookFunction(_LSSchemaCacheWrite, (void*)hook__LSSchemaCacheWrite, (void**)&orig__LSSchemaCacheWrite);
+	if (_UTEnumerateTypesForTag) MSHookFunction(_UTEnumerateTypesForTag, (void*)hook__UTEnumerateTypesForTag, (void**)&orig__UTEnumerateTypesForTag);
+	if (_UTEnumerateTypesForIdentifier) MSHookFunction(_UTEnumerateTypesForIdentifier, (void*)hook__UTEnumerateTypesForIdentifier, (void**)&orig__UTEnumerateTypesForIdentifier);
+	if (_UTTypeSearchConformingTypesWithBlock) MSHookFunction(_UTTypeSearchConformingTypesWithBlock, (void*)hook__UTTypeSearchConformingTypesWithBlock, (void**)&orig__UTTypeSearchConformingTypesWithBlock);
+	if (_UTTypeSearchConformsToTypesWithBlock) MSHookFunction(_UTTypeSearchConformsToTypesWithBlock, (void*)hook__UTTypeSearchConformsToTypesWithBlock, (void**)&orig__UTTypeSearchConformsToTypesWithBlock);
 }
