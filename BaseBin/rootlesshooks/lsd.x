@@ -18,8 +18,6 @@
 	int r = %orig;
 
 	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-		// Ensure jailbreak apps are readded to icon cache after the system reloads it
-		// A bit hacky, but works
 		const char *uicachePath = JBROOT_PATH_CSTRING("/usr/bin/uicache");
 		if (!access(uicachePath, F_OK)) {
 			exec_cmd(uicachePath, "-a", NULL);
@@ -150,7 +148,6 @@ static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 
 %hook _LSDOpenClient
 
-// 16.2+
 -(void)openURL:(NSURL*)url fileHandle:(id)fileHandle options:(id)options completionHandler:(void(^)(BOOL,NSError*))completionHandler
 {
 	NSXPCConnection *conn = [self XPCConnection];
@@ -164,7 +161,6 @@ static const void *kBlockSchemeTagKey = &kBlockSchemeTagKey;
 	%orig;
 }
 
-// 15.0~16.0
 - (void)openURL:(NSURL*)url options:(id)options completionHandler:(void(^)(BOOL,NSError*))completionHandler
 {
 	NSXPCConnection *conn = [self XPCConnection];
@@ -276,7 +272,7 @@ static BOOL utrUnitIsJailbreak(void* db, intptr_t unitID)
 }
 
 // ---------------------------------------------------------------------------
-// C function hooks — 直接使用 MSHookFunction，避免在 %group 内使用 %hookf
+// C function hooks — 直接使用 MSHookFunction，避免 %group / %hookf 展开问题
 // ---------------------------------------------------------------------------
 
 typedef intptr_t (^UTREnumBlock)(intptr_t a2, intptr_t unitID, const void* unitBytes, void* a5);
@@ -346,12 +342,11 @@ static void hook__LSSchemaCacheWrite(void* a1, id block)
 }
 
 // ---------------------------------------------------------------------------
-// %group 内只保留纯 ObjC 方法 hook
+// _LSDReadClient：顶层 %hook，不再放进 %group
 // ---------------------------------------------------------------------------
 
-%group UTTypeHooks
-
 %hook _LSDReadClient
+
 - (void)getTypeRecordWithTag:(id)tag ofClass:(id)_class conformingToIdentifier:(id)identifier completionHandler:(void(^)(id))handler
 {
 	if (!utrHideClientBlacklisted(self)) { %orig; return; }
@@ -397,9 +392,8 @@ static void hook__LSSchemaCacheWrite(void* a1, id block)
 	if (!utrHideClientBlacklisted(self)) { %orig; return; }
 	g_utrHide = YES; %orig; g_utrHide = NO;
 }
-%end
 
-%end // %group UTTypeHooks
+%end
 
 %hook _LSQueryContext
 
@@ -476,16 +470,16 @@ void lsdInit(void)
 {
 	MSImageRef coreServicesImage = MSGetImageByName("/System/Library/Frameworks/CoreServices.framework/CoreServices");
 
-	// Default group: URL scheme hiding + _LSURLOverride + plugin/extension hiding.
+	// 主 %init：包含所有 ObjC hook，包括 _LSDReadClient（不再使用 %group）
 	%init(_LSGetInboxURLForBundleIdentifier = MSFindSymbol(coreServicesImage, "__LSGetInboxURLForBundleIdentifier"),
 		  _LSServer_RebuildApplicationDatabases = MSFindSymbol(coreServicesImage, "__LSServer_RebuildApplicationDatabases"),
 		  _LSCanOpenURLManager = objc_getClass("_LSCanOpenURLManager"),
 		  _LSDOpenClient = objc_getClass("_LSDOpenClient"),
 		  _LSURLOverride = objc_getClass("_LSURLOverride"),
-		  _LSQueryContext = objc_getClass("_LSQueryContext"));
+		  _LSQueryContext = objc_getClass("_LSQueryContext"),
+		  _LSDReadClient = objc_getClass("_LSDReadClient"));
 
-	// UTType hiding group (CoreServices C functions).
-	// 注意：C 函数 hook 不再放在 %group 内，直接用 MSHookFunction 安装。
+	// UTType hiding 的 C 函数 hook：直接用 MSHookFunction 安装
 	void* _LSSchemaCacheRead = MSFindSymbol(coreServicesImage, "__LSSchemaCacheRead");
 	void* _LSSchemaCacheWrite = MSFindSymbol(coreServicesImage, "__LSSchemaCacheWrite");
 	void* _UTEnumerateTypesForTag = MSFindSymbol(coreServicesImage, "__UTEnumerateTypesForTag");
@@ -510,12 +504,5 @@ void lsdInit(void)
 	}
 	if (_UTTypeSearchConformsToTypesWithBlock) {
 		MSHookFunction(_UTTypeSearchConformsToTypesWithBlock, (void*)hook__UTTypeSearchConformsToTypesWithBlock, (void**)&orig__UTTypeSearchConformsToTypesWithBlock);
-	}
-
-	// UTTypeHooks group：只包含 _LSDReadClient 的 ObjC 方法 hook
-	Class _LSDReadClientClass = objc_getClass("_LSDReadClient");
-	if (_LSDReadClientClass) {
-		%init(UTTypeHooks,
-			  _LSDReadClient = _LSDReadClientClass);
 	}
 }
