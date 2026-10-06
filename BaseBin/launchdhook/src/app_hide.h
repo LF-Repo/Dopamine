@@ -33,6 +33,11 @@ void app_hide_watch_exit(pid_t pid);
 // so the jailbreak app can run. No re-hide on exit (accepted limitation).
 bool app_hide_is_currently_hidden(void);
 bool app_hide_is_jailbreak_app(const char *path);
+
+// Settings.app (stock /Applications/Preferences.app) behaves like a jailbreak
+// app: it lists every tweak's settings from /var/jb/Library/PreferenceBundles,
+// so it must resurrect the jailbreak too.
+bool app_hide_is_settings_app(const char *path);
 void app_hide_resurrect_for_jb_app(void);
 
 // Track a jailbreak app's pid after resurrection; it gets killed when the

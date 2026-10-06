@@ -451,6 +451,40 @@ bool app_hide_is_jailbreak_app(const char *path)
 	return false;
 }
 
+// Read an app bundle's CFBundleIdentifier from its launch path (.../X.app/X).
+static NSString *app_hide_bundle_id(const char *path)
+{
+	if (!path) return nil;
+	NSString *result = nil;
+	@autoreleasepool {
+		NSString *p = [NSString stringWithUTF8String:path];
+		NSRange r = [p rangeOfString:@".app/"];
+		if (r.location != NSNotFound) {
+			NSString *appPath = [p substringToIndex:r.location + 4];
+			NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:
+			                      [appPath stringByAppendingPathComponent:@"Info.plist"]];
+			id bundleID = info[@"CFBundleIdentifier"];
+			if ([bundleID isKindOfClass:[NSString class]]) result = [bundleID copy];
+		}
+	}
+	return result;
+}
+
+// The Settings app (Preferences.app, stock path /Applications/Preferences.app)
+// is effectively a jailbreak app: it is where every tweak's settings bundle is
+// listed from (/var/jb/Library/PreferenceBundles + PreferencePanes). While the
+// jailbreak is globally hidden it shows NO tweak settings at all, so it has to
+// resurrect the jailbreak exactly like Sileo does.
+bool app_hide_is_settings_app(const char *path)
+{
+	if (!path) return false;
+	if (!strstr(path, ".app/")) return false;
+	// Path-based fallback, in case Info.plist can't be read.
+	if (strstr(path, "/Applications/Preferences.app/") != NULL) return true;
+	static NSString *settingsBundleID = @"com.apple.Preferences";
+	return [app_hide_bundle_id(path) isEqualToString:settingsBundleID];
+}
+
 void app_hide_resurrect_for_jb_app(void)
 {
 	// "Jailbreak app resurrection": a jailbreak app was spawned while the
