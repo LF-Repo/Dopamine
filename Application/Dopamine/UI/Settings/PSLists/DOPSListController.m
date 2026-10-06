@@ -27,7 +27,7 @@
     DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
 
     vc.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-    vc.view.backgroundColor = [DOThemeManager settingsBackgroundColor];
+    vc.view.backgroundColor = theme.windowColor;
     vc.view.layer.cornerRadius = 16;
     vc.view.layer.masksToBounds = YES;
     vc.view.layer.cornerCurve = kCACornerCurveContinuous;

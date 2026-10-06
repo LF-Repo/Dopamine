@@ -20,6 +20,7 @@ NS_ASSUME_NONNULL_BEGIN
     NSArray <DOExploit *>*_availablePACBypasses;
     NSArray <DOExploit *>*_availablePPLBypasses;
     NSString *_lastKnownTheme;
+    NSString *_lastKnownMaterial;
 
     PSSpecifier *_customBootlogoEnabledSpecifier;
     PSSpecifier *_customBootlogoSpecifier;
