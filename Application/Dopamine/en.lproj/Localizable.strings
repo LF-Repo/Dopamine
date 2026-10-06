@@ -70,6 +70,14 @@
 "App_Hide_Footer" = "When enabled, the selected app will not see /var/jb or any jailbreak-related files. Changes take effect after restarting the app.";
 "App_Hide_Search_Placeholder" = "Search apps";
 "App_Hide_Search_No_Results" = "No matching apps.";
+"Background_Material" = "Background Material";
+"Material_Original" = "Original";
+"Material_Regular" = "Regular";
+"Material_Thick" = "Thick";
+"Material_Clear" = "Clear";
+"Material_Chrome" = "Chrome";
+"Material_Dark" = "Dark";
+"Material_Light" = "Light";
 "App_Hide_NoInject_Tag" = "[NoInject]";
 "Reboot Device" = "Reboot Device";
 "Show_Uptime" = "Show System Uptime";

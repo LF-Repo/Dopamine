@@ -417,8 +417,18 @@ extern char **environ;
 // libraries stay moved away, so the processes that get restarted cannot find the
 // jailbreak they expect. Force the jailbreak back to a fully visible state
 // first. This is a no-op when nothing is hidden.
+//
+// IMPORTANT: this must never run while the jailbreak is still being set up.
+// `finalize` calls rebootUserspace at the very end of a jailbreak run, and
+// DOBootstrapper deletes then re-creates the /var/jb symlink during bootstrap, so
+// a bare "/var/jb is missing" probe can fire right in the middle of that. Calling
+// setJailbreakHidden:NO there is fatal: it spawns jbctl synchronously (with
+// --waitfor) before the jbserver is up, which hangs and ends in a watchdog reboot.
+// The jailbroken flag is the guard: it only turns on once the jailbreak is really
+// established, so before that we never touch the hidden state.
 - (void)ensureJailbreakVisibleBeforeRestart
 {
+    if (!self.isJailbroken) return;
     if (![self isJailbreakHidden]) return;
 
     NSLog(@"[HideJailbreak] Jailbreak is hidden, unhiding before restart");
@@ -434,6 +444,16 @@ extern char **environ;
 - (void)rebootUserspace
 {
     [self ensureJailbreakVisibleBeforeRestart];
+    [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
+}
+
+// Used by the jailbreak flow itself (right after a successful bootstrap). The
+// jailbreak was just created, so it is visible by definition and no unhide is
+// needed - and probing the hidden state here is exactly what used to hang the
+// initialization, because the bootstrapper is still moving the /var/jb symlink
+// around at this point.
+- (void)rebootUserspaceAfterJailbreak
+{
     [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
 }
 

@@ -33,6 +33,7 @@
         button.layer.cornerCurve = kCACornerCurveContinuous;
         button.layer.borderWidth = 1;
         button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.15].CGColor;
+        button.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
 
         // The rounded corners were invisible because the button had no fill of its
         // own: against the PSTableCell group background only the hairline border

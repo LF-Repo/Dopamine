@@ -45,6 +45,7 @@
 - (void)viewWillAppear:(BOOL)arg1
 {
     [super viewWillAppear:arg1];
+    [self applyBackgroundMaterial];
     if (_lastKnownTheme != [[DOThemeManager sharedInstance] enabledTheme].key)
     {
         [DOSceneDelegate relaunch];
@@ -60,6 +61,29 @@
             });
         }
     }
+}
+
+// The material is a navigation-bar appearance, so re-apply it whenever the page
+// comes back on screen (picking one from the link list does not reload by itself).
+- (void)applyBackgroundMaterial
+{
+    UINavigationController *nav = self.navigationController;
+    if (!nav.navigationBar) return;
+
+    UINavigationBarAppearance *appearance = [DOThemeManager materialAppearanceForKey:[DOThemeManager enabledMaterialKey]];
+    if (!appearance) {
+        // "Original": hand the stock Dopamine look back.
+        nav.navigationBar.standardAppearance = nil;
+        nav.navigationBar.scrollEdgeAppearance = nil;
+        nav.navigationBar.compactAppearance = nil;
+        [nav.navigationBar setNeedsLayout];
+        return;
+    }
+
+    nav.navigationBar.standardAppearance = appearance;
+    nav.navigationBar.scrollEdgeAppearance = appearance;
+    nav.navigationBar.compactAppearance = appearance;
+    [nav.navigationBar setNeedsLayout];
 }
 
 - (NSArray *)availableKernelExploitIdentifiers
@@ -130,6 +154,24 @@
 - (NSArray *)themeNames
 {
     return [[DOThemeManager sharedInstance] getAvailableThemeNames];
+}
+
+- (NSArray *)materialIdentifiers
+{
+    return [DOThemeManager getAvailableMaterialKeys];
+}
+
+- (NSArray *)materialNames
+{
+    NSArray *names = [DOThemeManager getAvailableMaterialNames];
+    NSMutableArray *localized = [NSMutableArray arrayWithCapacity:names.count];
+    for (NSString *name in names) {
+        NSString *key = [@"Material_" stringByAppendingString:name];
+        NSString *value = DOLocalizedString(key);
+        // DOLocalizedString returns the key itself when there is no translation.
+        [localized addObject:[value isEqualToString:key] ? name : value];
+    }
+    return localized;
 }
 
 - (NSArray *)jetsamOptionNumbers
@@ -416,6 +458,15 @@
         [themeSpecifier setProperty:@"themeIdentifiers" forKey:@"valuesDataSource"];
         [themeSpecifier setProperty:@"themeNames" forKey:@"titlesDataSource"];
         [specifiers addObject:themeSpecifier];
+
+        PSSpecifier *materialSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Background_Material") target:self set:defSetter get:defGetter detail:nil cell:PSLinkListCell edit:nil];
+        materialSpecifier.detailControllerClass = [DOPSListItemsController class];
+        [materialSpecifier setProperty:@YES forKey:@"enabled"];
+        [materialSpecifier setProperty:@"backgroundMaterial" forKey:@"key"];
+        [materialSpecifier setProperty:@"original" forKey:@"default"];
+        [materialSpecifier setProperty:@"materialIdentifiers" forKey:@"valuesDataSource"];
+        [materialSpecifier setProperty:@"materialNames" forKey:@"titlesDataSource"];
+        [specifiers addObject:materialSpecifier];
 
         PSSpecifier *showUptimeSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Show_Uptime") target:self set:defSetter get:defGetter detail:nil cell:PSSwitchCell edit:nil];
         [showUptimeSpecifier setProperty:@YES forKey:@"enabled"];
@@ -1049,9 +1100,12 @@
         self.tableView.sectionHeaderTopPadding = 12;
     }
 
-    UIColor *bg = [DOThemeManager menuColorWithAlpha:0.55];
-    self.view.backgroundColor = bg;
-    self.tableView.backgroundColor = bg;
+    // Leave the table background alone: an opaque backgroundColor here paints over
+    // the grouped-corner masking, so the InsetGrouped cards lose their rounded
+    // outline. The plain system material already matches the theme (it is what the
+    // rest of the settings pages use).
+    self.view.backgroundColor = [UIColor clearColor];
+    self.tableView.backgroundColor = [UIColor clearColor];
 
     self.allApps = [NSMutableArray array];
     self.filteredApps = [NSMutableArray array];
