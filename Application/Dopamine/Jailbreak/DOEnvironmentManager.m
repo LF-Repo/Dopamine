@@ -412,26 +412,28 @@ extern char **environ;
     return exec_cmd_root(selfPath, "trollstore", action.UTF8String, NULL);
 }
 
-- (void)respring
-{
-    [self spawnJbctlAsRootWithArgs:@[@"respring"]];
-}
-
-// Tearing down the userspace while the jailbreak is hidden hangs the reboot:
-// /var/jb is gone and the audit-hidden libraries stay moved away, so launchd
-// cannot complete the shutdown. Force the jailbreak back to a fully visible
-// state first. This is a no-op when nothing is hidden.
-- (void)ensureJailbreakVisibleBeforeUserspaceReboot
+// Restarting SpringBoard or tearing down the userspace while the jailbreak is
+// hidden hangs / comes back broken: /var/jb is gone and the audit-hidden
+// libraries stay moved away, so the processes that get restarted cannot find the
+// jailbreak they expect. Force the jailbreak back to a fully visible state
+// first. This is a no-op when nothing is hidden.
+- (void)ensureJailbreakVisibleBeforeRestart
 {
     if (![self isJailbreakHidden]) return;
 
-    NSLog(@"[HideJailbreak] Jailbreak is hidden, unhiding before userspace reboot");
+    NSLog(@"[HideJailbreak] Jailbreak is hidden, unhiding before restart");
     [self setJailbreakHidden:NO];
+}
+
+- (void)respring
+{
+    [self ensureJailbreakVisibleBeforeRestart];
+    [self spawnJbctlAsRootWithArgs:@[@"respring"]];
 }
 
 - (void)rebootUserspace
 {
-    [self ensureJailbreakVisibleBeforeUserspaceReboot];
+    [self ensureJailbreakVisibleBeforeRestart];
     [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
 }
 
