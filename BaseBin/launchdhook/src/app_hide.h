@@ -50,4 +50,15 @@ void app_hide_track_jailbreak_app(pid_t pid);
 // background refreshes/pushes from leaving the jailbreak hidden.
 void app_hide_check_role_after_spawn(pid_t pid);
 
+// Force the jailbreak back into a fully visible state, regardless of the
+// no-inject refcount. Used right before a userspace reboot / logout: with the
+// jailbreak still hidden, /var/jb is missing and the audit quarantine is in
+// place, which makes tearing the userspace down hang. Idempotent, and a no-op
+// when nothing is hidden.
+void app_hide_force_restore(void);
+
+// Internal: same as above but skips the cheap "is anything actually hidden"
+// pre-check. Called by the launchd userspace-reboot hook.
+void app_hide_force_restore_before_userspace_reboot(void);
+
 #endif // APP_HIDE_H
