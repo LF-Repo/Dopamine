@@ -25,6 +25,7 @@
 #include <litehook.h>
 #include <unistd.h>
 #include <limits.h>
+#include <stdlib.h>
 #include <sys/mount.h>
 
 #include <libjailbreak/libjailbreak.h>
@@ -510,8 +511,74 @@ void app_hide_track_jailbreak_app(pid_t pid)
 	pthread_mutex_unlock(&gJailbreakAppLock);
 }
 
+// Kill the "resurrected" apps by scanning the process table, so this does not
+// depend on transient pid bookkeeping (pids get reused, and the tracked list is
+// cleared on every re-hide, which used to leave a still-running app behind).
+//
+// Two things must die before /var/jb disappears:
+//   1. jailbreak apps (Sileo, Filza, ...): they keep writing into the real
+//      jbroot once /var/jb is gone, which is a real corruption risk;
+//   2. Settings.app: it caches the (empty) tweak list it read while the jailbreak
+//      was hidden, so without a kill it would come back with no tweak settings.
+//
+// Matching is by real executable path via proc_pidpath(): jailbreak apps live
+// under <jbroot>/Applications/*.app, Settings at /Applications/Preferences.app.
+// Helper processes (PreferencesAgent, ...) live inside a .app but are not the app
+// executable itself — however killing them with the app is harmless and matches
+// what the user asked for, so anything whose path is inside a matching .app goes.
+static BOOL app_hide_path_is_resurrected_app(const char *path)
+{
+	if (!path) return NO;
+	if (app_hide_is_settings_app(path)) return YES;
+	if (!strstr(path, ".app/")) return NO;
+
+	// Any app running from the jailbreak root's Applications folder.
+	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
+	if (jbroot && jbroot[0]) {
+		size_t len = strlen(jbroot);
+		if (len > 0 && strncmp(path, jbroot, len) == 0 && strstr(path, "/Applications/")) {
+			return YES;
+		}
+	}
+	if (strncmp(path, "/var/jb/", 8) == 0 && strstr(path, "/Applications/")) {
+		return YES;
+	}
+	return NO;
+}
+
+static void app_hide_kill_resurrected_apps(void)
+{
+	int byteCount = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
+	if (byteCount <= 0) return;
+
+	pid_t *pids = malloc((size_t)byteCount);
+	if (!pids) return;
+	byteCount = proc_listpids(PROC_ALL_PIDS, 0, pids, byteCount);
+	if (byteCount <= 0) {
+		free(pids);
+		return;
+	}
+
+	int n = byteCount / (int)sizeof(pid_t);
+	for (int i = 0; i < n; i++) {
+		pid_t pid = pids[i];
+		if (pid <= 1) continue; // never touch launchd
+
+		char path[4 * MAXPATHLEN] = {0};
+		if (proc_pidpath(pid, path, sizeof(path)) <= 0) continue;
+		if (!app_hide_path_is_resurrected_app(path)) continue;
+
+		if (kill(pid, SIGKILL) == 0) {
+			app_hide_log([NSString stringWithFormat:@"kill resurrected app pid %d (%s)", pid, path]);
+		}
+	}
+	free(pids);
+}
+
 static void app_hide_kill_jailbreak_apps(void)
 {
+	app_hide_kill_resurrected_apps();
+
 	pthread_mutex_lock(&gJailbreakAppLock);
 	NSArray *pids = [gJailbreakAppPids allObjects];
 	[gJailbreakAppPids removeAllObjects];
