@@ -306,15 +306,36 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 	// no-inject app is running) and a jailbreak app (under /var/jb/) is being
 	// spawned, restore the jailbreak, spawn it directly, and track its pid so it
 	// can be killed when the jailbreak is re-hidden. No re-hide on exit.
-	if (path && app_hide_is_currently_hidden() && app_hide_is_jailbreak_app(path)) {
-		app_hide_resurrect_for_jb_app();
-		pid_t jbPid = 0;
-		int r = posix_spawn_hook_shared(&jbPid, path, desc, argv, envp, __posix_spawn_orig_wrapper, systemwide_trust_file_by_path, platform_set_process_debugged, jbsetting(jetsamMultiplier));
-		if (pid) *pid = jbPid;
-		if (r == 0) {
-			app_hide_track_jailbreak_app(jbPid);
+	//
+	// Settings.app (stock /Applications/Preferences.app) counts as a jailbreak
+	// app too: it lists every tweak's settings from /var/jb/Library/PreferenceBundles,
+	// so with the jailbreak hidden it would show no tweak settings at all.
+	if (path && app_hide_is_currently_hidden()) {
+		bool isJbApp = app_hide_is_jailbreak_app(path);
+		bool isSettings = false;
+		if (!isJbApp) {
+			// Settings is only resurrected for a foreground launch, so a background
+			// prewarm can't bring the jailbreak back unexpectedly.
+			int settingsRole = -1;
+			if (desc && desc->attrp) {
+				memcpy(&settingsRole, (char *)desc->attrp + 0x58, sizeof(settingsRole));
+			}
+			if (settingsRole < 3) {
+				isSettings = app_hide_is_settings_app(path);
+			}
 		}
-		return r;
+		if (isJbApp || isSettings) {
+			app_hide_resurrect_for_jb_app();
+			pid_t jbPid = 0;
+			int r = posix_spawn_hook_shared(&jbPid, path, desc, argv, envp, __posix_spawn_orig_wrapper, systemwide_trust_file_by_path, platform_set_process_debugged, jbsetting(jetsamMultiplier));
+			if (pid) *pid = jbPid;
+			// Only jailbreak apps get killed on re-hide (they keep writing into the
+			// real jbroot); Settings just reads /var/jb, so leaving it running is safe.
+			if (r == 0 && isJbApp) {
+				app_hide_track_jailbreak_app(jbPid);
+			}
+			return r;
+		}
 	}
 
 	// Check whether this App is on the injection block list
