@@ -1063,7 +1063,7 @@
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
-    self.searchController.searchBar.placeholder = DOLocalizedString(@"App_Hide_Search_Placeholder");
+    self.searchController.searchBar.placeholder = @"Search apps";
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.definesPresentationContext = YES;
@@ -1198,21 +1198,17 @@
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
-    return DOLocalizedString(@"App_Hide_Header");
+    return @"Select apps to hide jailbreak environment";
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
+{
+    return @"When enabled, the selected app will not see /var/jb or any jailbreak-related files. Changes take effect after restarting the app.";
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
     return self.filteredApps.count;
-}
-
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
-{
-    // When a search yields nothing, say so instead of showing a bare empty list.
-    if (self.filteredApps.count == 0 && self.searchController.searchBar.text.length > 0) {
-        return DOLocalizedString(@"App_Hide_Search_No_Results");
-    }
-    return DOLocalizedString(@"App_Hide_Footer");
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -1231,7 +1227,7 @@
     NSString *bundleID = appInfo[@"bundleID"];
 
     BOOL noInject = [appInfo[@"noInject"] boolValue];
-    cell.textLabel.text = noInject ? [NSString stringWithFormat:@"%@ %@", appInfo[@"name"], DOLocalizedString(@"App_Hide_NoInject_Tag")] : appInfo[@"name"];
+    cell.textLabel.text = noInject ? [NSString stringWithFormat:@"%@ [NoInject]", appInfo[@"name"]] : appInfo[@"name"];
     cell.detailTextLabel.text = bundleID;
 
     UIImage *icon = [self iconForBundleID:bundleID];
@@ -1243,9 +1239,7 @@
 
     UISwitch *toggle = [[UISwitch alloc] init];
     toggle.on = [appInfo[@"hidden"] boolValue];
-    // Tag by index into the *unfiltered* list: after a search the row is a
-    // filtered index, and toggleChanged: looks the app up in allApps.
-    toggle.tag = [self.allApps indexOfObject:appInfo];
+    toggle.tag = indexPath.row;
     [toggle addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
     cell.accessoryView = toggle;
 
@@ -1254,8 +1248,7 @@
 
 - (void)toggleChanged:(UISwitch *)sender
 {
-    if (sender.tag < 0 || sender.tag >= (NSInteger)self.allApps.count) return;
-    NSDictionary *appInfo = self.allApps[sender.tag];
+    NSDictionary *appInfo = self.filteredApps[sender.tag];
     NSString *bundleID = appInfo[@"bundleID"];
     BOOL hidden = sender.on;
 
