@@ -1116,9 +1116,10 @@
     }
     self.searchBar = searchBar;
 
-    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.tableView.bounds.size.width, 56)];
-    CGFloat searchWidth = MIN(340, header.bounds.size.width - 32);
-    searchBar.frame = CGRectMake((header.bounds.size.width - searchWidth) / 2, 4, searchWidth, 44);
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.tableView.bounds.size.width, 60)];
+    CGFloat screenWidth = CGRectGetWidth([UIScreen mainScreen].bounds);
+    CGFloat searchWidth = MIN(screenWidth - 24, 400);
+    searchBar.frame = CGRectMake((self.tableView.bounds.size.width - searchWidth) / 2, 6, searchWidth, 48);
     searchBar.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
     [header addSubview:searchBar];
     self.tableView.tableHeaderView = header;
