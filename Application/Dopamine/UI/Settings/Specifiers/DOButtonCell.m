@@ -34,6 +34,12 @@
         button.layer.borderWidth = 1;
         button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.15].CGColor;
 
+        // The rounded corners were invisible because the button had no fill of its
+        // own: against the PSTableCell group background only the hairline border
+        // showed, so the row looked square. Give the button a subtly lighter fill
+        // than the group background so the rounding reads clearly.
+        button.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+
         [self.contentView addSubview:button];
 
         [NSLayoutConstraint activateConstraints:@[
