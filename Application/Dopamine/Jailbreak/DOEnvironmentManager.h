@@ -92,9 +92,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSString *)appHideRulesPath;
 - (NSDictionary *)appHideRules;
 - (BOOL)isEnvironmentHiddenForBundleID:(NSString *)bundleID;
-- (void)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID;
+- (BOOL)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID;
 - (BOOL)isEnvironmentNoInjectForBundleID:(NSString *)bundleID;
-- (void)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID;
+- (BOOL)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID;
 - (NSArray<NSString *> *)allEnvironmentHiddenBundleIDs;
 
 - (void)mountDictionary:(NSDictionary *)dictionary writeToFile:(NSString *)path;

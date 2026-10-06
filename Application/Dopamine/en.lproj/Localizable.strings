@@ -70,6 +70,8 @@
 "App_Hide_Footer" = "When enabled, the selected app will not see /var/jb or any jailbreak-related files. Changes take effect after restarting the app.";
 "App_Hide_Search_Placeholder" = "Search apps";
 "App_Hide_Search_No_Results" = "No matching apps.";
+"App_Hide_Save_Failed_Title" = "Could Not Save";
+"App_Hide_Save_Failed_Message" = "Dopamine could not write the hide rules. This folder may be protected by iOS. Check that Full Disk Access is granted (Settings -> Privacy & Security -> Full Disk Access).";
 "Button_Material" = "Button Material";
 "Material_Original" = "Original";
 "Material_Custom" = "Custom";

@@ -1334,18 +1334,37 @@
     NSString *bundleID = appInfo[@"bundleID"];
     BOOL hidden = sender.on;
 
-    [[DOEnvironmentManager sharedManager] setEnvironmentHidden:hidden forBundleID:bundleID];
+    BOOL ok = [[DOEnvironmentManager sharedManager] setEnvironmentHidden:hidden forBundleID:bundleID];
 
     for (NSMutableDictionary *dict in self.allApps) {
         if ([dict[@"bundleID"] isEqualToString:bundleID]) {
-            dict[@"hidden"] = @(hidden);
-            if (!hidden) dict[@"noInject"] = @NO;
+            dict[@"hidden"] = @(ok ? hidden : !hidden);
+            if (ok && !hidden) dict[@"noInject"] = @NO;
             break;
         }
     }
 
+    if (!ok) {
+        // Persisting failed (permissions or a read-only/managed directory), so the
+        // rule did not stick. Put the switch back and say so instead of letting it
+        // look like the app was hidden when it was not.
+        [sender setOn:!hidden animated:YES];
+        [self presentWriteFailureAlert];
+        return;
+    }
+
     UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     [fb impactOccurred];
+}
+
+- (void)presentWriteFailureAlert
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"App_Hide_Save_Failed_Title")
+                                                                     message:DOLocalizedString(@"App_Hide_Save_Failed_Message")
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+    // Use the system's own cancel title rather than a new localisable string.
+    [alert addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 // Long-press a (hidden) app to toggle "无注入" (RootHide-style no-injection) mode.
@@ -1361,7 +1380,11 @@
     NSString *bundleID = appInfo[@"bundleID"];
 
     BOOL noInject = ![appInfo[@"noInject"] boolValue];
-    [[DOEnvironmentManager sharedManager] setEnvironmentNoInject:noInject forBundleID:bundleID];
+    BOOL ok = [[DOEnvironmentManager sharedManager] setEnvironmentNoInject:noInject forBundleID:bundleID];
+    if (!ok) {
+        [self presentWriteFailureAlert];
+        return;
+    }
 
     for (NSMutableDictionary *dict in self.allApps) {
         if ([dict[@"bundleID"] isEqualToString:bundleID]) {
