@@ -434,6 +434,25 @@ bool app_hide_is_currently_hidden(void)
 	return hidden;
 }
 
+void app_hide_force_restore(void)
+{
+	// Drop the refcount so a later no-inject app starts from a clean state and
+	// the running ones cannot restore-then-rehide in a loop after the reboot.
+	pthread_mutex_lock(&gNoInjectLock);
+	int refcount = gNoInjectRefCount;
+	gNoInjectRefCount = 0;
+	bool wasHidden = gNoInjectActive;
+	gNoInjectActive = false;
+	pthread_mutex_unlock(&gNoInjectLock);
+
+	if (!wasHidden) {
+		app_hide_log(@"force_restore: not hidden, nothing to do");
+		return;
+	}
+	app_hide_log([NSString stringWithFormat:@"force_restore: restoring jailbreak (refcount was %d)", refcount]);
+	app_hide_do_restore();
+}
+
 bool app_hide_is_jailbreak_app(const char *path)
 {
 	// A "jailbreak app" is an app bundle (contains ".app/") installed inside
