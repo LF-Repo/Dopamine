@@ -329,9 +329,12 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			pid_t jbPid = 0;
 			int r = posix_spawn_hook_shared(&jbPid, path, desc, argv, envp, __posix_spawn_orig_wrapper, systemwide_trust_file_by_path, platform_set_process_debugged, jbsetting(jetsamMultiplier));
 			if (pid) *pid = jbPid;
-			// Only jailbreak apps get killed on re-hide (they keep writing into the
-			// real jbroot); Settings just reads /var/jb, so leaving it running is safe.
-			if (r == 0 && isJbApp) {
+			// Track it so it gets killed the next time the jailbreak is hidden:
+			//   - jailbreak apps keep writing into the real jbroot after /var/jb is
+			//     removed, which is a real corruption risk;
+			//   - Settings caches the (empty) tweak list it read while hidden, so
+			//     without a kill it would come back with no tweak settings.
+			if (r == 0) {
 				app_hide_track_jailbreak_app(jbPid);
 			}
 			return r;
