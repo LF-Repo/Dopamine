@@ -86,4 +86,70 @@
 }
 
 
+#pragma mark - Background material
+
+// key -> (display name, UIBlurEffect.Style or nil for a plain vibrancy look).
+// The first entry is the stock Dopamine look and the default.
++ (NSDictionary<NSString *, id> *)materialTable
+{
+    static NSDictionary *table = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        table = @{
+            @"original":  @{ @"name": @"Original",     @"style": @(UIBlurEffectStyleSystemUltraThinMaterialDark) },
+            @"light":     @{ @"name": @"Light",        @"style": @(UIBlurEffectStyleSystemUltraThinMaterialLight) },
+            @"dark":      @{ @"name": @"Dark",         @"style": @(UIBlurEffectStyleSystemUltraThinMaterialDark) },
+            @"thick":     @{ @"name": @"Thick",        @"style": @(UIBlurEffectStyleSystemThickMaterialDark) },
+            @"regular":   @{ @"name": @"Regular",      @"style": @(UIBlurEffectStyleSystemMaterialDark) },
+            @"chrome":    @{ @"name": @"Chrome",       @"style": @(UIBlurEffectStyleSystemChromeMaterialDark) },
+            @"clear":     @{ @"name": @"Clear",        @"style": @(UIBlurEffectStyleSystemThinMaterialDark) },
+        };
+    });
+    return table;
+}
+
++ (NSArray*)getAvailableMaterialKeys
+{
+    // Keep a stable, human-friendly order rather than the dictionary's.
+    return @[ @"original", @"regular", @"thick", @"clear", @"chrome", @"dark", @"light" ];
+}
+
++ (NSArray*)getAvailableMaterialNames
+{
+    NSDictionary *table = [self materialTable];
+    NSMutableArray *names = [NSMutableArray array];
+    for (NSString *key in [self getAvailableMaterialKeys]) {
+        [names addObject:table[key][@"name"] ?: key];
+    }
+    return names;
+}
+
++ (NSString*)enabledMaterialKey
+{
+    id value = [[DOPreferenceManager sharedManager] preferenceValueForKey:@"backgroundMaterial"];
+    NSArray *keys = [self getAvailableMaterialKeys];
+    // Anything unset or unrecognised keeps the original look.
+    if ([value isKindOfClass:[NSString class]] && [keys containsObject:value]) {
+        return value;
+    }
+    return @"original";
+}
+
++ (id)materialAppearanceForKey:(NSString*)key
+{
+    if (!key) return nil;
+
+    NSDictionary *entry = [self materialTable][key];
+    if (!entry) return nil;
+
+    UIBlurEffect *effect = [UIBlurEffect effectWithStyle:[entry[@"style"] integerValue]];
+
+    UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
+    [appearance configureWithTransparentBackground];
+    appearance.backgroundEffect = effect;
+    // Keep the material from looking washed out behind light content.
+    appearance.backgroundColor = [UIColor colorWithWhite:0 alpha:0.12];
+    return appearance;
+}
+
 @end
