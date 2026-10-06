@@ -66,11 +66,6 @@
 "Disable_Crash_Reporter" = "Disable Crash Reporter";
 "Block App Injection" = "Block App Injection";
 "Hide for App" = "Hide for App";
-"App_Hide_Header" = "Select apps to hide jailbreak environment";
-"App_Hide_Footer" = "When enabled, the selected app will not see /var/jb or any jailbreak-related files. Changes take effect after restarting the app.";
-"App_Hide_Search_Placeholder" = "Search apps";
-"App_Hide_Search_No_Results" = "No matching apps.";
-"App_Hide_NoInject_Tag" = "[NoInject]";
 "Reboot Device" = "Reboot Device";
 "Show_Uptime" = "Show System Uptime";
 "Show_Version" = "Show Dopamine Version";

@@ -64,11 +64,6 @@
 "Disable_Crash_Reporter" = "禁用崩溃报告";
 "Block App Injection" = "阻止 App 注入";
 "Hide for App" = "按 App 隐藏";
-"App_Hide_Header" = "选择要对哪些 App 隐藏越狱环境";
-"App_Hide_Footer" = "启用后，所选 App 将看不到 /var/jb 及任何越狱相关文件。重启该 App 后生效。";
-"App_Hide_Search_Placeholder" = "搜索 App";
-"App_Hide_Search_No_Results" = "没有匹配的 App。";
-"App_Hide_NoInject_Tag" = "[无注入]";
 "Section_Boot_Logo" = "启动画面";
 "Reboot Device" = "重启设备";
 "Show_Uptime" = "显示系统运行时间";
