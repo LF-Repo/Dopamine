@@ -39,13 +39,20 @@
 - (void)viewDidLoad
 {
     _lastKnownTheme = [[DOThemeManager sharedInstance] enabledTheme].key;
+    _lastKnownMaterial = [DOThemeManager enabledMaterialKey];
     [super viewDidLoad];
 }
 
 - (void)viewWillAppear:(BOOL)arg1
 {
     [super viewWillAppear:arg1];
-    [self applyBackgroundMaterial];
+    if (_lastKnownMaterial != [DOThemeManager enabledMaterialKey])
+    {
+        // The button fill is applied when DOButtonCell is created, so the rows
+        // have to be rebuilt for a material change to become visible.
+        _lastKnownMaterial = [DOThemeManager enabledMaterialKey];
+        [self reloadSpecifiers];
+    }
     if (_lastKnownTheme != [[DOThemeManager sharedInstance] enabledTheme].key)
     {
         [DOSceneDelegate relaunch];
@@ -61,15 +68,6 @@
             });
         }
     }
-}
-
-// The background colour comes from DOPSListController.setupViewControllerStyle,
-// which runs once in viewDidLoad. Re-apply it when the material preference may
-// have changed, otherwise picking a material on the sub-page only shows up after
-// the settings list is rebuilt.
-- (void)applyBackgroundMaterial
-{
-    [DOPSListController setupViewControllerStyle:self];
 }
 
 - (NSArray *)availableKernelExploitIdentifiers
@@ -445,10 +443,10 @@
         [themeSpecifier setProperty:@"themeNames" forKey:@"titlesDataSource"];
         [specifiers addObject:themeSpecifier];
 
-        PSSpecifier *materialSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Background_Material") target:self set:defSetter get:defGetter detail:nil cell:PSLinkListCell edit:nil];
+        PSSpecifier *materialSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Button_Material") target:self set:defSetter get:defGetter detail:nil cell:PSLinkListCell edit:nil];
         materialSpecifier.detailControllerClass = [DOPSListItemsController class];
         [materialSpecifier setProperty:@YES forKey:@"enabled"];
-        [materialSpecifier setProperty:@"backgroundMaterial" forKey:@"key"];
+        [materialSpecifier setProperty:@"buttonMaterial" forKey:@"key"];
         [materialSpecifier setProperty:@"original" forKey:@"default"];
         [materialSpecifier setProperty:@"materialIdentifiers" forKey:@"valuesDataSource"];
         [materialSpecifier setProperty:@"materialNames" forKey:@"titlesDataSource"];

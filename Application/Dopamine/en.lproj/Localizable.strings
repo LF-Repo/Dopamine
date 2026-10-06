@@ -70,7 +70,7 @@
 "App_Hide_Footer" = "When enabled, the selected app will not see /var/jb or any jailbreak-related files. Changes take effect after restarting the app.";
 "App_Hide_Search_Placeholder" = "Search apps";
 "App_Hide_Search_No_Results" = "No matching apps.";
-"Background_Material" = "Background Material";
+"Button_Material" = "Button Material";
 "Material_Original" = "Original";
 "Material_Custom" = "Custom";
 "App_Hide_NoInject_Tag" = "[NoInject]";

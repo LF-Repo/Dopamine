@@ -22,13 +22,13 @@ NS_ASSUME_NONNULL_BEGIN
 - (DOTheme*)getThemeForKey:(NSString*)key;
 - (DOTheme*)enabledTheme;
 
-// Background material for the settings pages. "Original" keeps the stock
-// Dopamine look (the theme's windowColor), "Custom" uses a lighter translucent
-// grey that reads as frosted glass. Default is Original.
+// Material for the settings-row buttons. "Original" keeps the stock Dopamine
+// look (no fill), "Custom" adds a subtle light fill that makes the rounded
+// corners read as a frosted button. Default is Original.
 + (NSArray*)getAvailableMaterialKeys;
 + (NSArray*)getAvailableMaterialNames;
 + (NSString*)enabledMaterialKey;
-+ (UIColor*)settingsBackgroundColor;
++ (nullable UIColor*)settingsButtonFillColor;
 
 @end
 

@@ -86,16 +86,14 @@
 }
 
 
-#pragma mark - Background material
+#pragma mark - Button material
 
-// The settings pages are drawn on a solid background (DOPSListController applies
-// theme.windowColor to the view and keeps every cell transparent), so the
-// "material" is just which colour sits behind them. Two choices only:
-//   original - the stock Dopamine look (the theme's own windowColor)
-//   custom   - a lighter, slightly translucent grey that reads as frosted glass
+// The settings rows are drawn as buttons (DOButtonCell). The stock Dopamine look
+// leaves them unfilled, so only the hairline border shows. "Custom" adds a subtle
+// light fill, which makes the rounded corners read as an actual frosted button.
 + (NSString*)enabledMaterialKey
 {
-    id value = [[DOPreferenceManager sharedManager] preferenceValueForKey:@"backgroundMaterial"];
+    id value = [[DOPreferenceManager sharedManager] preferenceValueForKey:@"buttonMaterial"];
     if ([value isKindOfClass:[NSString class]] && [value isEqualToString:@"custom"]) {
         return @"custom";
     }
@@ -113,17 +111,14 @@
     return @[ @"Original", @"Custom" ];
 }
 
-// Background colour for the settings pages, honouring the material choice.
-+ (UIColor*)settingsBackgroundColor
+// Fill colour for the settings-row buttons. nil means "no fill", which is the
+// stock Dopamine appearance.
++ (UIColor*)settingsButtonFillColor
 {
-    DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
     if ([[DOThemeManager enabledMaterialKey] isEqualToString:@"custom"]) {
-        // A darker, cooler tint than the stock windowColor. It must stay clearly
-        // darker than white and keep some transparency, otherwise it washes the
-        // dimmed wallpaper out completely and the page turns flat grey.
-        return [UIColor colorWithWhite:0.16 alpha:0.72];
+        return [UIColor colorWithWhite:1 alpha:0.08];
     }
-    return theme.windowColor;
+    return nil;
 }
 
 @end
