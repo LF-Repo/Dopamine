@@ -88,68 +88,41 @@
 
 #pragma mark - Background material
 
-// key -> (display name, UIBlurEffect.Style or nil for a plain vibrancy look).
-// The first entry is the stock Dopamine look and the default.
-+ (NSDictionary<NSString *, id> *)materialTable
+// The settings pages are drawn on a solid background (DOPSListController applies
+// theme.windowColor to the view and keeps every cell transparent), so the
+// "material" is just which colour sits behind them. Two choices only:
+//   original - the stock Dopamine look (the theme's own windowColor)
+//   custom   - a lighter, slightly translucent grey that reads as frosted glass
++ (NSString*)enabledMaterialKey
 {
-    static NSDictionary *table = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        table = @{
-            @"original":  @{ @"name": @"Original",     @"style": @(UIBlurEffectStyleSystemUltraThinMaterialDark) },
-            @"light":     @{ @"name": @"Light",        @"style": @(UIBlurEffectStyleSystemUltraThinMaterialLight) },
-            @"dark":      @{ @"name": @"Dark",         @"style": @(UIBlurEffectStyleSystemUltraThinMaterialDark) },
-            @"thick":     @{ @"name": @"Thick",        @"style": @(UIBlurEffectStyleSystemThickMaterialDark) },
-            @"regular":   @{ @"name": @"Regular",      @"style": @(UIBlurEffectStyleSystemMaterialDark) },
-            @"chrome":    @{ @"name": @"Chrome",       @"style": @(UIBlurEffectStyleSystemChromeMaterialDark) },
-            @"clear":     @{ @"name": @"Clear",        @"style": @(UIBlurEffectStyleSystemThinMaterialDark) },
-        };
-    });
-    return table;
+    id value = [[DOPreferenceManager sharedManager] preferenceValueForKey:@"backgroundMaterial"];
+    if ([value isKindOfClass:[NSString class]] && [value isEqualToString:@"custom"]) {
+        return @"custom";
+    }
+    // Anything unset or unrecognised keeps the stock Dopamine look.
+    return @"original";
 }
 
 + (NSArray*)getAvailableMaterialKeys
 {
-    // Keep a stable, human-friendly order rather than the dictionary's.
-    return @[ @"original", @"regular", @"thick", @"clear", @"chrome", @"dark", @"light" ];
+    return @[ @"original", @"custom" ];
 }
 
 + (NSArray*)getAvailableMaterialNames
 {
-    NSDictionary *table = [self materialTable];
-    NSMutableArray *names = [NSMutableArray array];
-    for (NSString *key in [self getAvailableMaterialKeys]) {
-        [names addObject:table[key][@"name"] ?: key];
-    }
-    return names;
+    return @[ @"Original", @"Custom" ];
 }
 
-+ (NSString*)enabledMaterialKey
+// Background colour for the settings pages, honouring the material choice.
++ (UIColor*)settingsBackgroundColor
 {
-    id value = [[DOPreferenceManager sharedManager] preferenceValueForKey:@"backgroundMaterial"];
-    NSArray *keys = [self getAvailableMaterialKeys];
-    // Anything unset or unrecognised keeps the original look.
-    if ([value isKindOfClass:[NSString class]] && [keys containsObject:value]) {
-        return value;
+    DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
+    if ([[DOThemeManager enabledMaterialKey] isEqualToString:@"custom"]) {
+        // Matches the frosted look of the stock Dopamine buttons: a neutral grey
+        // with a little transparency so the wallpaper still shows through.
+        return [UIColor colorWithWhite:0.5 alpha:0.72];
     }
-    return @"original";
-}
-
-+ (id)materialAppearanceForKey:(NSString*)key
-{
-    if (!key) return nil;
-
-    NSDictionary *entry = [self materialTable][key];
-    if (!entry) return nil;
-
-    UIBlurEffect *effect = [UIBlurEffect effectWithStyle:[entry[@"style"] integerValue]];
-
-    UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
-    [appearance configureWithTransparentBackground];
-    appearance.backgroundEffect = effect;
-    // Keep the material from looking washed out behind light content.
-    appearance.backgroundColor = [UIColor colorWithWhite:0 alpha:0.12];
-    return appearance;
+    return theme.windowColor;
 }
 
 @end

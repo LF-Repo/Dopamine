@@ -63,27 +63,13 @@
     }
 }
 
-// The material is a navigation-bar appearance, so re-apply it whenever the page
-// comes back on screen (picking one from the link list does not reload by itself).
+// The background colour comes from DOPSListController.setupViewControllerStyle,
+// which runs once in viewDidLoad. Re-apply it when the material preference may
+// have changed, otherwise picking a material on the sub-page only shows up after
+// the settings list is rebuilt.
 - (void)applyBackgroundMaterial
 {
-    UINavigationController *nav = self.navigationController;
-    if (!nav.navigationBar) return;
-
-    UINavigationBarAppearance *appearance = [DOThemeManager materialAppearanceForKey:[DOThemeManager enabledMaterialKey]];
-    if (!appearance) {
-        // "Original": hand the stock Dopamine look back.
-        nav.navigationBar.standardAppearance = nil;
-        nav.navigationBar.scrollEdgeAppearance = nil;
-        nav.navigationBar.compactAppearance = nil;
-        [nav.navigationBar setNeedsLayout];
-        return;
-    }
-
-    nav.navigationBar.standardAppearance = appearance;
-    nav.navigationBar.scrollEdgeAppearance = appearance;
-    nav.navigationBar.compactAppearance = appearance;
-    [nav.navigationBar setNeedsLayout];
+    [DOPSListController setupViewControllerStyle:self];
 }
 
 - (NSArray *)availableKernelExploitIdentifiers
@@ -1100,11 +1086,10 @@
         self.tableView.sectionHeaderTopPadding = 12;
     }
 
-    // Leave the table background alone: an opaque backgroundColor here paints over
-    // the grouped-corner masking, so the InsetGrouped cards lose their rounded
-    // outline. The plain system material already matches the theme (it is what the
-    // rest of the settings pages use).
-    self.view.backgroundColor = [UIColor clearColor];
+    // Use the same page background as the other settings pages, but keep the table
+    // itself clear: an opaque table background paints over the InsetGrouped corner
+    // masking and the app cards lose their rounded outline.
+    [DOPSListController setupViewControllerStyle:self];
     self.tableView.backgroundColor = [UIColor clearColor];
 
     self.allApps = [NSMutableArray array];

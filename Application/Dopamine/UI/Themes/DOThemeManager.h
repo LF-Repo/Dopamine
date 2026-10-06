@@ -22,17 +22,13 @@ NS_ASSUME_NONNULL_BEGIN
 - (DOTheme*)getThemeForKey:(NSString*)key;
 - (DOTheme*)enabledTheme;
 
-// Background material used by list-style pages. "Original" keeps the stock
-// system material Dopamine ships with; the other keys let the user pick a
-// different look without touching the theme (wallpaper) itself.
+// Background material for the settings pages. "Original" keeps the stock
+// Dopamine look (the theme's windowColor), "Custom" uses a lighter translucent
+// grey that reads as frosted glass. Default is Original.
 + (NSArray*)getAvailableMaterialKeys;
 + (NSArray*)getAvailableMaterialNames;
 + (NSString*)enabledMaterialKey;
-
-// Resolve a material key to a concrete appearance for the current trait
-// collection. Returns nil for the original material, which means "leave the
-// system material alone".
-+ (nullable id)materialAppearanceForKey:(nullable NSString*)key;
++ (UIColor*)settingsBackgroundColor;
 
 @end
 

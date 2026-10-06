@@ -71,12 +71,7 @@
 "App_Hide_NoInject_Tag" = "[无注入]";
 "Background_Material" = "背景材质";
 "Material_Original" = "原版";
-"Material_Regular" = "常规";
-"Material_Thick" = "厚重";
-"Material_Clear" = "清透";
-"Material_Chrome" = "铬色";
-"Material_Dark" = "深色";
-"Material_Light" = "浅色";
+"Material_Custom" = "自定义";
 "Section_Boot_Logo" = "启动画面";
 "Reboot Device" = "重启设备";
 "Show_Uptime" = "显示系统运行时间";
