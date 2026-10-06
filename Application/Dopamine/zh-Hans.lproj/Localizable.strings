@@ -69,6 +69,8 @@
 "App_Hide_Search_Placeholder" = "搜索 App";
 "App_Hide_Search_No_Results" = "没有匹配的 App。";
 "App_Hide_NoInject_Tag" = "[无注入]";
+"App_Hide_Save_Failed_Title" = "无法保存";
+"App_Hide_Save_Failed_Message" = "无法写入越狱隐藏规则。该目录可能已被 iOS 保护。请检查是否已授予完全访问权限（设置 → 隐私与安全性 → 完全访问权限）。";
 "Button_Material" = "按钮材质";
 "Material_Original" = "原版";
 "Material_Custom" = "自定义";
