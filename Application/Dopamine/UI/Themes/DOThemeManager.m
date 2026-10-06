@@ -118,9 +118,10 @@
 {
     DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
     if ([[DOThemeManager enabledMaterialKey] isEqualToString:@"custom"]) {
-        // Matches the frosted look of the stock Dopamine buttons: a neutral grey
-        // with a little transparency so the wallpaper still shows through.
-        return [UIColor colorWithWhite:0.5 alpha:0.72];
+        // A darker, cooler tint than the stock windowColor. It must stay clearly
+        // darker than white and keep some transparency, otherwise it washes the
+        // dimmed wallpaper out completely and the page turns flat grey.
+        return [UIColor colorWithWhite:0.16 alpha:0.72];
     }
     return theme.windowColor;
 }
