@@ -26,10 +26,10 @@
 
 @end
 
-@interface DOAppHidePickerViewController : UITableViewController <UISearchResultsUpdating>
+@interface DOAppHidePickerViewController : UITableViewController <UISearchBarDelegate, UISearchResultsUpdating>
 @property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *allApps;
 @property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *filteredApps;
-@property (nonatomic, strong) UISearchController *searchController;
+@property (nonatomic, strong) UISearchBar *searchBar;
 @property (nonatomic, strong) NSCache<NSString *, UIImage *> *iconCache;
 - (UIImage *)iconForBundleID:(NSString *)bundleID;
 @end
@@ -1060,13 +1060,28 @@
 
     [self loadInstalledApps];
 
-    self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
-    self.searchController.searchResultsUpdater = self;
-    self.searchController.obscuresBackgroundDuringPresentation = NO;
-    self.searchController.searchBar.placeholder = @"Search apps";
-    self.navigationItem.searchController = self.searchController;
-    self.navigationItem.hidesSearchBarWhenScrolling = NO;
-    self.definesPresentationContext = YES;
+    // A self-drawn search bar as the table header instead of a UISearchController
+    // on navigationItem: this controller is pushed from a PSListController, which
+    // does not always carry a navigation bar, and navigationItem.searchController
+    // is silently ignored without one.
+    UISearchBar *searchBar = [[UISearchBar alloc] init];
+    searchBar.delegate = self;
+    searchBar.placeholder = DOLocalizedString(@"App_Hide_Search_Placeholder");
+    searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
+    searchBar.searchBarStyle = UISearchBarStyleMinimal;
+    if (@available(iOS 13.0, *)) {
+        searchBar.searchTextField.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.12];
+        searchBar.searchTextField.textColor = [UIColor whiteColor];
+        searchBar.searchTextField.leftView.tintColor = [[UIColor whiteColor] colorWithAlphaComponent:0.5];
+    }
+    self.searchBar = searchBar;
+
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.tableView.bounds.size.width, 56)];
+    searchBar.frame = CGRectMake(12, 4, header.bounds.size.width - 24, 44);
+    searchBar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    [header addSubview:searchBar];
+    self.tableView.tableHeaderView = header;
 
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                                                           target:self
@@ -1178,11 +1193,32 @@
 
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController
 {
-    NSString *text = searchController.searchBar.text ?: @"";
-    if (text.length == 0) {
+    [self applySearchText:searchController.searchBar.text ?: @""];
+}
+
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText
+{
+    [self applySearchText:searchText ?: @""];
+}
+
+- (void)searchBarCancelButtonClicked:(UISearchBar *)searchBar
+{
+    searchBar.text = @"";
+    [self applySearchText:@""];
+}
+
+- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar
+{
+    [searchBar resignFirstResponder];
+}
+
+- (void)applySearchText:(NSString *)text
+{
+    NSString *query = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (query.length == 0) {
         [self.filteredApps setArray:self.allApps];
     } else {
-        NSPredicate *predicate = [NSPredicate predicateWithFormat:@"name CONTAINS[cd] %@ OR bundleID CONTAINS[cd] %@", text, text];
+        NSPredicate *predicate = [NSPredicate predicateWithFormat:@"name CONTAINS[cd] %@ OR bundleID CONTAINS[cd] %@", query, query];
         NSArray *filtered = [self.allApps filteredArrayUsingPredicate:predicate];
         [self.filteredApps setArray:filtered];
     }
@@ -1198,12 +1234,16 @@
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
-    return @"Select apps to hide jailbreak environment";
+    return DOLocalizedString(@"App_Hide_Header");
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
-    return @"When enabled, the selected app will not see /var/jb or any jailbreak-related files. Changes take effect after restarting the app.";
+    // When a search yields nothing, say so instead of showing a bare empty list.
+    if (self.filteredApps.count == 0 && self.searchBar.text.length > 0) {
+        return DOLocalizedString(@"App_Hide_Search_No_Results");
+    }
+    return DOLocalizedString(@"App_Hide_Footer");
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
@@ -1239,7 +1279,9 @@
 
     UISwitch *toggle = [[UISwitch alloc] init];
     toggle.on = [appInfo[@"hidden"] boolValue];
-    toggle.tag = indexPath.row;
+    // Tag by index into the *unfiltered* list: after a search the row is a
+    // filtered index, and toggleChanged: looks the app up in allApps.
+    toggle.tag = [self.allApps indexOfObject:appInfo];
     [toggle addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
     cell.accessoryView = toggle;
 
@@ -1248,7 +1290,8 @@
 
 - (void)toggleChanged:(UISwitch *)sender
 {
-    NSDictionary *appInfo = self.filteredApps[sender.tag];
+    if (sender.tag < 0 || sender.tag >= (NSInteger)self.allApps.count) return;
+    NSDictionary *appInfo = self.allApps[sender.tag];
     NSString *bundleID = appInfo[@"bundleID"];
     BOOL hidden = sender.on;
 
