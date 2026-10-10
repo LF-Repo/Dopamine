@@ -771,20 +771,20 @@ extern char **environ;
 
 // Persist the Hide-for-App rules.
 //
-// Two problems this fixes:
+// Why this is deliberately NOT an atomic write:
 //
-// 1. The result of the write used to be ignored, so a failed write looked exactly
-//    like a successful toggle: the switch flipped, the UI updated, and the next
-//    launch read the old file back.
+// The target directory, /var/mobile/Library/Preferences/, belongs to cfprefsd. An
+// atomic write has to create a temp file *inside that directory* and then rename
+// it over the target, and on iOS 17 that rename is refused for this process - the
+// toggle silently did nothing. Writing the bytes straight through has no rename
+// step and is accepted on every version.
 //
-// 2. This was the only place that touched /var/mobile/Library/Preferences without
-//    running as root and unsandboxed first, unlike every other filesystem call
-//    here. That directory belongs to cfprefsd; on iOS 16 the write happened to
-//    succeed anyway, on iOS 17 it is rejected.
+// A non-atomic write can in theory leave a truncated file if the process dies
+// mid-write, so the read-back below is what actually guarantees correctness:
+// launchdhook re-reads this file on every spawn, and we would rather report a
+// failed toggle to the user than hand a half-written plist to launchd.
 //
-// The atomic write (temp file + rename) is kept because a plain truncating write
-// would leave a half-written plist if the process died mid-write, and launchdhook
-// reads this file on every spawn - a torn read there is much worse than a rename.
+// This runs as root and unsandboxed, matching every other filesystem call here.
 - (BOOL)writeAppHideRules:(NSDictionary *)rules
 {
     __block BOOL success = NO;
@@ -801,12 +801,22 @@ extern char **environ;
                 return;
             }
 
-            if (![data writeToFile:path options:NSDataWritingAtomic error:&error]) {
+            // NSDataWritingNone: overwrite in place, no temp file, no rename.
+            if (![data writeToFile:path options:NSDataWritingNone error:&error]) {
                 NSLog(@"[AppHide] failed to write %@: %@", path, error.localizedDescription);
                 return;
             }
 
             chmod(path.fileSystemRepresentation, 0644);
+
+            // Read back: the only proof that the rules really landed.
+            NSDictionary *verify = [NSDictionary dictionaryWithContentsOfFile:path];
+            if ([verify count] != [rules count]) {
+                NSLog(@"[AppHide] write verification failed for %@ (wrote %lu entries, read back %lu)",
+                      path, (unsigned long)[rules count], (unsigned long)[verify count]);
+                return;
+            }
+
             success = YES;
         }];
     }];

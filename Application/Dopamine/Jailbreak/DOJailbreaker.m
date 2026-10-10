@@ -384,9 +384,14 @@ void *boomerang_server(struct boomerang_info *info)
     struct boomerang_info info;
     info.serverPort = serverPort;
     info.boomerangDone = dispatch_semaphore_create(0);
+
+    // The server thread runs for the whole jailbreak attempt and keeps reading
+    // these fields, so it must not read the stack copy.
+    static struct boomerang_info sBoomerangInfo;
+    sBoomerangInfo = info;
     
     pthread_t boomerangThread;
-    pthread_create(&boomerangThread, NULL, (void *(*)(void *))boomerang_server, &info);
+    pthread_create(&boomerangThread, NULL, (void *(*)(void *))boomerang_server, &sBoomerangInfo);
     pthread_detach(boomerangThread);
 
     // Stash port to server in launchd's initPorts[2]
@@ -415,7 +420,22 @@ void *boomerang_server(struct boomerang_info *info)
     }
 
     // Wait for everything to finish
-    dispatch_semaphore_wait(info.boomerangDone, DISPATCH_TIME_FOREVER);
+    //
+    // This must never block forever. boomerang_server only signals after
+    // launchdhook has actually replied through the stashed mach port; if the
+    // injection silently did nothing (launchd already had a hook cached, or the
+    // reply was lost in the race right after opainject), xpc_pipe_receive never
+    // returns and this wait never completes. The UI then sits on "Initializing
+    // Environment" until the watchdog force-reboots the device - reported as an
+    // intermittent hang on iOS 16. Fail with a real error instead so the jailbreak
+    // attempt is reported and the user can retry.
+    dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC);
+    long timedOut = dispatch_semaphore_wait(info.boomerangDone, timeout);
+    if (timedOut != 0) {
+        NSLog(@"[Jailbreak] timed out waiting for launchdhook boomerang acknowledgement");
+        mach_port_deallocate(mach_task_self(), serverPort);
+        return [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLaunchdInjection userInfo:@{NSLocalizedDescriptionKey : @"Timed out waiting for launchdhook to acknowledge. Please try again."}];
+    }
     mach_port_deallocate(mach_task_self(), serverPort);
 
     return nil;
