@@ -1,6 +1,10 @@
 #ifndef APP_HIDE_H
 #define APP_HIDE_H
 
+// Diagnostic log shared by app_hide.m and the spawn hook. Defined here because
+// both files write to it and it needs to be a single path.
+#define APP_HIDE_LOG_PATH "/var/mobile/Documents/noinject_log.txt"
+
 // RootHide-style jailbreak-level hiding for "Hide for App" (ported from
 // RootHide's libjailbreak/src/roothider/xpc_hook.m + blacklist.cpp):
 // launchd hides jailbreak processes / jobs / coalitions from "hidden" apps'
@@ -28,6 +32,15 @@ void app_hide_global_hide(void);
 void app_hide_global_restore(void);
 void app_hide_watch_exit(pid_t pid);
 
+// Record a no-inject app that was just spawned. The hide is re-derived from this
+// set (plus liveness checks) rather than from a counter, so it cannot drift.
+void app_hide_note_pid(pid_t pid);
+
+// A no-inject app was launched but never produced a pid (spawn failure). Release
+// the pending-hide window so the jailbreak is not left hidden for an app that
+// does not exist.
+void app_hide_abort_pending_hide(void);
+
 // "Jailbreak app resurrection": while the jailbreak is hidden (a no-inject app
 // is running), spawning a jailbreak app (under /var/jb/) restores the jailbreak
 // so the jailbreak app can run. No re-hide on exit (accepted limitation).
@@ -45,9 +58,10 @@ void app_hide_resurrect_for_jb_app(void);
 // is removed).
 void app_hide_track_jailbreak_app(pid_t pid);
 
-// Schedule a delayed Mach-task-role check for a just-spawned no-inject app:
-// if the app turns out to be a background launch, undo the hide. This fixes
-// background refreshes/pushes from leaving the jailbreak hidden.
+// Schedule a delayed advisory app-state sample for a just-spawned no-inject app,
+// and make sure the hide watchdog is running. The watchdog (not this sample) owns
+// the decision to restore, because a single early app-state read cannot tell a
+// still-launching foreground app from a background launch.
 void app_hide_check_role_after_spawn(pid_t pid);
 
 #endif // APP_HIDE_H
