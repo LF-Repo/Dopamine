@@ -34,6 +34,7 @@
 #include <libjailbreak/codesign.h>
 #include <libjailbreak/util.h>
 #include "jbserver/jbserver_local.h"
+#include "app_hide.h"
 
 extern void systemwide_domain_set_enabled(bool enabled);
 
@@ -558,7 +559,7 @@ static void app_hide_reconcile(const char *reason)
 	if (app_hide_should_stay_hidden_locked()) {
 		int tracked = (int)gNoInjectPidCount;
 		pthread_mutex_unlock(&gNoInjectLock);
-		app_hide_log([NSString stringWithFormat:@"reconcile(%@): staying hidden, %d no-inject app(s) alive", reason, tracked]);
+		app_hide_log([NSString stringWithFormat:@"reconcile(%s): staying hidden, %d no-inject app(s) alive", reason, tracked]);
 		return;
 	}
 	gNoInjectActive = false;
@@ -570,7 +571,7 @@ static void app_hide_reconcile(const char *reason)
 	// plain leaf lock, and taking it while waiting for a blocking jbctl call in
 	// the other order would serialise every spawn behind the hide.
 	pthread_mutex_lock(&gNoInjectActionLock);
-	app_hide_log([NSString stringWithFormat:@"reconcile(%@): no no-inject app left, restoring jailbreak", reason]);
+	app_hide_log([NSString stringWithFormat:@"reconcile(%s): no no-inject app left, restoring jailbreak", reason]);
 	app_hide_do_restore();
 	pthread_mutex_unlock(&gNoInjectActionLock);
 }
