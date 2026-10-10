@@ -27,6 +27,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <sys/mount.h>
+#include <sys/stat.h>
 
 #include <libjailbreak/libjailbreak.h>
 #include <xpc_private.h>
@@ -243,12 +244,29 @@ static int new_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 	return orig_bind(sockfd, addr, addrlen);
 }
 
+// Cap the diagnostic log. Both the spawn hook (twice per spawn) and the 5s
+// watchdog write here, and the watchdog in particular would otherwise grow the
+// file for as long as any app stays hidden — this is an append-only log on the
+// user's data volume, so it needs a ceiling the way DopamineAppHide.log already
+// has one. APP_HIDE_LOG_PATH itself lives in app_hide.h, shared with spawn_hook.
+#define APP_HIDE_LOG_MAX_SIZE (512 * 1024)
+
 static void app_hide_log(NSString *msg)
 {
-	FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-	if (f) {
-		fprintf(f, "%s\n", msg.UTF8String);
-		fclose(f);
+	FILE *f = fopen(APP_HIDE_LOG_PATH, "a");
+	if (!f) return;
+	fprintf(f, "%s\n", msg.UTF8String);
+	fclose(f);
+
+	// Truncate in place once the file crosses the cap. Keeping the most recent
+	// entries is the useful direction: the watchdog's repeated lines are the bulk
+	// of the growth, and the state transitions that matter are the newest ones.
+	struct stat st;
+	if (stat(APP_HIDE_LOG_PATH, &st) == 0 && st.st_size > APP_HIDE_LOG_MAX_SIZE) {
+		// Truncate to zero rather than seeking: a partial tail from a large write
+		// is not worth preserving, and starting clean avoids shipping a helper to
+		// copy the tail out.
+		truncate(APP_HIDE_LOG_PATH, 0);
 	}
 }
 
@@ -312,6 +330,11 @@ static int new_xpc_pipe_routine_reply(xpc_object_t reply)
 	return orig_xpc_pipe_routine_reply(reply);
 }
 
+// The watchdog that re-derives the hide state (defined near the bottom of this
+// file). app_hide_init() starts it; declared here because that call site comes
+// first.
+static void app_hide_start_watchdog(void);
+
 void app_hide_init(void)
 {
 	// Save the originals, then GOT-rebind (NOT instruction-replace). Instruction
@@ -324,15 +347,127 @@ void app_hide_init(void)
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)xpc_dictionary_create_reply, (void *)new_xpc_dictionary_create_reply, NULL);
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)xpc_pipe_routine_reply, (void *)new_xpc_pipe_routine_reply, NULL);
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)bind, (void *)new_bind, NULL);
+
+	// Start the hide watchdog unconditionally, not only once a no-inject app has
+	// been launched. Its reverse check ("/var/jb is missing but nothing needs the
+	// hide") is the only thing that can repair a jailbreak stranded by a previous
+	// boot or a crashed app, and that damage is already present before any app is
+	// spawned — so waiting for the first spawn would leave a stuck device stuck.
+	// The timer early-outs unless something is actually wrong, and dispatch_once
+	// makes the later per-spawn starts no-ops.
+	//
+	// Deferred briefly so the first tick does not race launchd's own startup work
+	// at this point in the boot sequence.
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC),
+		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+			app_hide_start_watchdog();
+		});
 }
 
 // ---------------------------------------------------------------------------
 // RootHide-style "no-injection" mode: temporary global hide + bare spawn
 // ---------------------------------------------------------------------------
 
+// The set of no-inject app pids that are currently running, which is what the
+// hide state must actually follow. This used to be a bare int refcount, but the
+// count and the real world drifted apart in ways that left the jailbreak stuck
+// hidden with nothing left to restore it (see app_hide_should_stay_hidden_locked
+// below).
+//
+// The sets are plain ints (pids, not NSNumber) so that every decision below can
+// be made under a single plain mutex, with no Objective-C runtime calls while
+// the lock is held. That matters: this code runs inside launchd (pid 1), where a
+// deadlock is a full userspace hang.
+static pid_t *gNoInjectPids = NULL;
+static size_t gNoInjectPidCount = 0;
+static size_t gNoInjectPidCapacity = 0;
 static bool gNoInjectActive = false;
-static int gNoInjectRefCount = 0;
+// Number of hides that have started but whose app pid isn't known yet. The hide
+// must be in effect *before* the app is bare-spawned, so there is an unavoidable
+// window where the state is "hidden" while the tracked set is still empty. Without
+// this counter the watchdog reads that window as "hidden with nothing running" and
+// restores on top of the hide that is still executing.
+static int gNoInjectHidePending = 0;
 static pthread_mutex_t gNoInjectLock = PTHREAD_MUTEX_INITIALIZER;
+
+// Serialises the hide/restore bodies themselves. They rename files, unmount and
+// remount /usr/lib and block on jbctl, so two of them must never interleave —
+// that would leave files half-quarantined and fakelib in the wrong state.
+static pthread_mutex_t gNoInjectActionLock = PTHREAD_MUTEX_INITIALIZER;
+
+// Guarded by gNoInjectLock. Callers must have validated the pid > 0.
+static bool app_hide_pid_in_set(const pid_t *pids, size_t count, pid_t pid)
+{
+	for (size_t i = 0; i < count; i++) {
+		if (pids[i] == pid) return true;
+	}
+	return false;
+}
+
+static void app_hide_set_insert(pid_t pid)
+{
+	if (app_hide_pid_in_set(gNoInjectPids, gNoInjectPidCount, pid)) return;
+	if (gNoInjectPidCount == gNoInjectPidCapacity) {
+		size_t newCapacity = gNoInjectPidCapacity ? gNoInjectPidCapacity * 2 : 8;
+		pid_t *newPids = realloc(gNoInjectPids, newCapacity * sizeof(pid_t));
+		if (!newPids) return; // out of memory: lose the bookkeeping, not launchd
+		gNoInjectPids = newPids;
+		gNoInjectPidCapacity = newCapacity;
+	}
+	gNoInjectPids[gNoInjectPidCount++] = pid;
+}
+
+// Returns true if the pid was tracked.
+static bool app_hide_set_remove(pid_t pid)
+{
+	for (size_t i = 0; i < gNoInjectPidCount; i++) {
+		if (gNoInjectPids[i] != pid) continue;
+		gNoInjectPids[i] = gNoInjectPids[gNoInjectPidCount - 1];
+		gNoInjectPidCount--;
+		return true;
+	}
+	return false;
+}
+
+// Reap pids that have already exited, so a crashed no-inject app cannot leave a
+// stale entry pinning the hide on. Caller must hold gNoInjectLock.
+static void app_hide_reap_dead_pids_locked(void)
+{
+	size_t i = 0;
+	while (i < gNoInjectPidCount) {
+		pid_t pid = gNoInjectPids[i];
+		if (pid <= 1 || (kill(pid, 0) != 0 && errno == ESRCH)) {
+			gNoInjectPids[i] = gNoInjectPids[gNoInjectPidCount - 1];
+			gNoInjectPidCount--;
+			continue;
+		}
+		i++;
+	}
+}
+
+// The restore condition, evaluated entirely under gNoInjectLock: stay hidden if
+// and only if at least one tracked no-inject app is still alive.
+//
+// This is the invariant the old refcount got wrong. Decrementing a counter on
+// exit assumed every hide had exactly one matching restore, but two paths could
+// restore out from under it (the jb-app resurrection, and the background-launch
+// check), so the count could stay above zero forever with nothing running to
+// bring it back down. Asking the process table instead cannot drift.
+//
+// kill(pid, 0) delivers no signal; it only reports whether the pid still exists.
+static bool app_hide_should_stay_hidden_locked(void)
+{
+	// A hide whose pid isn't known yet is still in progress, so the empty set here
+	// is not evidence that anything finished.
+	if (gNoInjectHidePending > 0) return true;
+	for (size_t i = 0; i < gNoInjectPidCount; i++) {
+		pid_t pid = gNoInjectPids[i];
+		if (pid <= 1) continue;
+		if (kill(pid, 0) != 0 && errno == ESRCH) continue;
+		return true;
+	}
+	return false;
+}
 
 // Pids of jailbreak apps running "resurrected" (restored while the jailbreak was
 // hidden). Killed before the jailbreak is re-hidden so they don't keep writing
@@ -386,44 +521,82 @@ static void app_hide_do_restore(void)
 	app_hide_run_jbctl("fakelib", "mount");
 }
 
+// Record that a no-inject app was spawned. Called right after the bare spawn, so
+// by the time this runs the pid exists and the watchdog can verify it. Also closes
+// the pending window opened by app_hide_global_hide().
+void app_hide_note_pid(pid_t pid)
+{
+	if (pid <= 0) return;
+	pthread_mutex_lock(&gNoInjectLock);
+	app_hide_set_insert(pid);
+	if (gNoInjectHidePending > 0) gNoInjectHidePending--;
+	pthread_mutex_unlock(&gNoInjectLock);
+}
+
+// A no-inject app was launched but never got a pid. Close the pending window so
+// the watchdog can restore the jailbreak for an app that does not exist.
+void app_hide_abort_pending_hide(void)
+{
+	pthread_mutex_lock(&gNoInjectLock);
+	if (gNoInjectHidePending > 0) gNoInjectHidePending--;
+	pthread_mutex_unlock(&gNoInjectLock);
+}
+
+// Re-evaluate whether the jailbreak should be hidden right now, and restore it
+// if not. This is the single place that decides to un-hide, so the exit watcher,
+// the watchdog and the background-launch check can never disagree.
+//
+// Must not be called with gNoInjectLock held.
+static void app_hide_reconcile(const char *reason)
+{
+	pthread_mutex_lock(&gNoInjectLock);
+	if (!gNoInjectActive) {
+		pthread_mutex_unlock(&gNoInjectLock);
+		return;
+	}
+	app_hide_reap_dead_pids_locked();
+	if (app_hide_should_stay_hidden_locked()) {
+		int tracked = (int)gNoInjectPidCount;
+		pthread_mutex_unlock(&gNoInjectLock);
+		app_hide_log([NSString stringWithFormat:@"reconcile(%@): staying hidden, %d no-inject app(s) alive", reason, tracked]);
+		return;
+	}
+	gNoInjectActive = false;
+	gNoInjectPidCount = 0;
+	gNoInjectHidePending = 0;
+	pthread_mutex_unlock(&gNoInjectLock);
+
+	// Take the action lock only after releasing gNoInjectLock: gNoInjectLock is a
+	// plain leaf lock, and taking it while waiting for a blocking jbctl call in
+	// the other order would serialise every spawn behind the hide.
+	pthread_mutex_lock(&gNoInjectActionLock);
+	app_hide_log([NSString stringWithFormat:@"reconcile(%@): no no-inject app left, restoring jailbreak", reason]);
+	app_hide_do_restore();
+	pthread_mutex_unlock(&gNoInjectActionLock);
+}
+
 void app_hide_global_hide(void)
 {
-	// Reference-counted: multiple no-inject apps may run concurrently. The
-	// actual hide only runs when the jailbreak isn't already hidden (i.e. the
-	// first no-inject app, or the first after a jailbreak-app resurrection).
 	pthread_mutex_lock(&gNoInjectLock);
-	gNoInjectRefCount++;
-	int refcount = gNoInjectRefCount;
 	bool wasHidden = gNoInjectActive;
 	gNoInjectActive = true;
+	// Hide before spawning (the app must not see /var/jb), so until its pid is
+	// recorded the set is legitimately empty. Mark that so the watchdog waits.
+	if (!wasHidden) gNoInjectHidePending++;
 	pthread_mutex_unlock(&gNoInjectLock);
-	app_hide_log([NSString stringWithFormat:@"global_hide: refcount now %d", refcount]);
 	if (wasHidden) return;
 
+	pthread_mutex_lock(&gNoInjectActionLock);
 	app_hide_do_hide();
+	pthread_mutex_unlock(&gNoInjectActionLock);
 }
 
 void app_hide_global_restore(void)
 {
-	// Only restore once the LAST hidden app has exited.
-	pthread_mutex_lock(&gNoInjectLock);
-	if (gNoInjectRefCount <= 0) {
-		pthread_mutex_unlock(&gNoInjectLock);
-		app_hide_log(@"global_restore: refcount already 0 (no-op)");
-		return;
-	}
-	gNoInjectRefCount--;
-	int refcount = gNoInjectRefCount;
-	if (refcount > 0) {
-		pthread_mutex_unlock(&gNoInjectLock);
-		app_hide_log([NSString stringWithFormat:@"global_restore: refcount now %d (skip, still hidden)", refcount]);
-		return;
-	}
-	gNoInjectActive = false;
-	pthread_mutex_unlock(&gNoInjectLock);
-	app_hide_log(@"global_restore: refcount 0, restoring jailbreak");
-
-	app_hide_do_restore();
+	// Restore once the LAST hidden app is gone. The decision is delegated to the
+	// same reconcile path the watchdog uses, so an external restore request and a
+	// spontaneous one can't double-decrement or skip.
+	app_hide_reconcile("restore");
 }
 
 bool app_hide_is_currently_hidden(void)
@@ -490,16 +663,28 @@ void app_hide_resurrect_for_jb_app(void)
 {
 	// "Jailbreak app resurrection": a jailbreak app was spawned while the
 	// jailbreak was hidden (a no-inject app is running). Restore the jailbreak
-	// so the jailbreak app can run. The no-inject refcount is left intact (those
-	// apps are still running); only the hidden state is cleared, and we do NOT
-	// re-hide later (accepted limitation).
+	// so the jailbreak app can run.
+	//
+	// The still-running no-inject apps stay tracked. That matters: if we dropped
+	// them here, then when they exited the watchdog would see an empty set and
+	// "restore" a jailbreak that was already visible (a harmless extra unmount
+	// race), but if we kept a stale count instead, the next restore request would
+	// decrement a counter nothing else would ever bring back to zero and the
+	// jailbreak would stay hidden forever with no way out. Keeping the pids means
+	// one exit re-hides nothing by itself, and the resurrection is the only thing
+	// that un-hides until the apps are gone.
 	pthread_mutex_lock(&gNoInjectLock);
 	bool wasHidden = gNoInjectActive;
 	gNoInjectActive = false;
+	// The apps are still running, so the hide is suspended, not finished: reset
+	// the pending window and keep the pids for the watchdog to reason about.
+	gNoInjectHidePending = 0;
 	pthread_mutex_unlock(&gNoInjectLock);
 	if (!wasHidden) return;
 	app_hide_log(@"resurrect: jailbreak app spawned while hidden, restoring jailbreak");
+	pthread_mutex_lock(&gNoInjectActionLock);
 	app_hide_do_restore();
+	pthread_mutex_unlock(&gNoInjectActionLock);
 }
 
 void app_hide_track_jailbreak_app(pid_t pid)
@@ -605,25 +790,78 @@ static int app_hide_get_app_state(pid_t pid)
 	return (int)app_state;
 }
 
+// Watchdog: periodically re-derive the hide state from the set of live no-inject
+// apps.
+//
+// This replaces a one-shot 500 ms post-spawn check that read PROC_PIDT_APPSTATE
+// exactly once and restored on anything other than PROC_APPSTATE_ACTIVE. That was
+// unreliable in both directions: a normal foreground app legitimately reports
+// "inactive"/"nonui" while it is still launching, so a good launch could be torn
+// down mid-startup, and a genuinely background app that happened to report ACTIVE
+// at that instant was never corrected. Re-asking "is anything tracked still alive"
+// cannot misfire that way, and it also repairs a hide that was stranded by a
+// missed exit event or a crashed app.
+static void app_hide_start_watchdog(void)
+{
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+			dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+		// 5s is frequent enough that a crashed app is recovered quickly, and rare
+		// enough that this costs nothing: the body returns immediately unless
+		// something is actually wrong.
+		dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
+			5 * NSEC_PER_SEC, 1 * NSEC_PER_SEC);
+		dispatch_source_set_event_handler(timer, ^{
+			// Two independent checks, because a hide can go wrong in two ways:
+
+			// 1. We believe we are hidden but nothing needs us to be. This is the
+			//    stranded case: a missed exit event, or a restore that was skipped
+			//    because bookkeeping disagreed with reality. Left alone it hides
+			//    /var/jb indefinitely, which is exactly "tweaks disappeared".
+			if (app_hide_is_currently_hidden()) {
+				app_hide_reconcile("watchdog");
+				return;
+			}
+
+			// 2. We believe we are visible but the files say otherwise: /var/jb
+			//    is gone while no no-inject app is running. Only the watchdog can
+			//    notice this, because our own flag was already cleared by whatever
+			//    restored it — including a restore that ran before it finished.
+			//    Re-running the restore is safe: it is idempotent, and the audit
+			//    restore skips any file that is already back in place.
+			//
+			//    Requires a known jbroot: on a device that was never bootstrapped
+			//    (or before the jailbreak is applied) /var/jb is legitimately
+			//    absent, and acting on that would spawn jbctl every 5s forever
+			//    doing nothing.
+			const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
+			if (jbroot && jbroot[0] && access("/var/jb", F_OK) != 0) {
+				app_hide_log(@"watchdog: /var/jb missing while not hidden, re-restoring");
+				pthread_mutex_lock(&gNoInjectActionLock);
+				app_hide_do_restore();
+				pthread_mutex_unlock(&gNoInjectActionLock);
+			}
+		});
+		dispatch_resume(timer);
+	});
+}
+
 void app_hide_check_role_after_spawn(pid_t pid)
 {
 	if (pid <= 0) return;
-	// The app state is assigned shortly after spawn: foreground apps become
-	// PROC_APPSTATE_ACTIVE (1), background apps stay background/suspended/nonui.
-	// Give the system a moment, then undo the hide if this turned out to be a
-	// background launch (so a background refresh doesn't leave the jailbreak
-	// hidden until the app exits).
+	// Ensure the watchdog exists as soon as the first no-inject app is launched.
+	app_hide_start_watchdog();
+
+	// Give the system a moment to assign the app state, then log it for diagnosis.
+	// The decision to restore is deliberately NOT made here: a single early
+	// sample cannot distinguish "still launching" from "background launch", and
+	// guessing wrong is what left the jailbreak stuck hidden. The watchdog owns
+	// that decision, using liveness instead of a racy one-shot state read.
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC),
 		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
 			int appState = app_hide_get_app_state(pid);
-			app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d", pid, appState]);
-			// 1 = PROC_APPSTATE_ACTIVE (foreground). Any other real value (2
-			// inactive / 3 background / 4 suspended / 5 nonui) is a background
-			// launch: undo the hide.
-			if (appState > 0 && appState != 1) {
-				app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d is background, restoring jailbreak", pid]);
-				app_hide_global_restore();
-			}
+			app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d (advisory)", pid, appState]);
 		});
 }
 
@@ -631,12 +869,21 @@ void app_hide_watch_exit(pid_t pid)
 {
 	if (pid <= 0) return;
 
+	// Make sure the watchdog is running whenever an app is tracked.
+	app_hide_start_watchdog();
+
 	dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC, (uintptr_t)pid, DISPATCH_PROC_EXIT,
 		dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
 	dispatch_source_set_event_handler(source, ^{
 		app_hide_log([NSString stringWithFormat:@"watch_exit: pid %d exited", pid]);
 		app_hide_remove_pid(pid);
-		app_hide_global_restore();
+		// Drop the pid from the tracked set, then re-derive the hide state. If it
+		// was the last live no-inject app this restores; if others are still
+		// running, the jailbreak stays hidden and nothing else happens.
+		pthread_mutex_lock(&gNoInjectLock);
+		app_hide_set_remove(pid);
+		pthread_mutex_unlock(&gNoInjectLock);
+		app_hide_reconcile("exit");
 		dispatch_source_cancel(source);
 	});
 	dispatch_resume(source);

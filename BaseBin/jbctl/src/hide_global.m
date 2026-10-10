@@ -180,15 +180,26 @@ static void hideItemAtPath(NSString *src)
 	NSString *root = hideQuarantineRoot();
 	[fm createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
 
+	// Record the mapping BEFORE moving. The other order loses the file outright if
+	// we die in between: the move would have succeeded but the map would not know
+	// where the quarantined copy went, leaving an unnamed orphan under the
+	// quarantine root that nothing can ever restore.
 	NSString *dst = [root stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
+	NSMutableArray *map = [[NSArray arrayWithContentsOfFile:hideMapPath()] mutableCopy] ?: [NSMutableArray array];
+	[map addObject:@{ @"src": src, @"dst": dst }];
+	if (![map writeToFile:hideMapPath() atomically:YES]) {
+		auditLog([NSString stringWithFormat:@"hide ABORTED (map write failed): %@", src]);
+		return; // do not move: an unmapped move is unrecoverable
+	}
+
 	if (![fm moveItemAtPath:src toPath:dst error:nil]) {
+		// Roll the entry back so restore doesn't try to move a file that is still
+		// sitting in its original place.
+		[map removeLastObject];
+		[map writeToFile:hideMapPath() atomically:YES];
 		auditLog([NSString stringWithFormat:@"hide FAILED: %@", src]);
 		return;
 	}
-
-	NSMutableArray *map = [[NSArray arrayWithContentsOfFile:hideMapPath()] mutableCopy] ?: [NSMutableArray array];
-	[map addObject:@{ @"src": src, @"dst": dst }];
-	[map writeToFile:hideMapPath() atomically:YES];
 
 	auditLog([NSString stringWithFormat:@"hide ok: %@", src]);
 }

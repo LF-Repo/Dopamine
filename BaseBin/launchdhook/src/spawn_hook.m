@@ -39,54 +39,39 @@ extern void systemwide_domain_set_enabled(bool enabled);
 
 #define APP_HIDE_RULES_PATH "/var/mobile/Library/Preferences/.DopamineAppHideRules.plist"
 
-static bool should_hide_environment(const char *executablePath)
-{
-    if (!executablePath) return false;
-
-    @autoreleasepool {
-        NSString *path = [NSString stringWithUTF8String:executablePath];
-        NSRange appRange = [path rangeOfString:@".app/"];
-        if (appRange.location == NSNotFound) return false;
-
-        NSString *appPath = [path substringToIndex:appRange.location + 4];
-        NSString *infoPlistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
-        NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
-        NSString *bundleID = info[@"CFBundleIdentifier"];
-        if (!bundleID) return false;
-
-        NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:@APP_HIDE_RULES_PATH];
-        NSDictionary *appRule = rules[bundleID];
-        BOOL hideEnv = [appRule[@"HideEnvironment"] boolValue];
-        FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-        if (f) { fprintf(f, "hide_env: %s = %d\n", bundleID.UTF8String, hideEnv); fclose(f); }
-        return hideEnv;
-    }
-}
-
 // RootHide-style "no-injection" mode: when HideNoInject is YES, don't inject
 // systemhook at all — instead the jailbreak is hidden globally (remove /var/jb,
 // unmount fakelib) while the app runs, then restored on exit.
-static bool should_hide_no_inject(const char *executablePath)
+//
+// The hide decision needs both HideEnvironment (are we hiding at all?) and
+// HideNoInject (hide globally, or just in-process?). They live in the same rule
+// entry, so read them together in one pass: this runs on every single spawn, and
+// parsing the rules plist plus the app's Info.plist twice per spawn — then
+// writing a log line for each — was pure overhead on launchd's spawn path.
+static BOOL app_hide_rule_flags(const char *executablePath, BOOL *outHideEnv, BOOL *outNoInject)
 {
-    if (!executablePath) return false;
+    *outHideEnv = NO;
+    *outNoInject = NO;
+    if (!executablePath) return NO;
 
     @autoreleasepool {
         NSString *path = [NSString stringWithUTF8String:executablePath];
         NSRange appRange = [path rangeOfString:@".app/"];
-        if (appRange.location == NSNotFound) return false;
+        if (appRange.location == NSNotFound) return NO;
 
         NSString *appPath = [path substringToIndex:appRange.location + 4];
         NSString *infoPlistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
         NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
         NSString *bundleID = info[@"CFBundleIdentifier"];
-        if (!bundleID) return false;
+        if (!bundleID) return NO;
 
         NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:@APP_HIDE_RULES_PATH];
         NSDictionary *appRule = rules[bundleID];
-        BOOL noInject = [appRule[@"HideNoInject"] boolValue];
-        FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-        if (f) { fprintf(f, "no_inject: %s = %d\n", bundleID.UTF8String, noInject); fclose(f); }
-        return noInject;
+        if (!appRule) return NO;
+
+        *outHideEnv = [appRule[@"HideEnvironment"] boolValue];
+        *outNoInject = [appRule[@"HideNoInject"] boolValue];
+        return YES;
     }
 }
 
@@ -348,8 +333,11 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 
 
-  if (path && should_hide_environment(path)) {
-		if (should_hide_no_inject(path)) {
+  // One combined read of this app's hide rules (see app_hide_rule_flags).
+	BOOL hideEnv = NO;
+	BOOL noInject = NO;
+	if (path && app_hide_rule_flags(path, &hideEnv, &noInject) && hideEnv) {
+		if (noInject) {
 			// RootHide-style no-injection mode: temporarily hide the jailbreak
 			// globally (remove /var/jb + unmount fakelib), bare-spawn the app
 			// (no systemhook injection at all), and restore when it exits.
@@ -365,7 +353,7 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			if (desc && desc->attrp) {
 				memcpy(&darwinRole, (char *)desc->attrp + 0x58, sizeof(darwinRole));
 			}
-			FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
+			FILE *f = fopen(APP_HIDE_LOG_PATH, "a");
 			if (f) { fprintf(f, "darwin_role=%d\n", darwinRole); fclose(f); }
 
 			if (darwinRole >= 3) {
@@ -386,9 +374,15 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			if (pid) *pid = childPid;
 			app_hide_commit_pid(blacklistedPidp);
 			if (r == 0) {
+				// Track the app so the hide can be re-derived from real liveness
+				// later. This must happen before any restore path can run.
+				app_hide_note_pid(childPid);
 				app_hide_watch_exit(childPid);
 				app_hide_check_role_after_spawn(childPid);
 			} else {
+				// Spawn failed, so there is no app that could keep the jailbreak
+				// hidden. Release the pending-hide window and undo it.
+				app_hide_abort_pending_hide();
 				app_hide_global_restore();
 			}
 			return r;
