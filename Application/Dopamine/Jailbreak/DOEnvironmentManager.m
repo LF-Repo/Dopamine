@@ -801,8 +801,8 @@ extern char **environ;
                 return;
             }
 
-            // NSDataWritingNone: overwrite in place, no temp file, no rename.
-            if (![data writeToFile:path options:NSDataWritingNone error:&error]) {
+            // NSDataWritingWithoutAtomic: overwrite in place, no temp file, no rename.
+            if (![data writeToFile:path options:NSDataWritingWithoutAtomic error:&error]) {
                 NSLog(@"[AppHide] failed to write %@: %@", path, error.localizedDescription);
                 return;
             }
