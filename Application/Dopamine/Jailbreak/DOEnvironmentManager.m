@@ -12,6 +12,7 @@
 #import <sys/mount.h>
 #import <sys/utsname.h>
 #import <sys/stat.h>
+#import <errno.h>
 #import <unistd.h>
 #import <mach-o/dyld.h>
 #import <libgrabkernel2/libgrabkernel2.h>
@@ -801,9 +802,11 @@ extern char **environ;
                 return;
             }
 
-            // NSDataWritingWithoutAtomic: overwrite in place, no temp file, no rename.
-            if (![data writeToFile:path options:NSDataWritingWithoutAtomic error:&error]) {
-                NSLog(@"[AppHide] failed to write %@: %@", path, error.localizedDescription);
+            // atomically:NO -> overwrite in place. No auxiliary file, no rename.
+            // That matters because /var/mobile/Library/Preferences belongs to
+            // cfprefsd; on iOS 17 the App is not allowed to rename into it.
+            if (![data writeToFile:path atomically:NO]) {
+                NSLog(@"[AppHide] failed to write %@: %@ (errno %d)", path, [error localizedDescription], errno);
                 return;
             }
 
