@@ -55,10 +55,6 @@ extern kern_return_t mach_vm_region_recurse(vm_map_read_t target_task, mach_vm_a
 #include <dispatch/dispatch.h>
 #include <libjailbreak/codesign.h>
 #include <objc/runtime.h>
-
-// For hook_dylib_path(): our injected library has a per-jailbreak name, and both
-// the rule matcher and the dyld image hiding below need to know it.
-#include "common/common.h"
 #include <objc/message.h>
 
 #ifndef SYS_csops
@@ -816,11 +812,6 @@ void hidejb_init(const char *jbroot)
 	hidejb_rules_set_jbroot(jbroot);
 	hidejb_rules_set_self_bundle_id();
 
-	// Our injected library has a per-jailbreak name, so tell the rule matcher
-	// about it: otherwise the app we are hiding could still see our own library
-	// in /usr/lib and in its dyld image list.
-	hidejb_rules_register_hook_basename(hook_dylib_path());
-
 	hidejb_load_disable_switch(jbroot);
 
 	if (!(gDisabled & HIDE_OFF_DYLD)) {
@@ -828,10 +819,7 @@ void hidejb_init(const char *jbroot)
 		for (uint32_t i = 0; i < n; i++) {
 			const char *name = _dyld_get_image_name(i);
 			if (!name) continue;
-			// Match on the derived hook path too, not just the fixed names: our own
-			// image is named after the randomised path we injected.
-			if (strstr(name, "systemhook") || strstr(name, "libellekit") || strstr(name, "CydiaSubstrate") ||
-			    strstr(name, hook_dylib_path())) {
+			if (strstr(name, "systemhook") || strstr(name, "libellekit") || strstr(name, "CydiaSubstrate")) {
 				hidejb_register_hidden_index(i);
 			}
 		}

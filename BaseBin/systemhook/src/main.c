@@ -373,22 +373,12 @@ __attribute__((constructor)) static void initializer(void)
 
 	// Unset DYLD_INSERT_LIBRARIES, but only if systemhook itself is the only thing contained in it
 	// Feeable attempt at making jailbreak detection harder
-	//
-	// This must compare against hook_dylib_path(), not the canonical macro: the
-	// value we inject is the derived variant, so comparing against the canonical
-	// path would never match and would leave DYLD_INSERT_LIBRARIES visible in
-	// every process — turning a working mitigation into a detection signal.
 	const char *dyldInsertLibraries = getenv("DYLD_INSERT_LIBRARIES");
 	if (dyldInsertLibraries) {
-		if (!strcmp(dyldInsertLibraries, hook_dylib_path())) {
+		if (!strcmp(dyldInsertLibraries, HOOK_DYLIB_PATH)) {
 			unsetenv("DYLD_INSERT_LIBRARIES");
 		}
 	}
-	// DOPAMINE_HOOK_DYLIB is only consumed by dyldhook while it loads this image,
-	// which has already happened by now. Leaving it behind would be worse than
-	// leaving DYLD_INSERT_LIBRARIES behind: it is a name no stock process has, and
-	// it hands a detector the exact injected path. Always drop it.
-	unsetenv("DOPAMINE_HOOK_DYLIB");
 
 	// On iOS 26+, hooks have to be applied through hookd
 	if (__builtin_available(iOS 19.0, *)) {
