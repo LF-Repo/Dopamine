@@ -206,22 +206,26 @@ void dyldhook_init(uintptr_t kernelParams)
 	}
 	// If DYLD_INSERT_LIBRARIES does not contain our hook library, bail out.
 	//
-	// This used to match the literal "/systemhook.dylib". The injected path is now
-	// a per-jailbreak variant (see hook_dylib_path() in systemhook/src/common),
-	// so that substring no longer appears. Matching on the ".dylib" suffix plus
-	// the "lib_" prefix keeps dyldhook working without sharing code with
-	// systemhook: dyldhook must stay self-contained (the build enforces this with
-	// CHECK_SELF_CONTAINED), so it cannot call hook_dylib_path() to get the exact
-	// string.
+	// The injected path is a per-jailbreak variant (see hook_dylib_path() in
+	// systemhook/src/common), so the old literal "/systemhook.dylib" match no
+	// longer finds it. Do NOT try to recognise it by shape instead: dyldhook runs
+	// inside launchd itself, and a shape-based match (".dylib" + "/lib_") is
+	// satisfied by launchd's own environment. That made launchd run a check-in
+	// against itself during "Initializing Jailbreak Environment" and hard-reboot
+	// the device.
 	//
-	// Being slightly looser here is safe: we only proceed to check in, and a
-	// false positive costs one check-in, while a false negative would leave the
-	// process without its jailbreak info.
-	if (!strstr(insertLibrariesVar, ".dylib") || !strstr(insertLibrariesVar, "/lib_")) {
-		if (gDyldHookLog) {
-			_simple_dprintf(2, "Not checking in, no hook library found in DYLD_INSERT_LIBRARIES (%s)\n", insertLibrariesVar);
+	// So the exact path is handed to us in an env var next to the one we already
+	// read. Comparing the full string cannot collide with anything else.
+	const char *hookPath = _simple_getenv(envp, "DOPAMINE_HOOK_DYLIB");
+	if (!hookPath || strcmp(hookPath, insertLibrariesVar) != 0) {
+		// Also accept the canonical name, so a process spawned with the plain path
+		// (or anything else that sets only DYLD_INSERT_LIBRARIES) still checks in.
+		if (!strstr(insertLibrariesVar, "/systemhook.dylib")) {
+			if (gDyldHookLog) {
+				_simple_dprintf(2, "Not checking in, no hook library found in DYLD_INSERT_LIBRARIES (%s)\n", insertLibrariesVar);
+			}
+			return;
 		}
-		return;
 	}
 
 	// If all is well, do check-in right here before dyld_start!

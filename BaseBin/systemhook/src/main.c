@@ -384,6 +384,11 @@ __attribute__((constructor)) static void initializer(void)
 			unsetenv("DYLD_INSERT_LIBRARIES");
 		}
 	}
+	// DOPAMINE_HOOK_DYLIB is only consumed by dyldhook while it loads this image,
+	// which has already happened by now. Leaving it behind would be worse than
+	// leaving DYLD_INSERT_LIBRARIES behind: it is a name no stock process has, and
+	// it hands a detector the exact injected path. Always drop it.
+	unsetenv("DOPAMINE_HOOK_DYLIB");
 
 	// On iOS 26+, hooks have to be applied through hookd
 	if (__builtin_available(iOS 19.0, *)) {
