@@ -527,9 +527,18 @@ static void app_hide_do_restore(void)
 		symlink(jbroot, "/var/jb");
 	}
 
-	// Restore the quarantined files, then remount fakelib.
-	app_hide_run_jbctl("audit", "restore");
+	// Order matters for how fast the jailbreak comes back.
+	//
+	// fakelib first: it is a single stat plus one bindfs mount, so /usr/lib is
+	// usable again almost immediately. "audit restore" afterwards has to move
+	// back every quarantined file and can take seconds; doing it second means
+	// tweaks and jailbreak binaries load again long before it finishes.
+	//
+	// The two are independent: neither depends on the other's result, and both
+	// are idempotent, so a failure in one does not leave the other in a state
+	// the watchdog cannot repair (it re-runs this function on its next tick).
 	app_hide_run_jbctl("fakelib", "mount");
+	app_hide_run_jbctl("audit", "restore");
 }
 
 // Record that a no-inject app was spawned. Called right after the bare spawn, so
@@ -861,11 +870,14 @@ static void app_hide_start_watchdog(void)
 	dispatch_once(&onceToken, ^{
 		dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
 			dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
-		// 5s is frequent enough that a crashed app is recovered quickly, and rare
-		// enough that this costs nothing: the body returns immediately unless
-		// something is actually wrong.
-		dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
-			5 * NSEC_PER_SEC, 1 * NSEC_PER_SEC);
+		// 2s rather than 5s: this is only a safety net for events that never arrive (a
+		// crashed app, a missed exit). The normal path is the exit watcher, which
+		// restores immediately, so the interval only decides how long a *missed*
+		// event stays invisible — and a hidden jailbreak looks exactly like
+		// "tweaks disappeared". The body returns immediately unless something is
+		// actually wrong, so the cost is a handful of cheap comparisons.
+		dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+			2 * NSEC_PER_SEC, 1 * NSEC_PER_SEC);
 		dispatch_source_set_event_handler(timer, ^{
 			// Two independent checks, because a hide can go wrong in two ways:
 
