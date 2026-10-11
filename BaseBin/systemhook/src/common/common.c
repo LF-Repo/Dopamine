@@ -155,86 +155,6 @@ __attribute__((weak)) bool hidejb_is_hidden(void)
 	return false;
 }
 
-// Derive the injected library path from the jailbreak root.
-//
-// Why this exists: HOOK_DYLIB_PATH is a constant, so any detector can hardcode
-// "/usr/lib/systemhook.dylib" and simply look for that string in a process's
-// environment. Varying the name per jailbreak removes that fixed feature.
-//
-// The name is derived from the jailbreak root rather than stored in a file: the
-// jailbreak root already changes on every jailbreak (it lives under a per-boot
-// preboot UUID), and every binary that needs this value can compute it from the
-// same source, so there is no new state to keep in sync across launchdhook,
-// systemhook and dyldhook. The trade-off is deliberate: the name stays constant
-// for the lifetime of one jailbreak.
-//
-// The result stays inside /usr/lib and keeps a .dylib suffix on purpose. The
-// fakelib mount publishes exactly that directory, and dyldhook needs the suffix
-// to recognise the entry as our library (see dyldhook/src/main.c).
-//
-// Returns HOOK_DYLIB_PATH whenever anything is unexpected, so a failure here
-// degrades to today's behaviour instead of breaking injection.
-// Weak fallback so this translation unit also links into launchdhook, which
-// compiles common.c but not systemhook's main.c and therefore has no
-// get_jbroot(). systemhook provides the strong definition (systemhook/src/main.c).
-// Without this, the link would fail with an undefined symbol.
-__attribute__((weak)) char *get_jbroot(void)
-{
-	return NULL;
-}
-
-const char *hook_dylib_path(void)
-{
-	static char path[PATH_MAX];
-	static bool havePath = false;
-
-	// Not dispatch_once on purpose. If we run before the jailbreak root is known
-	// we must not cache that: a cached failure would pin us to the canonical path
-	// for the rest of the process, and the caller that compares against this
-	// value (systemhook's constructor unsetting DYLD_INSERT_LIBRARIES) would then
-	// silently stop matching and leave the variable visible in every process.
-	// Retrying is cheap and only happens while the answer is unavailable.
-	if (havePath) return path;
-
-	const char *jbroot = get_jbroot();
-	if (!jbroot || !jbroot[0]) return HOOK_DYLIB_PATH;
-
-	// FNV-1a over the jailbreak root: stable within one jailbreak, and
-	// different across jailbreaks because the preboot UUID differs.
-	uint64_t hash = 14695981039346656037ULL;
-	for (const char *p = jbroot; *p; p++) {
-		hash ^= (unsigned char)*p;
-		hash *= 1099511628211ULL;
-	}
-
-	// Deliberately neutral: this must not resemble any real jailbreak library
-	// name (no "ellekit", "hooker", "substrate", ...), both because a familiar
-	// name would be a giveaway in itself and because the marker table in
-	// hidejb_rules.c keys off such names.
-	int n = snprintf(path, sizeof(path), "/usr/lib/lib_%016llx.dylib",
-					 (unsigned long long)hash);
-	if (n <= 0 || (size_t)n >= sizeof(path)) return HOOK_DYLIB_PATH;
-
-	// The variant name only helps if it actually resolves. fakelib publishes
-	// /usr/lib and carries a symlink for the canonical name only, so publish a
-	// matching symlink for the variant too.
-	//
-	// If we cannot create it we must NOT advertise the variant: dyld would fail
-	// to load the library and the process would start with no jailbreak hooks at
-	// all. Keeping the canonical path here is the safe degradation.
-	char linkTarget[PATH_MAX];
-	n = snprintf(linkTarget, sizeof(linkTarget), "%s/basebin/%s",
-				 jbroot, HOOK_DYLIB_NAME);
-	if (n <= 0 || (size_t)n >= sizeof(linkTarget)) return HOOK_DYLIB_PATH;
-
-	if (symlink(linkTarget, path) != 0 && access(path, F_OK) != 0) {
-		return HOOK_DYLIB_PATH;
-	}
-
-	havePath = true;
-	return path;
-}
-
 // 1. Ensure the binary about to be spawned and all of it's dependencies are trust cached
 // 2. Insert "DYLD_INSERT_LIBRARIES=/usr/lib/systemhook.dylib" into all binaries spawned
 // 3. Increase Jetsam limit to more sane value (Multipler defined as JETSAM_MULTIPLIER)
@@ -270,7 +190,7 @@ static int spawn_exec_hook_common(bool isExec,
 	__block bool systemHookAlreadyInserted = false;
 	if (existingLibraryInserts) {
 		string_enumerate_components(existingLibraryInserts, ":", ^(const char *existingLibraryInsert, bool *stop) {
-			if (!strcmp(existingLibraryInsert, hook_dylib_path())) {
+			if (!strcmp(existingLibraryInsert, HOOK_DYLIB_PATH)) {
 				systemHookAlreadyInserted = true;
 			}
 		});
@@ -316,9 +236,6 @@ static int spawn_exec_hook_common(bool isExec,
 			}
 		}
 
-		// Keep checking the canonical path here: that is the file that exists on
-		// disk. hook_dylib_path() is a symlink to it, so either check works, but
-		// the canonical one keeps this independent of the variant derivation.
 		if (access(HOOK_DYLIB_PATH, F_OK) != 0) {
 			// If the hook dylib doesn't exist, don't try to inject it (would crash the process)
 			shouldInsertJBEnv = false;
@@ -402,25 +319,13 @@ static int spawn_exec_hook_common(bool isExec,
 
 		if (shouldInsertJBEnv) {
 			if (!systemHookAlreadyInserted) {
-				const char *hookPath = hook_dylib_path();
-				size_t hookPathLen = strlen(hookPath);
-				char newLibraryInsert[hookPathLen + (existingLibraryInserts ? (strlen(existingLibraryInserts) + 1) : 0) + 1];
-				strcpy(newLibraryInsert, hookPath);
+				char newLibraryInsert[strlen(HOOK_DYLIB_PATH) + (existingLibraryInserts ? (strlen(existingLibraryInserts) + 1) : 0) + 1];
+				strcpy(newLibraryInsert, HOOK_DYLIB_PATH);
 				if (existingLibraryInserts) {
 					strcat(newLibraryInsert, ":");
 					strcat(newLibraryInsert, existingLibraryInserts);
 				}
 				envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert);
-
-				// Tell dyldhook the exact path we injected.
-				//
-				// dyldhook cannot derive it (it must stay self-contained, and it has
-				// no jbroot at that point) and must not recognise it by shape: it
-				// runs inside launchd too, where a shape match also hits launchd's
-				// own environment and made it check in against itself during
-				// "Initializing Jailbreak Environment", hard-rebooting the device.
-				// An exact string comparison cannot collide.
-				envbuf_setenv(&envc, "DOPAMINE_HOOK_DYLIB", hookPath);
 			}
 			// Keep dyld from merging the injected library into the shared cache image
 			// list. RootHide sets this unconditionally on the injection path
@@ -443,7 +348,7 @@ static int spawn_exec_hook_common(bool isExec,
 		}
 		else {
 			if (systemHookAlreadyInserted && existingLibraryInserts) {
-				if (!strcmp(existingLibraryInserts, hook_dylib_path())) {
+				if (!strcmp(existingLibraryInserts, HOOK_DYLIB_PATH)) {
 					envbuf_unsetenv(&envc, "DYLD_INSERT_LIBRARIES");
 				}
 				else {
@@ -452,7 +357,7 @@ static int spawn_exec_hook_common(bool isExec,
 
 					__block bool first = true;
 					string_enumerate_components(existingLibraryInserts, ":", ^(const char *existingLibraryInsert, bool *stop) {
-						if (strcmp(existingLibraryInsert, hook_dylib_path()) != 0) {
+						if (strcmp(existingLibraryInsert, HOOK_DYLIB_PATH) != 0) {
 							if (first) {
 								strcpy(newLibraryInsert, existingLibraryInsert);
 								first = false;

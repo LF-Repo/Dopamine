@@ -395,9 +395,7 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 		// 不再做全局隐藏（不卸载 fakelib、不删除 /var/jb、不搬移文件），其它越狱进程不受影响。
 
 		char **envc = envbuf_mutcopy((const char **)envp);
-		envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", hook_dylib_path());
-		// Exact path for dyldhook; it must not guess it by shape (see common.c).
-		envbuf_setenv(&envc, "DOPAMINE_HOOK_DYLIB", hook_dylib_path());
+		envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", HOOK_DYLIB_PATH);
 		envbuf_setenv(&envc, "DOPAMINE_APP_HIDE", "1");
 		// Keep the hidden library out of dyld's shared cache image list, same as the
 		// normal injection path in common.c. A cached image has a shared
