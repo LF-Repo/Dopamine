@@ -386,47 +386,55 @@
                     [actionsGroupSpecifier setProperty:DOLocalizedString(envManager.isJailbroken ? @"Hint_Hide_Jailbreak_Jailbroken" : @"Hint_Hide_Jailbreak") forKey:@"footerText"];
                 }
 
-                // ===== Hide Settings 分组 =====
-                PSSpecifier *hideSettingsGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
-                hideSettingsGroupSpecifier.name = DOLocalizedString(@"Section_Hide_Settings");
-                [specifiers addObject:hideSettingsGroupSpecifier];
+                // Hide Settings and Mount Settings only make sense while the jailbreak is
+                // actually active. Every control in these groups talks to the
+                // jailbreak environment (the hide rules file, the fakelib mount);
+                // with no jailbreak present those are not merely useless, they
+                // are misleading — a switch that can be flipped but has no
+                // effect. Hide the whole block instead.
+                if (envManager.isJailbroken || envManager.isJailbreakHidden) {
+                    // ===== Hide Settings 分组 =====
+                    PSSpecifier *hideSettingsGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
+                    hideSettingsGroupSpecifier.name = DOLocalizedString(@"Section_Hide_Settings");
+                    [specifiers addObject:hideSettingsGroupSpecifier];
 
-                PSSpecifier *injectionBlockSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
-                [injectionBlockSpecifier setProperty:@"Block App Injection" forKey:@"title"];
-                [injectionBlockSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
-                [injectionBlockSpecifier setProperty:buttonHeight forKey:@"height"];
-                [injectionBlockSpecifier setProperty:@"shield.slash" forKey:@"image"];
-                [injectionBlockSpecifier setProperty:@"injectionBlockPressed" forKey:@"action"];
-                [specifiers addObject:injectionBlockSpecifier];
+                    PSSpecifier *injectionBlockSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                    [injectionBlockSpecifier setProperty:@"Block App Injection" forKey:@"title"];
+                    [injectionBlockSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                    [injectionBlockSpecifier setProperty:buttonHeight forKey:@"height"];
+                    [injectionBlockSpecifier setProperty:@"shield.slash" forKey:@"image"];
+                    [injectionBlockSpecifier setProperty:@"injectionBlockPressed" forKey:@"action"];
+                    [specifiers addObject:injectionBlockSpecifier];
 
-                PSSpecifier *appHideSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
-                [appHideSpecifier setProperty:@"Hide for App" forKey:@"title"];
-                [appHideSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
-                [appHideSpecifier setProperty:buttonHeight forKey:@"height"];
-                [appHideSpecifier setProperty:@"eye.slash.circle" forKey:@"image"];
-                [appHideSpecifier setProperty:@"appHidePressed" forKey:@"action"];
-                [specifiers addObject:appHideSpecifier];
+                    PSSpecifier *appHideSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                    [appHideSpecifier setProperty:@"Hide for App" forKey:@"title"];
+                    [appHideSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                    [appHideSpecifier setProperty:buttonHeight forKey:@"height"];
+                    [appHideSpecifier setProperty:@"eye.slash.circle" forKey:@"image"];
+                    [appHideSpecifier setProperty:@"appHidePressed" forKey:@"action"];
+                    [specifiers addObject:appHideSpecifier];
 
-                PSSpecifier *mountGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
-                mountGroupSpecifier.name = DOLocalizedString(@"Section_Mount_Settings");
-                [mountGroupSpecifier setProperty:DOLocalizedString(@"Mount_Settings_Footer") forKey:@"footerText"];
-                [specifiers addObject:mountGroupSpecifier];
+                    PSSpecifier *mountGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
+                    mountGroupSpecifier.name = DOLocalizedString(@"Section_Mount_Settings");
+                    [mountGroupSpecifier setProperty:DOLocalizedString(@"Mount_Settings_Footer") forKey:@"footerText"];
+                    [specifiers addObject:mountGroupSpecifier];
 
-                PSSpecifier *mountSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
-                [mountSpecifier setProperty:@"Input_Mmount_Title" forKey:@"title"];
-                [mountSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
-                [mountSpecifier setProperty:buttonHeight forKey:@"height"];
-                [mountSpecifier setProperty:@"folder.badge.plus" forKey:@"image"];
-                [mountSpecifier setProperty:@"mountPressed" forKey:@"action"];
-                [specifiers addObject:mountSpecifier];
+                    PSSpecifier *mountSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                    [mountSpecifier setProperty:@"Input_Mmount_Title" forKey:@"title"];
+                    [mountSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                    [mountSpecifier setProperty:buttonHeight forKey:@"height"];
+                    [mountSpecifier setProperty:@"folder.badge.plus" forKey:@"image"];
+                    [mountSpecifier setProperty:@"mountPressed" forKey:@"action"];
+                    [specifiers addObject:mountSpecifier];
 
-                PSSpecifier *unmountSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
-                [unmountSpecifier setProperty:@"Input_Unmount_Title" forKey:@"title"];
-                [unmountSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
-                [unmountSpecifier setProperty:buttonHeight forKey:@"height"];
-                [unmountSpecifier setProperty:@"folder.badge.gearshape" forKey:@"image"];
-                [unmountSpecifier setProperty:@"unmountPressed" forKey:@"action"];
-                [specifiers addObject:unmountSpecifier];
+                    PSSpecifier *unmountSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                    [unmountSpecifier setProperty:@"Input_Unmount_Title" forKey:@"title"];
+                    [unmountSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                    [unmountSpecifier setProperty:buttonHeight forKey:@"height"];
+                    [unmountSpecifier setProperty:@"folder.badge.gearshape" forKey:@"image"];
+                    [unmountSpecifier setProperty:@"unmountPressed" forKey:@"action"];
+                    [specifiers addObject:unmountSpecifier];
+                }
             }
         }
         
