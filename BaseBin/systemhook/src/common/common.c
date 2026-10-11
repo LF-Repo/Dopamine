@@ -327,6 +327,19 @@ static int spawn_exec_hook_common(bool isExec,
 				}
 				envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert);
 			}
+			// Keep dyld from merging the injected library into the shared cache image
+			// list. RootHide sets this unconditionally on the injection path
+			// (roothider.m); we do the same, but only when we really injected this
+			// child — a child that merely inherited the variable already has it set,
+			// and rewriting it would be pure noise on the spawn path.
+			//
+			// Beyond matching RootHide this is what makes the hide reliable: an image
+			// that dyld caches gets its __DATA_CONST shared, so our vm_protect-based
+			// hooks cannot patch it and the process keeps seeing the real jailbreak
+			// state.
+			if (envbuf_getenv(envc, "DYLD_INSERT_LIBRARIES")) {
+				envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
+			}
 			if (hideChild) {
 				// Re-add the hide marker that hidejb_init() unset from our own
 				// environ, so child processes keep hiding.
