@@ -55,6 +55,10 @@ extern kern_return_t mach_vm_region_recurse(vm_map_read_t target_task, mach_vm_a
 #include <dispatch/dispatch.h>
 #include <libjailbreak/codesign.h>
 #include <objc/runtime.h>
+
+// For hook_dylib_path(): our injected library has a per-jailbreak name, and both
+// the rule matcher and the dyld image hiding below need to know it.
+#include "common/common.h"
 #include <objc/message.h>
 
 #ifndef SYS_csops

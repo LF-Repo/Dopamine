@@ -424,7 +424,7 @@ static int spawn_exec_hook_common(bool isExec,
 			// that dyld caches gets its __DATA_CONST shared, so our vm_protect-based
 			// hooks cannot patch it and the process keeps seeing the real jailbreak
 			// state.
-			if (envbuf_getenv(envc, "DYLD_INSERT_LIBRARIES")) {
+			if (envbuf_getenv((const char **)envc, "DYLD_INSERT_LIBRARIES")) {
 				envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
 			}
 			if (hideChild) {
