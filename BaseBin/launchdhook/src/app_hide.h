@@ -45,6 +45,13 @@ void app_hide_abort_pending_hide(void);
 // is running), spawning a jailbreak app (under /var/jb/) restores the jailbreak
 // so the jailbreak app can run. No re-hide on exit (accepted limitation).
 bool app_hide_is_currently_hidden(void);
+
+// True while a resurrection is holding the jailbreak visible on behalf of still
+// running no-inject apps, or while a hide is in flight without a known pid. The
+// watchdog uses this to keep reconciling during those windows instead of assuming
+// "not hidden" means "nothing to do".
+bool app_hide_has_pending_no_inject_state(void);
+
 bool app_hide_is_jailbreak_app(const char *path);
 
 // Settings.app (stock /Applications/Preferences.app) behaves like a jailbreak
