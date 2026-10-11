@@ -373,9 +373,14 @@ __attribute__((constructor)) static void initializer(void)
 
 	// Unset DYLD_INSERT_LIBRARIES, but only if systemhook itself is the only thing contained in it
 	// Feeable attempt at making jailbreak detection harder
+	//
+	// This must compare against hook_dylib_path(), not the canonical macro: the
+	// value we inject is the derived variant, so comparing against the canonical
+	// path would never match and would leave DYLD_INSERT_LIBRARIES visible in
+	// every process — turning a working mitigation into a detection signal.
 	const char *dyldInsertLibraries = getenv("DYLD_INSERT_LIBRARIES");
 	if (dyldInsertLibraries) {
-		if (!strcmp(dyldInsertLibraries, HOOK_DYLIB_PATH)) {
+		if (!strcmp(dyldInsertLibraries, hook_dylib_path())) {
 			unsetenv("DYLD_INSERT_LIBRARIES");
 		}
 	}
