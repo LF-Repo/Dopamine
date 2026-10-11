@@ -803,6 +803,12 @@ void hidejb_init(const char *jbroot)
 	// checks hidejb_is_hidden()).
 	unsetenv("DOPAMINE_APP_HIDE");
 
+	// DYLD_IN_CACHE is ours too and just as obvious: it is never set on a stock
+	// device, so its presence points straight at an injected library. Unsetting it
+	// here is safe — it only matters during dyld's own load of this image, which
+	// has already happened by the time our constructor runs.
+	unsetenv("DYLD_IN_CACHE");
+
 	hidejb_rules_set_jbroot(jbroot);
 	hidejb_rules_set_self_bundle_id();
 

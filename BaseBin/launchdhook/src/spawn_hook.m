@@ -397,6 +397,11 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 		char **envc = envbuf_mutcopy((const char **)envp);
 		envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", HOOK_DYLIB_PATH);
 		envbuf_setenv(&envc, "DOPAMINE_APP_HIDE", "1");
+		// Keep the hidden library out of dyld's shared cache image list, same as the
+		// normal injection path in common.c. A cached image has a shared
+		// __DATA_CONST, so hidejb's vm_protect hooks could not patch it and the app
+		// would keep seeing the real jailbreak state.
+		envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
 		envbuf_unsetenv(&envc, "_SafeMode");
 		envbuf_unsetenv(&envc, "_MSSafeMode");
 
