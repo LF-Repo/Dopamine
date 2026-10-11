@@ -31,6 +31,11 @@ bool hidejb_rules_dir_may_hide_entries(const char *dirpath);
 // (systemhook.dylib, libellekit.dylib, ...). Used for dyld image hiding.
 bool hidejb_rules_path_has_marker(const char *path);
 
+// Register the basename of the injected hook library so it is treated as a
+// jailbreak marker even though its name is randomised per jailbreak. Call once
+// from hidejb_init(). Passing NULL or a too-long name is a no-op.
+void hidejb_rules_register_hook_basename(const char *basename);
+
 // Cheap readdir-side decision: should `entryName`, a component directly inside
 // `dirpath`, be hidden? Avoids building the full path in the hot loop.
 bool hidejb_rules_dir_hides_entry(const char *dirpath, const char *entryName);

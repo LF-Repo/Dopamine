@@ -1,4 +1,4 @@
-﻿#include <stdint.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -204,9 +204,22 @@ void dyldhook_init(uintptr_t kernelParams)
 		}
 		return;		
 	}
-	if (!strstr(insertLibrariesVar, "/systemhook.dylib")) {
+	// If DYLD_INSERT_LIBRARIES does not contain our hook library, bail out.
+	//
+	// This used to match the literal "/systemhook.dylib". The injected path is now
+	// a per-jailbreak variant (see hook_dylib_path() in systemhook/src/common),
+	// so that substring no longer appears. Matching on the ".dylib" suffix plus
+	// the "lib_" prefix keeps dyldhook working without sharing code with
+	// systemhook: dyldhook must stay self-contained (the build enforces this with
+	// CHECK_SELF_CONTAINED), so it cannot call hook_dylib_path() to get the exact
+	// string.
+	//
+	// Being slightly looser here is safe: we only proceed to check in, and a
+	// false positive costs one check-in, while a false negative would leave the
+	// process without its jailbreak info.
+	if (!strstr(insertLibrariesVar, ".dylib") || !strstr(insertLibrariesVar, "/lib_")) {
 		if (gDyldHookLog) {
-			_simple_dprintf(2, "Not checking in, no systemhook found in DYLD_INSERT_LIBRARIES (%s)\n", insertLibrariesVar);
+			_simple_dprintf(2, "Not checking in, no hook library found in DYLD_INSERT_LIBRARIES (%s)\n", insertLibrariesVar);
 		}
 		return;
 	}

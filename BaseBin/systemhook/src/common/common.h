@@ -4,7 +4,24 @@
 #include "private.h"
 #include "inline.h"
 
+// Canonical (real) location of the hook dylib on disk. Used for filesystem work:
+// fakelib symlinks, existence checks, and the basebin layout.
 #define HOOK_DYLIB_PATH "/usr/lib/systemhook.dylib"
+
+// Name-only form of HOOK_DYLIB_PATH, i.e. "systemhook.dylib".
+#define HOOK_DYLIB_NAME "systemhook.dylib"
+
+// The path we actually put into DYLD_INSERT_LIBRARIES.
+//
+// It differs from HOOK_DYLIB_PATH on purpose: the canonical path is a constant
+// that any detector can hardcode, and a hardcoded "/usr/lib/systemhook.dylib"
+// in a process's environment is a giveaway. We derive a per-jailbreak variant
+// from the jailbreak root instead, so the name is not a fixed feature.
+//
+// This returns HOOK_DYLIB_PATH whenever the derivation is not possible (no
+// jbroot known yet, buffer too small, ...). Every caller must therefore keep
+// working with the canonical name, and treat this as a best-effort variant.
+const char *hook_dylib_path(void);
 
 typedef enum 
 {

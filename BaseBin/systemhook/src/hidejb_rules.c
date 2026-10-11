@@ -225,6 +225,37 @@ static const char *gJailbreakPathMarkers[] = {
 	".installed_dopamine",
 };
 
+// The injected library no longer has a fixed name: hook_dylib_path() derives a
+// per-jailbreak variant, so none of the markers above can match it. Without
+// registering it here, a hidden app would be able to see our own library under
+// /usr/lib (path hiding) and in its dyld image list (image hiding).
+//
+// Kept separate from the table above, and checked as one extra strstr(), so the
+// hot path stays a straight scan and we do not reorder the existing entries.
+static char gRegisteredHookBasename[64];
+
+void hidejb_rules_register_hook_basename(const char *basename)
+{
+	if (!basename || !basename[0]) return;
+	if (strlen(basename) >= sizeof(gRegisteredHookBasename)) return; // too long to match safely
+
+	// Only the basename matters: every consumer above matches against the last
+	// path component.
+	const char *slash = strrchr(basename, '/');
+	if (slash) basename = slash + 1;
+
+	strlcpy(gRegisteredHookBasename, basename, sizeof(gRegisteredHookBasename));
+}
+
+static inline bool hidejb_rules_matches_marker(const char *name)
+{
+	for (size_t i = 0; i < sizeof(gJailbreakPathMarkers)/sizeof(gJailbreakPathMarkers[0]); i++) {
+		if (strstr(name, gJailbreakPathMarkers[i])) return true;
+	}
+	if (gRegisteredHookBasename[0] && strstr(name, gRegisteredHookBasename)) return true;
+	return false;
+}
+
 // NOTE: this function runs on *every* file syscall in a hidden process
 // (stat/access/fopen/opendir/readdir/realpath/...), so it is deliberately a
 // straight sequence of cheap rejects that bail out as early as possible. An
@@ -267,10 +298,7 @@ bool __attribute__((optnone)) hidejb_rules_path_is_jailbreak(const char *path)
 	if (strncmp(path, "/usr/lib/", 9) == 0) {
 		const char *base = strrchr(path, '/');
 		base = base ? base + 1 : path;
-		for (size_t i = 0; i < sizeof(gJailbreakPathMarkers)/sizeof(gJailbreakPathMarkers[0]); i++) {
-			if (strstr(base, gJailbreakPathMarkers[i])) return true;
-		}
-		return false;
+		return hidejb_rules_matches_marker(base);
 	}
 
 	// Every hide rule is under /var/mobile. The vast majority of /var/mobile
@@ -299,10 +327,7 @@ bool __attribute__((optnone)) hidejb_rules_path_is_jailbreak(const char *path)
 	}
 
 	// Anything else (rare): only an embedded jailbreak marker matters.
-	for (size_t i = 0; i < sizeof(gJailbreakPathMarkers)/sizeof(gJailbreakPathMarkers[0]); i++) {
-		if (strstr(path, gJailbreakPathMarkers[i])) return true;
-	}
-	return false;
+	return hidejb_rules_matches_marker(path);
 }
 
 // True when the basename of `path` carries a jailbreak marker.
@@ -311,10 +336,7 @@ bool __attribute__((optnone)) hidejb_rules_path_has_marker(const char *path)
 	if (!path || !path[0]) return false;
 	const char *base = strrchr(path, '/');
 	base = base ? base + 1 : path;
-	for (size_t i = 0; i < sizeof(gJailbreakPathMarkers)/sizeof(gJailbreakPathMarkers[0]); i++) {
-		if (strstr(base, gJailbreakPathMarkers[i])) return true;
-	}
-	return false;
+	return hidejb_rules_matches_marker(base);
 }
 
 // Cheap per-entry decision for the readdir hook: `entryName` is a component
