@@ -746,6 +746,7 @@ extern char **environ;
 
     NSString *path = [self injectionRulesPath];
     [rules writeToFile:path atomically:YES];
+    chown(path.fileSystemRepresentation, 501, 501);
     chmod(path.fileSystemRepresentation, 0644);
 
     NSLog(@"[InjectionBlock] %@ -> %@", bundleID, blocked ? @"blocked" : @"allowed");
@@ -810,11 +811,20 @@ extern char **environ;
                 return;
             }
 
+            // Fix ownership explicitly. We wrote as root inside runAsRoot, so the
+            // new inode is root:wheel. launchd reads this file as mobile (501) on
+            // every spawn, and the App re-reads it on its next launch, so a root
+            // owned file in cfprefsd's directory is only readable for as long as
+            // runUnsandboxed's temporary label swap lasts. Hand it to mobile:mobile
+            // so both readers can always see it.
+            chown(path.fileSystemRepresentation, 501, 501);
             chmod(path.fileSystemRepresentation, 0644);
 
-            // Read back: the only proof that the rules really landed.
+            // Read back: the only proof that the rules really landed. Compare the
+            // actual bundle IDs, not just the count: a stale file can have the same
+            // number of entries as the one we meant to write.
             NSDictionary *verify = [NSDictionary dictionaryWithContentsOfFile:path];
-            if ([verify count] != [rules count]) {
+            if (![verify isEqualToDictionary:rules]) {
                 NSLog(@"[AppHide] write verification failed for %@ (wrote %lu entries, read back %lu)",
                       path, (unsigned long)[rules count], (unsigned long)[verify count]);
                 return;
