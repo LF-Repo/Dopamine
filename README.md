@@ -4,7 +4,7 @@
 
 A rootless semi-untethered jailbreak for iOS 15.0 - 17.3.1 (arm64e), iOS 15.0 - 18.7.1, 26.0 - 26.0.1 (A12/A13) and iOS 15.0 - 18.7.1 (arm64). More details will follow here soon.
 
-> This is a fork of the original Dopamine repository. It adds improved jailbreak hiding, jailbreak path mount mapping, and other small enhancements.
+> This is a fork of the original Dopamine repository
 
 **Fork additions:**
 - Improved jailbreak hiding
