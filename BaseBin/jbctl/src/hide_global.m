@@ -204,22 +204,103 @@ static void hideItemAtPath(NSString *src)
 	auditLog([NSString stringWithFormat:@"hide ok: %@", src]);
 }
 
+// Modification date of a path, or 0 when it cannot be read.
+static NSTimeInterval hideItemModified(NSString *path)
+{
+	NSError *error = nil;
+	NSDate *date = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:&error].fileModificationDate;
+	return date ? [date timeIntervalSince1970] : 0;
+}
+
+// Put a quarantined copy somewhere we can still recover it from, instead of
+// letting it become an orphan under the quarantine root with no map entry.
+static void preserveConflict(NSString *dst)
+{
+	if (![[NSFileManager defaultManager] fileExistsAtPath:dst]) return;
+
+	NSString *conflictDir = [hideQuarantineRoot() stringByAppendingPathComponent:@"conflicts"];
+	NSFileManager *fm = [NSFileManager defaultManager];
+	[fm createDirectoryAtPath:conflictDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+	NSString *name = [dst lastPathComponent];
+	NSString *kept = [conflictDir stringByAppendingPathComponent:name];
+	// dst is a bare UUID, but never assume it: if something already landed there,
+	// add a suffix instead of overwriting another conflict copy.
+	for (int n = 1; [fm fileExistsAtPath:kept]; n++) {
+		kept = [conflictDir stringByAppendingPathComponent:
+		        [NSString stringWithFormat:@"%@.%d", name, n]];
+	}
+	if ([fm moveItemAtPath:dst toPath:kept error:nil]) {
+		auditLog([NSString stringWithFormat:@"restore CONFLICT kept live copy, quarantined copy saved: %@", kept]);
+	}
+	else {
+		auditLog([NSString stringWithFormat:@"restore CONFLICT FAILED to preserve quarantined copy: %@", dst]);
+	}
+}
+
 static void restoreHiddenItems(void)
 {
 	NSFileManager *fm = [NSFileManager defaultManager];
 	NSArray *map = [NSArray arrayWithContentsOfFile:hideMapPath()];
+
 	for (NSDictionary *entry in [map reverseObjectEnumerator]) {
 		NSString *src = entry[@"src"];
 		NSString *dst = entry[@"dst"];
 		if (!src || !dst) continue;
-		if ([fm fileExistsAtPath:src]) continue;
 
-		[fm createDirectoryAtPath:[src stringByDeletingLastPathComponent]
-	      withIntermediateDirectories:YES
-	                       attributes:nil
-	                            error:nil];
-		[fm moveItemAtPath:dst toPath:src error:nil];
+		if ([fm fileExistsAtPath:dst]) {
+			if (![fm fileExistsAtPath:src]) {
+				[fm createDirectoryAtPath:[src stringByDeletingLastPathComponent]
+			      withIntermediateDirectories:YES
+			                       attributes:nil
+			                            error:nil];
+				if ([fm moveItemAtPath:dst toPath:src error:nil]) {
+					auditLog([NSString stringWithFormat:@"restore ok: %@", src]);
+				}
+				else {
+					// Leave dst in place AND keep the map entry, so a later restore
+					// pass can still find it. Dropping the map here would strand it.
+					auditLog([NSString stringWithFormat:@"restore FAILED (kept in quarantine): %@", src]);
+					return;
+				}
+				continue;
+			}
+
+			// Both exist. NoInject hides and restores repeatedly, so between two
+			// passes cfprefsd (or the app itself) can recreate the file at its
+			// original path. Silently preferring the live file lost whatever the
+			// quarantine held, which is what made tweak settings go missing.
+			// A rename preserves mtime, so comparing the two tells us which copy
+			// actually has the newer settings.
+			NSTimeInterval srcTime = hideItemModified(src);
+			NSTimeInterval dstTime = hideItemModified(dst);
+
+			if (dstTime > srcTime) {
+				// The quarantined copy is newer: it holds writes the live file
+				// never received. Preserve the live copy before replacing it so
+				// nothing is destroyed either way.
+				preserveConflict(src);
+				[fm removeItemAtPath:src error:nil];
+				if ([fm moveItemAtPath:dst toPath:src error:nil]) {
+					auditLog([NSString stringWithFormat:@"restore ok (quarantined was newer): %@", src]);
+				}
+				else {
+					auditLog([NSString stringWithFormat:@"restore FAILED (quarantined was newer): %@", src]);
+					return;
+				}
+			}
+			else {
+				// The live copy is newer or equally new: keep it, but do not throw
+				// the quarantined copy away unreferenced.
+				preserveConflict(dst);
+				auditLog([NSString stringWithFormat:@"restore ok (live copy was newer): %@", src]);
+			}
+			continue;
+		}
+
+		// Nothing at either end (already restored on a previous pass): idempotent.
 	}
+
 	[fm removeItemAtPath:hideMapPath() error:nil];
 }
 
