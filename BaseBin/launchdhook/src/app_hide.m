@@ -369,6 +369,10 @@ void app_hide_init(void)
 // RootHide-style "no-injection" mode: temporary global hide + bare spawn
 // ---------------------------------------------------------------------------
 
+// Forward declaration: app_hide_restore_files_only() below calls it, but the
+// definition sits further down next to the other jbctl wrappers.
+static void app_hide_run_jbctl(const char *command, const char *arg);
+
 // The set of no-inject app pids that are currently running, which is what the
 // hide state must actually follow. This used to be a bare int refcount, but the
 // count and the real world drifted apart in ways that left the jailbreak stuck
@@ -479,8 +483,8 @@ static void app_hide_restore_files_only(void)
 		return;
 	}
 
-	app_hide_log(@"files: restoring quarantined files after %ds, jailbreak stays hidden",
-				 APP_HIDE_FILES_RESTORE_DELAY_SEC);
+	app_hide_log([NSString stringWithFormat:@"files: restoring quarantined files after %ds, jailbreak stays hidden",
+				  APP_HIDE_FILES_RESTORE_DELAY_SEC]);
 	app_hide_run_jbctl("audit", "restore");
 	gNoInjectFilesRestored = true;
 	pthread_mutex_unlock(&gNoInjectActionLock);
