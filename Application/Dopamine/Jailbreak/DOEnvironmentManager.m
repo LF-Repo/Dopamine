@@ -711,6 +711,40 @@ extern char **environ;
 
 #pragma mark - Injection Blocking Rules
 
+// Read caches for the two rule files. Both live in cfprefsd's directory and are
+// only reachable after dropping root and swapping the sandbox label (see
+// -appHideRules and -injectionRules), which is far too expensive to repeat for
+// every installed App in the settings list. Declared here, ahead of both
+// readers, because a static variable must be declared before it is used.
+static NSDictionary *gInjectionRulesCache = nil;
+static BOOL gInjectionRulesCacheValid = NO;
+static NSDictionary *gAppHideRulesCache = nil;
+static BOOL gAppHideRulesCacheValid = NO;
+
++ (void)invalidateAppHideRulesCache
+{
+    gAppHideRulesCache = nil;
+    gAppHideRulesCacheValid = NO;
+}
+
++ (void)updateAppHideRulesCache:(NSDictionary *)rules
+{
+    gAppHideRulesCache = rules ?: @{};
+    gAppHideRulesCacheValid = YES;
+}
+
++ (void)invalidateInjectionRulesCache
+{
+    gInjectionRulesCache = nil;
+    gInjectionRulesCacheValid = NO;
+}
+
++ (void)updateInjectionRulesCache:(NSDictionary *)rules
+{
+    gInjectionRulesCache = rules ?: @{};
+    gInjectionRulesCacheValid = YES;
+}
+
 - (NSString *)injectionRulesPath
 {
     return @"/var/mobile/Library/Preferences/.DopamineInjectionRules.plist";
@@ -718,7 +752,22 @@ extern char **environ;
 
 - (NSDictionary *)injectionRules
 {
-    NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:[self injectionRulesPath]];
+    // Same reasoning as -appHideRules: the file is written as root and
+    // unsandboxed, so on iOS 17 the sandboxed App cannot read it back and every
+    // injection toggle would appear to revert on the next launch. Cached for the
+    // same reason: this is consulted once per App in the settings list.
+    __block NSDictionary *rules = nil;
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            if (gInjectionRulesCacheValid) {
+                rules = gInjectionRulesCache;
+                return;
+            }
+            rules = [NSDictionary dictionaryWithContentsOfFile:[self injectionRulesPath]];
+            gInjectionRulesCache = rules ?: @{};
+            gInjectionRulesCacheValid = YES;
+        }];
+    }];
     return rules ?: @{};
 }
 
@@ -744,11 +793,44 @@ extern char **environ;
         [rules removeObjectForKey:bundleID];
     }
 
-    NSString *path = [self injectionRulesPath];
-    [rules writeToFile:path atomically:YES];
-    chown(path.fileSystemRepresentation, 501, 501);
-    chmod(path.fileSystemRepresentation, 0644);
+    // Write the same way -appHideRules does: as root, unsandboxed, and without
+    // an atomic replace.
+    //
+    // This previously wrote straight from the sandbox with atomically:YES, which
+    // needs to create a temp file inside /var/mobile/Library/Preferences and
+    // rename over the target — a step the App is refused on iOS 17. That is why
+    // the injection toggle wrote nothing there while the hide toggle worked.
+    __block BOOL success = NO;
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            [DOEnvironmentManager invalidateInjectionRulesCache];
+            NSString *path = [self injectionRulesPath];
+            NSError *error = nil;
+            NSData *data = [NSPropertyListSerialization dataWithPropertyList:rules
+                                                                      format:NSPropertyListXMLFormat_v1_0
+                                                                     options:0
+                                                                       error:&error];
+            if (!data || ![data writeToFile:path atomically:NO]) {
+                NSLog(@"[InjectionBlock] failed to write %@: %@", path, error.localizedDescription);
+                return;
+            }
+            chown(path.fileSystemRepresentation, 501, 501);
+            chmod(path.fileSystemRepresentation, 0644);
 
+            NSDictionary *verify = [NSDictionary dictionaryWithContentsOfFile:path];
+            if ([verify isEqualToDictionary:rules]) {
+                [DOEnvironmentManager updateInjectionRulesCache:verify];
+                success = YES;
+            } else {
+                NSLog(@"[InjectionBlock] write verification failed for %@", path);
+            }
+        }];
+    }];
+
+    if (!success) {
+        NSLog(@"[InjectionBlock] %@ -> %@ (NOT persisted)", bundleID, blocked ? @"blocked" : @"allowed");
+        return;
+    }
     NSLog(@"[InjectionBlock] %@ -> %@", bundleID, blocked ? @"blocked" : @"allowed");
 }
 
@@ -792,6 +874,9 @@ extern char **environ;
     __block BOOL success = NO;
     [self runAsRoot:^{
         [self runUnsandboxed:^{
+            // Drop the read cache first: the bytes on disk are about to change,
+            // and leaving a stale copy would make the toggle appear to revert.
+            [DOEnvironmentManager invalidateAppHideRulesCache];
             NSString *path = [self appHideRulesPath];
             NSError *error = nil;
             NSData *data = [NSPropertyListSerialization dataWithPropertyList:rules
@@ -830,6 +915,10 @@ extern char **environ;
                 return;
             }
 
+            // Repopulate the cache with what we just verified, so the list that
+            // follows this toggle does not need another elevated read and cannot
+            // disagree with what was written.
+            [DOEnvironmentManager updateAppHideRulesCache:verify];
             success = YES;
         }];
     }];
@@ -838,7 +927,30 @@ extern char **environ;
 
 - (NSDictionary *)appHideRules
 {
-    NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:[self appHideRulesPath]];
+    // Read as root and unsandboxed, mirroring writeAppHideRules:.
+    //
+    // The write has to do that (the App may not write into cfprefsd's directory,
+    // and on iOS 17 it may not rename into it either), so the file is only ever
+    // *readable* from that same context. Reading it from the plain sandboxed App
+    // silently returns nil on iOS 17, which is why a toggle that demonstrably
+    // wrote to disk appeared to revert on the next launch: the file was fine, the
+    // reader could not see it.
+    // Reading as root is not free (two sandbox transitions per call), and the
+    // settings list asks for one lookup per installed App. Cache the result so a
+    // full list costs one elevated read instead of one per row; the cache is
+    // dropped whenever writeAppHideRules: runs.
+    __block NSDictionary *rules = nil;
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            if (gAppHideRulesCacheValid) {
+                rules = gAppHideRulesCache;
+                return;
+            }
+            rules = [NSDictionary dictionaryWithContentsOfFile:[self appHideRulesPath]];
+            gAppHideRulesCache = rules ?: @{};
+            gAppHideRulesCacheValid = YES;
+        }];
+    }];
     return rules ?: @{};
 }
 

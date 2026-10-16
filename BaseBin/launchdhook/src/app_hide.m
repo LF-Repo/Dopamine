@@ -440,6 +440,68 @@ static bool app_hide_set_remove(pid_t pid)
 	return false;
 }
 
+// Time after which the *files* are handed back while the jailbreak stays
+// hidden.
+//
+// While files are quarantined, any tweak that keeps running inside a no-inject
+// app reads an empty configuration and looks broken ("tweaks stopped working").
+// A no-inject app is normally only on screen briefly, so by the time the user
+// actually goes back to it the files are already back — which is all the
+// protection that is actually needed, since the point of NoInject is to survive
+// the App being launched and scanned.
+//
+// Only the quarantined files are restored. /var/jb stays removed and fakelib
+// stays unmounted until every tracked app exits, so the jailbreak remains hidden
+// for the whole window; this trades a little stealth late in a long session for
+// tweaks that keep working.
+#define APP_HIDE_FILES_RESTORE_DELAY_SEC 30
+
+// Set once the delayed file restore has fired, so a long-running window does not
+// re-arm the timer on every spawn and so a fresh hide starts from a clean state.
+static bool gNoInjectFilesRestored = false;
+
+// Put the quarantined files back but leave the jailbreak hidden.
+//
+// Runs on a timer rather than on the spawn path, so its ordering with respect to
+// do_hide()/do_restore() is decided by gNoInjectActionLock like every other state
+// change. Both steps are idempotent.
+static void app_hide_restore_files_only(void)
+{
+	pthread_mutex_lock(&gNoInjectActionLock);
+	// Re-check under the action lock: every tracked app may have exited while we
+	// were queued behind another hide/restore, in which case do_restore() already
+	// ran and repeating the audit restore here would be redundant work.
+	pthread_mutex_lock(&gNoInjectLock);
+	bool wanted = gNoInjectActive || gNoInjectSuspended;
+	pthread_mutex_unlock(&gNoInjectLock);
+	if (!wanted) {
+		pthread_mutex_unlock(&gNoInjectActionLock);
+		return;
+	}
+
+	app_hide_log(@"files: restoring quarantined files after %ds, jailbreak stays hidden",
+				 APP_HIDE_FILES_RESTORE_DELAY_SEC);
+	app_hide_run_jbctl("audit", "restore");
+	gNoInjectFilesRestored = true;
+	pthread_mutex_unlock(&gNoInjectActionLock);
+}
+
+static void app_hide_schedule_files_restore(void)
+{
+	// Fire once per hide. Re-arming on every spawn would keep pushing the timer
+	// out while a user flicks between apps, and the point is to stop hiding the
+	// files soon after the window opens.
+	pthread_mutex_lock(&gNoInjectLock);
+	bool alreadyRestored = gNoInjectFilesRestored;
+	pthread_mutex_unlock(&gNoInjectLock);
+	if (alreadyRestored) return;
+
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, APP_HIDE_FILES_RESTORE_DELAY_SEC * NSEC_PER_SEC),
+				   dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+		app_hide_restore_files_only();
+	});
+}
+
 // Reap pids that have already exited, so a crashed no-inject app cannot leave a
 // stale entry pinning the hide on. Caller must hold gNoInjectLock.
 static void app_hide_reap_dead_pids_locked(void)
@@ -592,6 +654,9 @@ static void app_hide_reconcile(const char *reason)
 	gNoInjectSuspended = false;
 	gNoInjectPidCount = 0;
 	gNoInjectHidePending = 0;
+	// The window reopened: arm the delayed file restore again for the same reason
+	// app_hide_global_hide() does, so files come back 30s after the re-hide.
+	gNoInjectFilesRestored = false;
 	pthread_mutex_unlock(&gNoInjectLock);
 
 	// Take the action lock only after releasing gNoInjectLock: gNoInjectLock is a
@@ -601,6 +666,9 @@ static void app_hide_reconcile(const char *reason)
 	if (rehide) {
 		app_hide_log([NSString stringWithFormat:@"reconcile(%s): last no-inject app gone, re-hiding for resumed window", reason]);
 		app_hide_do_hide();
+		// Schedule after do_hide() so the countdown reflects a window that is
+		// actually open, rather than one that queued behind another action.
+		app_hide_schedule_files_restore();
 	} else {
 		app_hide_log([NSString stringWithFormat:@"reconcile(%s): no no-inject app left, restoring jailbreak", reason]);
 		app_hide_do_restore();
@@ -618,6 +686,10 @@ void app_hide_global_hide(void)
 	bool wasHidden = gNoInjectActive;
 	gNoInjectActive = true;
 	gNoInjectSuspended = false;
+	// A genuinely new hide starts a new window, so the delayed file restore has to
+	// be armed again. Doing this here (rather than only when !wasHidden) also
+	// covers entering from the suspended state, where wasHidden is false anyway.
+	gNoInjectFilesRestored = false;
 	// Hide before spawning (the app must not see /var/jb), so until its pid is
 	// recorded the set is legitimately empty. Mark that so the watchdog waits.
 	//
@@ -626,6 +698,11 @@ void app_hide_global_hide(void)
 	// exactly what that case needs.
 	if (!wasHidden) gNoInjectHidePending++;
 	pthread_mutex_unlock(&gNoInjectLock);
+
+	// Arm the timer before doing the hide: do_hide() is the expensive step, and
+	// scheduling first means the countdown starts when the window actually opens.
+	app_hide_schedule_files_restore();
+
 	if (wasHidden) return;
 
 	pthread_mutex_lock(&gNoInjectActionLock);

@@ -248,6 +248,7 @@ int jbctl_handle_internal(const char *command, int argc, char* argv[])
 		if (argc > 1) {
 			if (!strcmp(argv[1], "hide")) return hide_global_audit_hide();
 			else if (!strcmp(argv[1], "restore")) return hide_global_audit_restore();
+			else if (!strcmp(argv[1], "recover")) return hide_global_audit_recover();
 		}
 		return -1;
 	}

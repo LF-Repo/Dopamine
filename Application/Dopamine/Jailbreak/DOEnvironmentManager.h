@@ -20,6 +20,15 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (instancetype)sharedManager;
 
+// Internal cache management for the Hide-for-App and injection-block rule files.
+// Both live in cfprefsd's directory and are only reachable after dropping root
+// and swapping the sandbox label, so they are read once and cached; the writer
+// drops and repopulates the cache around its own change.
++ (void)invalidateAppHideRulesCache;
++ (void)updateAppHideRulesCache:(NSDictionary *)rules;
++ (void)invalidateInjectionRulesCache;
++ (void)updateInjectionRulesCache:(NSDictionary *)rules;
+
 - (NSString *)appVersion;
 - (NSString *)appVersionDisplayString;
 - (NSString *)nightlyHash;
