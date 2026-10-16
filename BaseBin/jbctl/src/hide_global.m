@@ -183,7 +183,7 @@ static void auditLog(NSString *msg)
 // overlap: a no-inject App spawned while a jailbreak App is launching triggers
 // hide from both the spawn path and the resurrection path, and each rewrites the
 // whole array. The slower writer then lands last and silently drops the other
-// one's entries â€” their files are already moved, but nothing will ever move them
+// one's entries â€?their files are already moved, but nothing will ever move them
 // back, which is exactly the "settings files gone after a restart" symptom.
 //
 // Reading the file fresh on every write and adding just the new entry makes the
@@ -191,7 +191,7 @@ static void auditLog(NSString *msg)
 // *tail*, but never loses the head it already committed, and a lost tail is
 // recoverable on the next pass because the source file is simply absent and the
 // audit walk re-discovers it.
-static NSMutableArray *readHideMap(NSFileManager *fm)
+static NSMutableArray *readHideMap(void)
 {
 	NSArray *existing = [NSArray arrayWithContentsOfFile:hideMapPath()];
 	return existing ? [existing mutableCopy] : [NSMutableArray array];
@@ -199,7 +199,8 @@ static NSMutableArray *readHideMap(NSFileManager *fm)
 
 static void hideItemAtPath(NSString *src)
 {
-	NSFileManager *fm = [NSFileManager defaultManager];	NSString *root = hideQuarantineRoot();
+	NSFileManager *fm = [NSFileManager defaultManager];
+	NSString *root = hideQuarantineRoot();
 	[fm createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
 
 	// Record the mapping BEFORE moving. The other order loses the file outright if
@@ -211,7 +212,7 @@ static void hideItemAtPath(NSString *src)
 	// may have added entries since, and overwriting the file with our stale copy
 	// would strand every file that hider moved. See readHideMap() above.
 	NSString *dst = [root stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
-	NSMutableArray *map = readHideMap(fm);
+	NSMutableArray *map = readHideMap();
 	[map addObject:@{ @"src": src, @"dst": dst }];
 	if (![map writeToFile:hideMapPath() atomically:YES]) {
 		auditLog([NSString stringWithFormat:@"hide ABORTED (map write failed): %@", src]);
@@ -219,11 +220,11 @@ static void hideItemAtPath(NSString *src)
 	}
 
 	if (![fm moveItemAtPath:src toPath:dst error:nil]) {
-		// Roll this entry back â€” and only this one â€” so restore doesn't try to
+		// Roll this entry back â€?and only this one â€?so restore doesn't try to
 		// move a file that is still sitting in its original place. Read the map
 		// fresh again: another hider may have appended since our write, and
 		// rewriting from our in-memory copy would drop those entries.
-		NSMutableArray *fresh = readHideMap(fm);
+		NSMutableArray *fresh = readHideMap();
 		[fresh removeObject:@{ @"src": src, @"dst": dst }];
 		[fresh writeToFile:hideMapPath() atomically:YES];
 		auditLog([NSString stringWithFormat:@"hide FAILED: %@", src]);
