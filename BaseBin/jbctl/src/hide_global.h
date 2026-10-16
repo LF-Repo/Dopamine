@@ -11,5 +11,8 @@ int hide_global_urlschemes_hide(void);
 int hide_global_urlschemes_show(void);
 int hide_global_audit_hide(void);
 int hide_global_audit_restore(void);
+// Drain a quarantine left behind by a hide that never got restored (reboot or
+// logout while hidden). Safe to call when there is nothing pending.
+int hide_global_audit_recover(void);
 
 #endif // HIDE_GLOBAL_H

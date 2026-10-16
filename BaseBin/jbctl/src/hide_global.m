@@ -174,18 +174,44 @@ static void auditLog(NSString *msg)
 	}
 }
 
+// Write the quarantine map, appending in place.
+//
+// The map is the only record of where each quarantined file went, so it must
+// survive losing a race with a concurrent writer and must never be replaced by a
+// shorter copy. It used to be rewritten atomically from the array we had in
+// memory, which is only safe if this process is the sole writer. Two hiders can
+// overlap: a no-inject App spawned while a jailbreak App is launching triggers
+// hide from both the spawn path and the resurrection path, and each rewrites the
+// whole array. The slower writer then lands last and silently drops the other
+// one's entries — their files are already moved, but nothing will ever move them
+// back, which is exactly the "settings files gone after a restart" symptom.
+//
+// Reading the file fresh on every write and adding just the new entry makes the
+// operation additive: an interleaved writer can still be overwritten for the
+// *tail*, but never loses the head it already committed, and a lost tail is
+// recoverable on the next pass because the source file is simply absent and the
+// audit walk re-discovers it.
+static NSMutableArray *readHideMap(NSFileManager *fm)
+{
+	NSArray *existing = [NSArray arrayWithContentsOfFile:hideMapPath()];
+	return existing ? [existing mutableCopy] : [NSMutableArray array];
+}
+
 static void hideItemAtPath(NSString *src)
 {
-	NSFileManager *fm = [NSFileManager defaultManager];
-	NSString *root = hideQuarantineRoot();
+	NSFileManager *fm = [NSFileManager defaultManager];	NSString *root = hideQuarantineRoot();
 	[fm createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
 
 	// Record the mapping BEFORE moving. The other order loses the file outright if
 	// we die in between: the move would have succeeded but the map would not know
 	// where the quarantined copy went, leaving an unnamed orphan under the
 	// quarantine root that nothing can ever restore.
+	//
+	// Re-read the map rather than reusing a copy held in memory: another hider
+	// may have added entries since, and overwriting the file with our stale copy
+	// would strand every file that hider moved. See readHideMap() above.
 	NSString *dst = [root stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
-	NSMutableArray *map = [[NSArray arrayWithContentsOfFile:hideMapPath()] mutableCopy] ?: [NSMutableArray array];
+	NSMutableArray *map = readHideMap(fm);
 	[map addObject:@{ @"src": src, @"dst": dst }];
 	if (![map writeToFile:hideMapPath() atomically:YES]) {
 		auditLog([NSString stringWithFormat:@"hide ABORTED (map write failed): %@", src]);
@@ -193,10 +219,13 @@ static void hideItemAtPath(NSString *src)
 	}
 
 	if (![fm moveItemAtPath:src toPath:dst error:nil]) {
-		// Roll the entry back so restore doesn't try to move a file that is still
-		// sitting in its original place.
-		[map removeLastObject];
-		[map writeToFile:hideMapPath() atomically:YES];
+		// Roll this entry back — and only this one — so restore doesn't try to
+		// move a file that is still sitting in its original place. Read the map
+		// fresh again: another hider may have appended since our write, and
+		// rewriting from our in-memory copy would drop those entries.
+		NSMutableArray *fresh = readHideMap(fm);
+		[fresh removeObject:@{ @"src": src, @"dst": dst }];
+		[fresh writeToFile:hideMapPath() atomically:YES];
 		auditLog([NSString stringWithFormat:@"hide FAILED: %@", src]);
 		return;
 	}
@@ -441,6 +470,41 @@ int hide_global_audit_restore(void)
 		auditLog(@"=== audit restore START ===");
 		restoreHiddenItems();
 		auditLog(@"=== audit restore END ===");
+	}
+	return 0;
+}
+
+// Put back anything left over from a hide that never got to restore.
+//
+// A hide is a destructive operation: the files are moved to a quarantine root
+// that nothing else knows about. Normally every path back is taken (the app
+// exits, the watchdog notices, a no-inject app is killed), but a device reboot,
+// a user logout or a launchd restart in the middle of a window leaves the
+// quarantine populated with no map-driven caller left to drain it. The files
+// then stay at their quarantine paths indefinitely and every tweak that reads
+// them looks broken.
+//
+// This runs once at startup, before anything else needs those files, so the
+// window is closed for good instead of depending on the previous session to have
+// ended cleanly.
+int hide_global_audit_recover(void)
+{
+	@autoreleasepool {
+		NSFileManager *fm = [NSFileManager defaultManager];
+		NSString *map = hideMapPath();
+		if (![fm fileExistsAtPath:map]) return 0;
+
+		NSArray *entries = [NSArray arrayWithContentsOfFile:map];
+		if (!entries.count) {
+			auditLog(@"=== audit recover: empty map, clearing ===");
+			[fm removeItemAtPath:map error:nil];
+			return 0;
+		}
+
+		auditLog([NSString stringWithFormat:@"=== audit recover: %lu leftover entr(ies) from a previous session ===",
+		          (unsigned long)entries.count]);
+		restoreHiddenItems();
+		auditLog(@"=== audit recover END ===");
 	}
 	return 0;
 }

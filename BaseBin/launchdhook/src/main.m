@@ -178,6 +178,17 @@ __attribute__((constructor)) static void initializer(void)
 		// So we need to host our own here again, just so that jbctl can talk to it
 		mach_port_t serverPort = jbserver_local_start();
 		jbctl_earlyboot(serverPort, "internal", "fakelib", "unmount", NULL);
+
+		// Being here means the previous userspace was rebooted or the user was
+		// logged out while the jailbreak was still hidden, so whatever the audit
+		// pass had quarantined never got restored — the process that would have
+		// restored it died with the old userspace. Drain that quarantine now,
+		// before anything can observe the missing files.
+		//
+		// This must happen inside the same jbserver session as the unmount above:
+		// both need the bindfs-allow entitlement and root, and standing up a second
+		// local server for it would double the startup cost of every boot.
+		jbctl_earlyboot(serverPort, "internal", "audit", "recover", NULL);
 		jbserver_local_stop();
 
 		// Also disable the systemwide domain again
