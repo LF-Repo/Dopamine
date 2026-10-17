@@ -464,6 +464,11 @@ static bool app_hide_set_remove(pid_t pid)
 // re-arm the timer on every spawn and so a fresh hide starts from a clean state.
 static bool gNoInjectFilesRestored = false;
 
+// Latch for the watchdog's idle /var/jb check: has it already tried to restore a
+// jailbreak that nothing was asking to be hidden? See the watchdog for why an
+// unbounded retry is not safe. Re-armed by app_hide_global_hide().
+static bool gIdleRestoreAttempted = false;
+
 // Put the quarantined files back but leave the jailbreak hidden.
 //
 // Runs on a timer rather than on the spawn path, so its ordering with respect to
@@ -745,6 +750,10 @@ void app_hide_global_hide(void)
 	if (!wasHidden) gNoInjectHidePending++;
 	pthread_mutex_unlock(&gNoInjectLock);
 
+	// A new hide is new work: let the watchdog try an idle /var/jb repair again if
+	// this hide cycle leaves it missing.
+	gIdleRestoreAttempted = false;
+
 	// Arm the timer before doing the hide: do_hide() is the expensive step, and
 	// scheduling first means the countdown starts when the window actually opens.
 	app_hide_schedule_files_restore();
@@ -1003,14 +1012,16 @@ static void app_hide_start_watchdog(void)
 	dispatch_once(&onceToken, ^{
 		dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
 			dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
-		// 2s rather than 5s: this is only a safety net for events that never arrive (a
-		// crashed app, a missed exit). The normal path is the exit watcher, which
-		// restores immediately, so the interval only decides how long a *missed*
-		// event stays invisible — and a hidden jailbreak looks exactly like
-		// "tweaks disappeared". The body returns immediately unless something is
-		// actually wrong, so the cost is a handful of cheap comparisons.
-		dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
-			2 * NSEC_PER_SEC, 1 * NSEC_PER_SEC);
+		// 5s. This was 2s in an attempt to shorten the window in which a *missed*
+		// exit event leaves the jailbreak hidden, but that shortened a symptom at
+		// the cost of the worst possible place to spend CPU: this runs inside
+		// launchd (pid 1), and the check below can invoke a full audit restore —
+		// which walks and moves every quarantined file — so a tighter interval
+		// multiplies straight onto device-wide latency. A missed event is
+		// recoverable; a launchd that spends its time in a blocking jbctl call
+		// while userspace waits on it is not.
+		dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
+			5 * NSEC_PER_SEC, 1 * NSEC_PER_SEC);
 		dispatch_source_set_event_handler(timer, ^{
 			// Two independent checks, because a hide can go wrong in two ways:
 
@@ -1040,8 +1051,16 @@ static void app_hide_start_watchdog(void)
 			//    (or before the jailbreak is applied) /var/jb is legitimately
 			//    absent, and acting on that would spawn jbctl every 5s forever
 			//    doing nothing.
+			//
+			//    The latch matters just as much. This is the only branch that calls
+			//    do_restore() with no no-inject app asking for it, so if /var/jb is
+			//    still absent after a restore genuinely ran, the cause is outside
+			//    our control and retrying only burns launchd on a blocking call
+			//    that cannot succeed. Attempt once per hide cycle; the next
+			//    app_hide_global_hide() re-arms it, since that is new work.
 			const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
-			if (jbroot && jbroot[0] && access("/var/jb", F_OK) != 0) {
+			if (!gIdleRestoreAttempted && jbroot && jbroot[0] && access("/var/jb", F_OK) != 0) {
+				gIdleRestoreAttempted = true;
 				app_hide_log(@"watchdog: /var/jb missing while not hidden, re-restoring");
 				pthread_mutex_lock(&gNoInjectActionLock);
 				// Same reasoning as the resurrect path: this restores every
