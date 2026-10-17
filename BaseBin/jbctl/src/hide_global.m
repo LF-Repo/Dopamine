@@ -183,7 +183,7 @@ static void auditLog(NSString *msg)
 // overlap: a no-inject App spawned while a jailbreak App is launching triggers
 // hide from both the spawn path and the resurrection path, and each rewrites the
 // whole array. The slower writer then lands last and silently drops the other
-// one's entries â€?their files are already moved, but nothing will ever move them
+// one's entries â€”their files are already moved, but nothing will ever move them
 // back, which is exactly the "settings files gone after a restart" symptom.
 //
 // Reading the file fresh on every write and adding just the new entry makes the
@@ -220,7 +220,7 @@ static void hideItemAtPath(NSString *src)
 	}
 
 	if (![fm moveItemAtPath:src toPath:dst error:nil]) {
-		// Roll this entry back â€?and only this one â€?so restore doesn't try to
+		// Roll this entry back â€”and only this one â€”so restore doesn't try to
 		// move a file that is still sitting in its original place. Read the map
 		// fresh again: another hider may have appended since our write, and
 		// rewriting from our in-memory copy would drop those entries.
