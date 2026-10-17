@@ -397,11 +397,20 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 		char **envc = envbuf_mutcopy((const char **)envp);
 		envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", HOOK_DYLIB_PATH);
 		envbuf_setenv(&envc, "DOPAMINE_APP_HIDE", "1");
-		// Keep the hidden library out of dyld's shared cache image list, same as the
-		// normal injection path in common.c. A cached image has a shared
-		// __DATA_CONST, so hidejb's vm_protect hooks could not patch it and the app
-		// would keep seeing the real jailbreak state.
-		envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
+		// Deliberately NOT setting DYLD_IN_CACHE=0 here.
+		//
+		// It was set to match roothider, on the theory that a cached image has a
+		// shared __DATA_CONST that hidejb's vm_protect hooks cannot patch. The cost
+		// is that dyld must re-map systemhook into every spawned process instead
+		// of sharing one cached image, and this is the spawn path: it turned into
+		// visible device-wide lag, worst on the Home screen where SpringBoard
+		// churns spawns on every foreground switch. Inside a running app it was
+		// smooth, which is exactly what a per-spawn mapping cost looks like.
+		//
+		// The trade is deliberate. If a hidejb hook fails to apply because its
+		// target turned out to be cached, that one app sees real jailbreak state —
+		// but the jailbreak stays hidden for everything else, and the device stays
+		// responsive. Losing a hook is recoverable; stalling userspace is not.
 		envbuf_unsetenv(&envc, "_SafeMode");
 		envbuf_unsetenv(&envc, "_MSSafeMode");
 

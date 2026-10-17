@@ -327,19 +327,24 @@ static int spawn_exec_hook_common(bool isExec,
 				}
 				envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newLibraryInsert);
 			}
-			// Keep dyld from merging the injected library into the shared cache image
-			// list. RootHide sets this unconditionally on the injection path
-			// (roothider.m); we do the same, but only when we really injected this
-			// child — a child that merely inherited the variable already has it set,
-			// and rewriting it would be pure noise on the spawn path.
+			// Deliberately NOT setting DYLD_IN_CACHE=0 here, even though roothider.m
+			// sets it on its injection path. This branch runs for every injected
+			// child, not just the app-hide ones, so the cost lands on the whole
+			// system rather than on a single hidden app.
 			//
-			// Beyond matching RootHide this is what makes the hide reliable: an image
-			// that dyld caches gets its __DATA_CONST shared, so our vm_protect-based
-			// hooks cannot patch it and the process keeps seeing the real jailbreak
-			// state.
-			if (envbuf_getenv((const char **)envc, "DYLD_INSERT_LIBRARIES")) {
-				envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
-			}
+			// DYLD_IN_CACHE=0 tells dyld not to merge the injected library into the
+			// shared cache image list. That makes dyld map systemhook separately in
+			// every spawned process instead of sharing one cached image, and since
+			// this is the spawn path it showed up as device-wide lag — noticeably on
+			// the Home screen, where SpringBoard spawns constantly while the user
+			// switches apps. A running app itself stayed smooth, which is the
+			// signature of a per-spawn cost rather than a runtime one.
+			//
+			// The original motivation was that a cached image has a shared
+			// __DATA_CONST, so hidejb's vm_protect hooks cannot patch it. That is a
+			// real effect, but a failed hook only means one app observes the real
+			// jailbreak state, while the alternative is stalling userspace. Losing a
+			// hook is recoverable; losing responsiveness is not.
 			if (hideChild) {
 				// Re-add the hide marker that hidejb_init() unset from our own
 				// environ, so child processes keep hiding.
