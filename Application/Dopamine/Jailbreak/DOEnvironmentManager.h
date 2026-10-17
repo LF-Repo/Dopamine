@@ -62,6 +62,13 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)respring;
 - (void)rebootUserspace;
 - (void)rebootUserspaceAfterJailbreak;
+
+// Finish a jailbreak hide that was requested but never completed (interrupted by
+// a reboot, a logout or a crash). Safe to call unconditionally: it no-ops unless
+// the hide-intent marker is present, which is only written when the user actually
+// asked for the jailbreak to be hidden.
+- (void)verifyAndCompleteHiddenStateOnLaunch;
+- (void)verifyAndCompleteHiddenState;
 - (void)rebuildIconCache;
 - (void)refreshJailbreakApps;
 - (void)reboot;

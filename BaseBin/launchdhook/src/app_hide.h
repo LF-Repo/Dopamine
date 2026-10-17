@@ -71,4 +71,13 @@ void app_hide_track_jailbreak_app(pid_t pid);
 // still-launching foreground app from a background launch.
 void app_hide_check_role_after_spawn(pid_t pid);
 
+// Undo a jailbreak-level hide that was still in effect when the previous
+// userspace ended (reboot-while-hidden, logout-while-hidden).
+//
+// The hide is a one-way ratchet on its own: it removes /var/jb, unmounts fakelib
+// and leaves .safe_mode on disk, and no launchd-side code puts any of that back.
+// Called only from launchdhook's startup path, where "the previous session ended
+// hidden" is a known fact rather than a guess. Idempotent.
+void app_hide_recover_hidden_jailbreak(void);
+
 #endif // APP_HIDE_H

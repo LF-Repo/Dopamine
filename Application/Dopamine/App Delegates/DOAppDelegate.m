@@ -6,6 +6,7 @@
 //
 
 #import "DOAppDelegate.h"
+#import "../Jailbreak/DOEnvironmentManager.h"
 
 @interface DOAppDelegate ()
 
@@ -15,6 +16,12 @@
 
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    // If the user asked for the jailbreak to be hidden but the last hide attempt
+    // was cut short (reboot, logout, crash), finish it now. Self-gating: it no-ops
+    // unless the hide-intent marker is present, so calling it on every launch is
+    // safe.
+    [[DOEnvironmentManager sharedManager] verifyAndCompleteHiddenStateOnLaunch];
+
     // Override point for customization after application launch.
     return YES;
 }

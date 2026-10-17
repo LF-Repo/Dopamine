@@ -189,6 +189,24 @@ __attribute__((constructor)) static void initializer(void)
 		// both need the bindfs-allow entitlement and root, and standing up a second
 		// local server for it would double the startup cost of every boot.
 		jbctl_earlyboot(serverPort, "internal", "audit", "recover", NULL);
+
+		// A userspace reboot or a logout that happens while hidden used to carry
+		// the hidden state into the new session and leave it there: /var/jb stayed
+		// removed, fakelib stayed unmounted and .safe_mode stayed on disk, so
+		// every process kept refusing to load tweaks. Nothing ever undid it — the
+		// only thing that cleared the state was the user opening the app and
+		// pressing "unhide". From launchd's side that reads as "the jailbreak
+		// mysteriously turned itself back on after a reboot".
+		//
+		// Undo it here, at the only point where we know for certain the previous
+		// session ended hidden. Deliberately not done any later: by then
+		// user-space processes have already started against a half-restored
+		// environment.
+		//
+		// Must run inside this same jbserver session: it issues its own jbctl calls
+		// (fakelib mount, audit restore), and jbserver_local_stop() below tears
+		// down the only server they could talk to.
+		app_hide_recover_hidden_jailbreak();
 		jbserver_local_stop();
 
 		// Also disable the systemwide domain again
@@ -196,8 +214,8 @@ __attribute__((constructor)) static void initializer(void)
 
 		// No need to keep this around
 		unsetenv("DOPAMINE_IS_HIDDEN");
-	}
 
+	}
 	// This will ensure launchdhook is always reinjected after userspace reboots
 	// As this launchd will pass environ to the next launchd...
 	setenv("DYLD_INSERT_LIBRARIES", JBROOT_PATH("/basebin/launchdhook.dylib"), 1);
