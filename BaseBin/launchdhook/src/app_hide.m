@@ -649,6 +649,59 @@ static void app_hide_do_restore(void)
 	app_hide_run_jbctl("audit", "restore");
 }
 
+// Undo a jailbreak-level hide left over from a previous userspace.
+//
+// Distinct from app_hide_do_restore() above: that one undoes a *temporary*
+// no-inject hide and must stay cheap and re-runnable while apps come and go.
+// This one runs once, at launchd startup, and has to put back the extra pieces
+// the permanent hide does that the temporary one never touched:
+//
+//   - .safe_mode, which makes every process refuse to load tweaks. Without
+//     removing it the device looks jailbroken-but-dead, which is what people
+//     report as "the jailbreak turned itself back on".
+//   - the fakelib mount, which a userspace reboot always tears down and which
+//     the startup path therefore unmounts again.
+//   - /var/jb, which the hide deleted and nothing on the launchd side recreates.
+//
+// Only called when the previous session actually ended hidden, so there is no
+// risk of it undoing a hide that is still wanted.
+void app_hide_recover_hidden_jailbreak(void)
+{
+	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
+	if (!jbroot || !jbroot[0]) {
+		app_hide_log(@"recover-hidden: no jailbreak root, nothing to do");
+		return;
+	}
+
+	app_hide_log(@"recover-hidden: previous session ended hidden, restoring jailbreak");
+
+	// Same steps in the same order as app_hide_do_restore(): symlink first so the
+	// jailbreak is reachable, fakelib next so /usr/lib works, audit last because
+	// it is the slow one.
+	if (access("/var/jb", F_OK) != 0) {
+		if (symlink(jbroot, "/var/jb") != 0) {
+			app_hide_log([NSString stringWithFormat:@"recover-hidden: FAILED to recreate /var/jb (errno %d)", errno]);
+			return;
+		}
+	}
+
+	app_hide_run_jbctl("fakelib", "mount");
+
+	// .safe_mode has to go before the audit restore, and on its own: it is the
+	// one piece that is not a jbctl action, and leaving it behind would keep
+	// every tweak disabled no matter how healthy the rest of the jailbreak is.
+	NSString *safeModePath = [NSString stringWithFormat:@"%s/basebin/.safe_mode", jbroot];
+	if ([[NSFileManager defaultManager] fileExistsAtPath:safeModePath]) {
+		if ([[NSFileManager defaultManager] removeItemAtPath:safeModePath error:nil]) {
+			app_hide_log(@"recover-hidden: removed .safe_mode (tweaks re-enabled)");
+		} else {
+			app_hide_log(@"recover-hidden: FAILED to remove .safe_mode");
+		}
+	}
+
+	app_hide_run_jbctl("audit", "restore");
+}
+
 // Record that a no-inject app was spawned. Called right after the bare spawn, so
 // by the time this runs the pid exists and the watchdog can verify it. Also closes
 // the pending window opened by app_hide_global_hide().

@@ -448,14 +448,143 @@ extern char **environ;
     [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
 }
 
+// Records that the user asked for the jailbreak to be hidden.
+//
+// This is a *separate* file from the ones the hide itself touches, on purpose.
+// Its only job is to survive a reboot or a crash and answer the one question
+// that cannot be answered from the live state: "did the user want this hidden?".
+//
+// .DopamineCrashReporterDisabled cannot serve that purpose — the crash reporter
+// setting writes and removes it independently, so a user who merely turned the
+// crash reporter off would look like a half-finished hide. Likewise /var/jb and
+// .safe_mode are the hide's *effects*, not its intent, and an effect that is
+// still present after a reboot tells us nothing about whether it was meant to be.
+- (NSString *)hideIntentMarkerPath
+{
+    return @"/var/mobile/.DopamineHideRequested";
+}
+
+- (BOOL)isHideRequested
+{
+    return [[NSFileManager defaultManager] fileExistsAtPath:[self hideIntentMarkerPath]];
+}
+
+- (void)setHideRequested:(BOOL)requested
+{
+    NSString *path = [self hideIntentMarkerPath];
+    if (requested) {
+        // Non-atomic: /var/mobile is cfprefsd-adjacent and an atomic write has to
+        // rename into it, which iOS 17 refuses for this process. The file is empty,
+        // so a failed write simply leaves it absent, which reads as "not requested"
+        // and is the safe direction to fail in.
+        [[NSData data] writeToFile:path atomically:NO];
+    } else {
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    }
+}
+//
+// The intent marker is what makes this safe to run: it only fires when the user
+// Finish a jailbreak hide that was requested but never completed.
+//
+// The hide is a chain of independent steps (unregister apps, unmount fakelib,
+// write .safe_mode, fake devmode, hide url schemes, remove /var/jb, quarantine
+// files). If it is interrupted — a reboot, a logout, a crash, a jbctl call that
+// never returns — the result is a jailbreak that is *partly* hidden: /var/jb is
+// gone but tweaks still load, or the reverse. Nothing used to notice, so the
+// state simply persisted until the user opened the app and toggled it.
+//
+// The intent marker is what makes this safe to run: it only fires when the user
+// actually asked for the jailbreak to be hidden. Without it, a jailbreak that
+// was never hidden would be hidden by this code, which is the exact opposite of
+// what the user asked for.
+- (void)verifyAndCompleteHiddenState
+{
+    if (![self isHideRequested]) return;
+    if (![self isJailbroken]) return;
+
+    // Work out what is actually missing rather than re-running the whole hide.
+    // Each step is idempotent, so redoing them all would also be correct — but it
+    // would reboot every jailbreak app and churn the URL scheme database on every
+    // jailbreak, which is exactly the kind of disruption this check exists to
+    // avoid.
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL symlinkGone = ![fm fileExistsAtPath:@"/var/jb"];
+    BOOL safeModeSet = [fm fileExistsAtPath:JBROOT_PATH(@"/basebin/.safe_mode")];
+    // The audit writes its map before moving anything, so a populated map means
+    // files are still quarantined; an empty one means the hide never got there.
+    BOOL filesQuarantined = [fm fileExistsAtPath:@"/var/mobile/.DopamineHideQuarantine/map.plist"];
+
+    if (symlinkGone && safeModeSet && !filesQuarantined) {
+        // The two defining effects are both in place and nothing is left
+        // quarantined. Treat the hide as complete.
+        return;
+    }
+
+    NSLog(@"[HideVerify] hide was requested but incomplete (symlinkGone=%d safeMode=%d quarantined=%d), completing it",
+          symlinkGone, safeModeSet, filesQuarantined);
+
+    // Re-run setJailbreakHidden:YES through the normal path. It early-outs when
+    // it believes the jailbreak is already hidden, so drive the remaining pieces
+    // explicitly instead of relying on that.
+    if (!safeModeSet) {
+        [[NSData data] writeToFile:JBROOT_PATH(@"/basebin/.safe_mode") atomically:YES];
+        [self setForkfixEnabled:NO];
+    }
+
+    if (!symlinkGone) {
+        [[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:nil];
+    }
+
+    if (!filesQuarantined) {
+        [self hideJailbreakURLSchemes];
+        [self runJailbreakLibraryAudit];
+    }
+
+    // fakelib and preboot protection back to their hidden values. Both are cheap
+    // and idempotent, so unconditionally.
+    [self setPrivatePrebootProtected:NO];
+    [self setFakelibMounted:NO];
+
+    NSLog(@"[HideVerify] completed the requested hide");
+}
+
 // Used by the jailbreak flow itself (right after a successful bootstrap). The
 // jailbreak was just created, so it is visible by definition and no unhide is
 // needed - and probing the hidden state here is exactly what used to hang the
 // initialization, because the bootstrapper is still moving the /var/jb symlink
 // around at this point.
+//
+// The hidden-state check deliberately does NOT run here. This method is the last
+// thing finalize() does before the userspace reboot tears this process down, so
+// anything scheduled now would race this process's own death. It runs on the next
+// launch instead (see -verifyAndCompleteHiddenStateOnLaunch), which is both
+// reliable and later - by then a reboot or logout in between has also landed.
 - (void)rebootUserspaceAfterJailbreak
 {
     [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
+}
+
+// Run the completion check once, shortly after launch, when a hide was requested.
+//
+// Covers every way the jailbreak can come back up: the normal jailbreak flow, a
+// reboot or logout while hidden, and a hide that died part-way through. Late
+// enough that the userspace has settled, early enough that a user who reopens the
+// app to check sees the corrected state.
+- (void)verifyAndCompleteHiddenStateOnLaunch
+{
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        // isJailbroken must already be true: during bootstrap the /var/jb symlink
+        // is in flux, and probing or touching the hidden state there hangs the app.
+        if (![self isJailbroken]) return;
+        if (![self isHideRequested]) return;
+
+        // Let the launch settle first, for the same reason.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+                       dispatch_get_main_queue(), ^{
+            [self verifyAndCompleteHiddenState];
+        });
+    });
 }
 
 - (void)rebuildIconCache
@@ -1422,6 +1551,10 @@ static BOOL gAppHideRulesCacheValid = NO;
     return ![[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"];
 }
 
+// Records that the user asked for the jailbreak to be hidden.
+//
+// This is a *separate* file from the ones the hide itself touches, on purpose.
+
 - (void)setJailbreakHidden:(BOOL)hidden
 {
     if (hidden && ![self isJailbroken] && geteuid() != 0) {
@@ -1433,6 +1566,14 @@ static BOOL gAppHideRulesCacheValid = NO;
         BOOL alreadyHidden = [self isJailbreakHidden];
         if (hidden != alreadyHidden) {
             if (hidden) {
+                // Record the intent *first*, before touching anything. If this
+                // hide dies halfway — a reboot, a crash, a jbctl call that never
+                // returns — the marker is still there, and the post-jailbreak check
+                // can tell a half-finished hide from "the user never hid it" and
+                // finish the job. Written last it would be lost in exactly the case
+                // it exists to cover.
+                [self setHideRequested:YES];
+
                 // 用户手动隐藏：删掉 monitor 标记，防止 monitor 自动恢复
                 [[NSFileManager defaultManager] removeItemAtPath:@"/var/mobile/.DopamineMonitorDidHide" error:nil];
 
@@ -1468,6 +1609,11 @@ static BOOL gAppHideRulesCacheValid = NO;
                 }
             }
             else {
+                // Clear the intent before restoring, so a failure part-way through
+                // the restore does not leave the checker trying to re-hide a
+                // jailbreak the user just asked to see.
+                [self setHideRequested:NO];
+
                 if ([self isJailbroken]) {
                     jbclient_platform_set_systemwide_domain_enabled(true);
                     jbclient_platform_set_crashreporter_enabled(true);
