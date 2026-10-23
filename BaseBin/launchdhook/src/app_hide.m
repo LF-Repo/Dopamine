@@ -369,9 +369,10 @@ void app_hide_init(void)
 // RootHide-style "no-injection" mode: temporary global hide + bare spawn
 // ---------------------------------------------------------------------------
 
-// Forward declaration: app_hide_restore_after_timeout() below calls it, but the
-// definition sits further down next to the other jbctl wrappers.
+// Forward declarations: app_hide_restore_after_timeout() below calls both of
+// them, but their definitions sit further down next to the other jbctl wrappers.
 static void app_hide_run_jbctl(const char *command, const char *arg);
+static void app_hide_do_restore(void);
 
 // The set of no-inject app pids that are currently running, which is what the
 // hide state must actually follow. This used to be a bare int refcount, but the
@@ -491,10 +492,8 @@ static void app_hide_restore_after_timeout(void)
 	app_hide_log([NSString stringWithFormat:@"timeout: lifting the hide after %ds, jailbreak stays visible from here on",
 				  APP_HIDE_RESTORE_DELAY_SEC]);
 
-	// Full restore, exactly what exiting the app would have done. The tracked pids
-	// are deliberately left alone: the window is closed for good, so those apps
-	// exiting later must not hide the jailbreak again. reconcile() handles that by
-	// seeing the hide already lifted.
+	// Full restore, exactly what exiting the last no-inject app would have done:
+	// rebuild /var/jb, remount fakelib, move the quarantined config files back.
 	app_hide_do_restore();
 
 	pthread_mutex_lock(&gNoInjectLock);
