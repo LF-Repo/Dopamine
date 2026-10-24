@@ -513,24 +513,11 @@ extern char **environ;
     // The audit writes its map before moving anything, so a populated map means
     // files are still quarantined; an empty one means the hide never got there.
     BOOL filesQuarantined = [fm fileExistsAtPath:@"/var/mobile/.DopamineHideQuarantine/map.plist"];
-    // A leftover .restore_in_progress means a previous restore was interrupted
-    // (reboot, logout, crash) and never finished draining the quarantine. Do not
-    // treat anything as "complete" until that restore has run to the end.
-    BOOL restoreInterrupted = [fm fileExistsAtPath:@"/var/mobile/.DopamineHideQuarantine/.restore_in_progress"];
 
-    if (symlinkGone && safeModeSet && !filesQuarantined && !restoreInterrupted) {
+    if (symlinkGone && safeModeSet && !filesQuarantined) {
         // The two defining effects are both in place and nothing is left
         // quarantined. Treat the hide as complete.
         return;
-    }
-
-    if (restoreInterrupted) {
-        NSLog(@"[HideVerify] .restore_in_progress present: a previous restore was interrupted, draining quarantine first");
-        [self spawnJbctlAsRootWithArgs:@[@"internal", @"audit", @"recover"]];
-        // Re-check after draining: files may still be quarantined if recover
-        // itself was interrupted again.
-        filesQuarantined = [fm fileExistsAtPath:@"/var/mobile/.DopamineHideQuarantine/map.plist"];
-        restoreInterrupted = [fm fileExistsAtPath:@"/var/mobile/.DopamineHideQuarantine/.restore_in_progress"];
     }
 
     NSLog(@"[HideVerify] hide was requested but incomplete (symlinkGone=%d safeMode=%d quarantined=%d), completing it",

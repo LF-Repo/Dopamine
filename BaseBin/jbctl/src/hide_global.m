@@ -279,12 +279,7 @@ static void restoreHiddenItems(void)
 	NSArray *map = [NSArray arrayWithContentsOfFile:hideMapPath()];
 	if (!map || map.count == 0) return;
 
-	// Mark that a restore is in progress before touching anything. If the
-	// process dies mid-restore (reboot, logout, crash), the marker survives
-	// and the next startup pass knows the quarantine was not fully drained,
-	// so it must not report "restore complete" just because some entries
-	// happen to be back already.
-	[[NSData data] writeToFile:restoreInProgressPath() atomically:NO];
+	auditLog([NSString stringWithFormat:@"restoreHiddenItems: %lu entries to restore", (unsigned long)map.count]);
 
 	for (NSDictionary *entry in [map reverseObjectEnumerator]) {
 		NSString *src = entry[@"src"];
@@ -344,11 +339,9 @@ static void restoreHiddenItems(void)
 		// Nothing at either end (already restored on a previous pass): idempotent.
 	}
 
-	// All entries processed: the map can be dropped and the in-progress marker
-	// cleared. If we die before reaching here, the marker survives and tells
-	// the next pass that this restore never finished.
+	// All entries processed: the map can be dropped.
 	[fm removeItemAtPath:hideMapPath() error:nil];
-	[fm removeItemAtPath:restoreInProgressPath() error:nil];
+	auditLog(@"restoreHiddenItems: all entries processed, map removed");
 }
 
 static BOOL doAuditName(NSString *name, NSArray<NSString *> *exact, NSArray<NSString *> *regex)

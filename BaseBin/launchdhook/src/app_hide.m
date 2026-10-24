@@ -485,6 +485,7 @@ static void app_hide_restore_after_timeout(void)
 	bool wanted = gNoInjectActive || gNoInjectSuspended;
 	pthread_mutex_unlock(&gNoInjectLock);
 	if (!wanted) {
+		app_hide_log([NSString stringWithFormat:@"timeout: skipped restore, already restored (active=%d suspended=%d)", gNoInjectActive, gNoInjectSuspended]);
 		pthread_mutex_unlock(&gNoInjectActionLock);
 		return;
 	}
@@ -614,6 +615,8 @@ static void app_hide_kill_jailbreak_apps(void);
 
 static int app_hide_run_jbctl(const char *command, const char *arg)
 {
+	app_hide_log([NSString stringWithFormat:@"jbctl %s %s START", command, arg]);
+
 	// jbctl carries the bindfs-allow entitlement + root; host a local jbserver so
 	// it can talk to us, same pattern as ensure_fakelib_mounted().
 	systemwide_domain_set_enabled(true);
@@ -622,6 +625,8 @@ static int app_hide_run_jbctl(const char *command, const char *arg)
 	jbserver_local_stop();
 	if (r != 0) {
 		app_hide_log([NSString stringWithFormat:@"jbctl %s %s FAILED (errno %d)", command, arg, errno]);
+	} else {
+		app_hide_log([NSString stringWithFormat:@"jbctl %s %s DONE", command, arg]);
 	}
 	return r;
 }
@@ -649,6 +654,9 @@ static void app_hide_do_hide(void)
 
 static void app_hide_do_restore(void)
 {
+	app_hide_log([NSString stringWithFormat:@"app_hide_do_restore: starting full restore, active=%d suspended=%d pidCount=%zu",
+				  gNoInjectActive, gNoInjectSuspended, gNoInjectPidCount]);
+
 	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
 	if (jbroot && jbroot[0]) {
 		unlink("/var/jb");
@@ -667,6 +675,8 @@ static void app_hide_do_restore(void)
 	// the watchdog cannot repair (it re-runs this function on its next tick).
 	app_hide_run_jbctl("fakelib", "mount");
 	app_hide_run_jbctl("audit", "restore");
+
+	app_hide_log(@"app_hide_do_restore: full restore complete");
 }
 
 // Undo a jailbreak-level hide left over from a previous userspace.
@@ -753,6 +763,7 @@ static void app_hide_reconcile(const char *reason)
 	pthread_mutex_lock(&gNoInjectLock);
 	if (!gNoInjectActive && !gNoInjectSuspended) {
 		pthread_mutex_unlock(&gNoInjectLock);
+		app_hide_log([NSString stringWithFormat:@"reconcile(%s): not active or suspended, nothing to do", reason]);
 		return;
 	}
 	app_hide_reap_dead_pids_locked();
@@ -760,8 +771,7 @@ static void app_hide_reconcile(const char *reason)
 		int tracked = (int)gNoInjectPidCount;
 		bool suspended = gNoInjectSuspended;
 		pthread_mutex_unlock(&gNoInjectLock);
-		app_hide_log([NSString stringWithFormat:@"reconcile(%s): staying hidden, %d no-inject app(s) alive%@",
-		              reason, tracked, suspended ? @" (suspended by jailbreak app)" : @""]);
+		app_hide_log([NSString stringWithFormat:@"reconcile(%s): staying hidden, %d no-inject app(s) alive%@", reason, tracked, suspended ? @" (suspended by jailbreak app)" : @""]);
 		return;
 	}
 
