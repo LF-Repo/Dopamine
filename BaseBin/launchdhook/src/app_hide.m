@@ -371,7 +371,7 @@ void app_hide_init(void)
 
 // Forward declarations: app_hide_restore_after_timeout() below calls both of
 // them, but their definitions sit further down next to the other jbctl wrappers.
-static void app_hide_run_jbctl(const char *command, const char *arg);
+static int app_hide_run_jbctl(const char *command, const char *arg);
 static void app_hide_do_restore(void);
 
 // The set of no-inject app pids that are currently running, which is what the
@@ -585,6 +585,13 @@ static void app_hide_reap_dead_pids_locked(void)
 // kill(pid, 0) delivers no signal; it only reports whether the pid still exists.
 static bool app_hide_should_stay_hidden_locked(void)
 {
+	// No tracked pids at all means no no-inject app is running right now. The
+	// hide window is over regardless of gNoInjectHidePending — that counter only
+	// means "the hide started but we don't know the pid yet", and if no pid was
+	// ever recorded the app either failed to spawn or already exited. In either
+	// case there is nothing left to hide for, so reconcile() must restore.
+	if (gNoInjectPidCount == 0) return false;
+
 	// A hide whose pid isn't known yet is still in progress, so the empty set here
 	// is not evidence that anything finished.
 	if (gNoInjectHidePending > 0) return true;
@@ -605,14 +612,18 @@ static pthread_mutex_t gJailbreakAppLock = PTHREAD_MUTEX_INITIALIZER;
 
 static void app_hide_kill_jailbreak_apps(void);
 
-static void app_hide_run_jbctl(const char *command, const char *arg)
+static int app_hide_run_jbctl(const char *command, const char *arg)
 {
 	// jbctl carries the bindfs-allow entitlement + root; host a local jbserver so
 	// it can talk to us, same pattern as ensure_fakelib_mounted().
 	systemwide_domain_set_enabled(true);
 	mach_port_t serverPort = jbserver_local_start();
-	jbctl_earlyboot(serverPort, "internal", command, arg, NULL);
+	int r = jbctl_earlyboot(serverPort, "internal", command, arg, NULL);
 	jbserver_local_stop();
+	if (r != 0) {
+		app_hide_log([NSString stringWithFormat:@"jbctl %s %s FAILED (errno %d)", command, arg, errno]);
+	}
+	return r;
 }
 
 // Actual (reversible) hide/restore bodies, shared by the no-inject refcount
