@@ -663,18 +663,18 @@ static void app_hide_do_restore(void)
 		symlink(jbroot, "/var/jb");
 	}
 
-	// Order matters for how fast the jailbreak comes back.
+	// Order matters, and it is the reverse of app_hide_do_hide() for a reason.
 	//
-	// fakelib first: it is a single stat plus one bindfs mount, so /usr/lib is
-	// usable again almost immediately. "audit restore" afterwards has to move
-	// back every quarantined file and can take seconds; doing it second means
-	// tweaks and jailbreak binaries load again long before it finishes.
-	//
-	// The two are independent: neither depends on the other's result, and both
-	// are idempotent, so a failure in one does not leave the other in a state
-	// the watchdog cannot repair (it re-runs this function on its next tick).
-	app_hide_run_jbctl("fakelib", "mount");
+	// audit restore must run BEFORE fakelib mount. Both spawn jbctl, and jbctl
+	// dynamically links against /usr/lib — but once fakelib is mounted, /usr/lib
+	// is the read-only fakelib image whose dyld is the patched one, so spawning
+	// jbctl at that point fails with ENOENT and the quarantined files are never
+	// moved back. That is exactly the "hide works, restore silently does nothing"
+	// bug: do_hide() unmounts fakelib first so its own audit-hide jbctl spawn
+	// works, and do_restore() must keep the same invariant — spawn the audit
+	// jbctl while /usr/lib is still the real directory, then mount fakelib last.
 	app_hide_run_jbctl("audit", "restore");
+	app_hide_run_jbctl("fakelib", "mount");
 
 	app_hide_log(@"app_hide_do_restore: full restore complete");
 }
@@ -705,9 +705,7 @@ void app_hide_recover_hidden_jailbreak(void)
 
 	app_hide_log(@"recover-hidden: previous session ended hidden, restoring jailbreak");
 
-	// Same steps in the same order as app_hide_do_restore(): symlink first so the
-	// jailbreak is reachable, fakelib next so /usr/lib works, audit last because
-	// it is the slow one.
+	// Rebuild /var/jb first so the jailbreak is reachable at all.
 	if (access("/var/jb", F_OK) != 0) {
 		if (symlink(jbroot, "/var/jb") != 0) {
 			app_hide_log([NSString stringWithFormat:@"recover-hidden: FAILED to recreate /var/jb (errno %d)", errno]);
@@ -715,9 +713,13 @@ void app_hide_recover_hidden_jailbreak(void)
 		}
 	}
 
-	app_hide_run_jbctl("fakelib", "mount");
+	// audit restore must run BEFORE the fakelib mount, for the same reason as in
+	// app_hide_do_restore(): jbctl dynamically links /usr/lib, so it can only be
+	// spawned while /usr/lib is still the real directory. Mounting fakelib first
+	// would make the audit jbctl fail with ENOENT and strand the quarantined files.
+	app_hide_run_jbctl("audit", "restore");
 
-	// .safe_mode has to go before the audit restore, and on its own: it is the
+	// .safe_mode has to go before the fakelib mount, and on its own: it is the
 	// one piece that is not a jbctl action, and leaving it behind would keep
 	// every tweak disabled no matter how healthy the rest of the jailbreak is.
 	NSString *safeModePath = [NSString stringWithFormat:@"%s/basebin/.safe_mode", jbroot];
@@ -729,7 +731,8 @@ void app_hide_recover_hidden_jailbreak(void)
 		}
 	}
 
-	app_hide_run_jbctl("audit", "restore");
+	// fakelib goes last, now that no more jbctl spawns are needed.
+	app_hide_run_jbctl("fakelib", "mount");
 }
 
 // Record that a no-inject app was spawned. Called right after the bare spawn, so
