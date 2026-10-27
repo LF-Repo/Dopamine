@@ -1623,6 +1623,13 @@ static BOOL gAppHideRulesCacheValid = NO;
                 [self restoreHiddenItems];
                 [self restoreJailbreakURLSchemes];
 
+                // Remove any existing /var/jb node first. While hidden, an app or
+                // a daemon can have created /var/jb as a REAL directory (stray
+                // cache writes), and createSymbolicLinkAtPath against an existing
+                // path silently fails — leaving the jailbreak permanently
+                // unreachable. removeItemAtPath handles both a leftover symlink
+                // and a real directory, so the symlink below always lands.
+                [[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:nil];
                 [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb"
                                                      withDestinationPath:JBROOT_PATH(@"/")
                                                                    error:nil];
