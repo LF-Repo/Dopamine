@@ -613,6 +613,42 @@ static pthread_mutex_t gJailbreakAppLock = PTHREAD_MUTEX_INITIALIZER;
 
 static void app_hide_kill_jailbreak_apps(void);
 
+// Rebuild /var/jb as a symlink to jbroot, tolerating the case where /var/jb is a
+// REAL directory instead of a symlink.
+//
+// The hide path removes /var/jb, but while it is gone an app (or a system daemon
+// such as cfprefsd) can still mkdir("/var/jb") or create a file under it, which
+// auto-creates /var/jb as a real directory. The old code did unlink() + symlink():
+// unlink() only removes symlinks/files (EISDIR/EPERM on a directory) and symlink()
+// fails with EEXIST if the target already exists, so a real /var/jb directory was
+// never replaced and left the jailbreak unreachable — every process resolving
+// /var/jb/* hit the empty directory instead of the jbroot.
+static void app_hide_rebuild_var_jb(const char *jbroot)
+{
+	struct stat st;
+	if (lstat("/var/jb", &st) == 0) {
+		if (S_ISLNK(st.st_mode)) {
+			// Already a symlink; drop it so the fresh one below is authoritative.
+			unlink("/var/jb");
+		}
+		else if (S_ISDIR(st.st_mode)) {
+			// A real directory (written by a 3rd-party app while hidden). Recursively
+			// remove it so symlink() can take the name. Contents are just stray cache
+			// files, not the real jbroot (that lives under /private/preboot/...).
+			app_hide_log(@"rebuild /var/jb: found a REAL directory, removing it (stray app caches)");
+			[[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:nil];
+		}
+		else {
+			// Regular file or other node; still must go for symlink() to succeed.
+			unlink("/var/jb");
+		}
+	}
+
+	if (symlink(jbroot, "/var/jb") != 0) {
+		app_hide_log([NSString stringWithFormat:@"rebuild /var/jb: symlink(%s) FAILED (errno %d)", jbroot, errno]);
+	}
+}
+
 static int app_hide_run_jbctl(const char *command, const char *arg)
 {
 	app_hide_log([NSString stringWithFormat:@"jbctl %s %s START", command, arg]);
@@ -659,8 +695,9 @@ static void app_hide_do_restore(void)
 
 	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
 	if (jbroot && jbroot[0]) {
-		unlink("/var/jb");
-		symlink(jbroot, "/var/jb");
+		// Handles /var/jb being a real directory (stray app caches), not just a
+		// missing symlink. unlink+symlink alone left that state unrecoverable.
+		app_hide_rebuild_var_jb(jbroot);
 	}
 
 	// Order matters, and it is the reverse of app_hide_do_hide() for a reason.
@@ -705,13 +742,10 @@ void app_hide_recover_hidden_jailbreak(void)
 
 	app_hide_log(@"recover-hidden: previous session ended hidden, restoring jailbreak");
 
-	// Rebuild /var/jb first so the jailbreak is reachable at all.
-	if (access("/var/jb", F_OK) != 0) {
-		if (symlink(jbroot, "/var/jb") != 0) {
-			app_hide_log([NSString stringWithFormat:@"recover-hidden: FAILED to recreate /var/jb (errno %d)", errno]);
-			return;
-		}
-	}
+	// Rebuild /var/jb first so the jailbreak is reachable at all. Deliberately
+	// unconditional: the old "only if missing" check skipped a /var/jb that existed
+	// as a REAL directory (not a symlink), which left the jailbreak unreachable.
+	app_hide_rebuild_var_jb(jbroot);
 
 	// audit restore must run BEFORE the fakelib mount, for the same reason as in
 	// app_hide_do_restore(): jbctl dynamically links /usr/lib, so it can only be
