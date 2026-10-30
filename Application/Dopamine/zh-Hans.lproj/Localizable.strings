@@ -44,6 +44,7 @@
 "Settings_Apps_JIT" = "允许 App 使用 JIT";
 "Settings_Jetsam_Multiplier" = "Jetsam 倍数";
 "Settings_Spinlock_Fix_Enhanced" = "自旋锁增强修复（仅 iOS 15）";
+"Settings_Additional" = "附加";
 
 // Settings Buttons
 "Button_Remove_Jailbreak" = "移除越狱";
