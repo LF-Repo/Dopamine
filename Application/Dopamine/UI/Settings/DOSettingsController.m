@@ -409,10 +409,11 @@
                     [appHideSpecifier setProperty:@"appHidePressed" forKey:@"action"];
                     [specifiers addObject:appHideSpecifier];
 
-                    PSSpecifier *additionalSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Additional") target:self set:defSetter get:defGetter detail:nil cell:PSLinkListCell edit:nil];
-                    [additionalSpecifier setProperty:@YES forKey:@"enabled"];
-                    [additionalSpecifier setProperty:@"additional" forKey:@"key"];
-                    additionalSpecifier.detailControllerClass = [DOPSAdditionalListItemsController class];
+                    PSSpecifier *additionalSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Additional") target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                    [additionalSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                    [additionalSpecifier setProperty:buttonHeight forKey:@"height"];
+                    [additionalSpecifier setProperty:@"gear" forKey:@"image"];
+                    [additionalSpecifier setProperty:@"additionalPressed" forKey:@"action"];
                     [specifiers addObject:additionalSpecifier];
 
                     PSSpecifier *mountGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
@@ -1045,6 +1046,12 @@
 {
     DOAppHidePickerViewController *picker = [[DOAppHidePickerViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
     [self.navigationController pushViewController:picker animated:YES];
+}
+
+- (void)additionalPressed
+{
+    DOPSAdditionalListItemsController *additional = [[DOPSAdditionalListItemsController alloc] init];
+    [self.navigationController pushViewController:additional animated:YES];
 }
 
 - (void)rebootPressed
