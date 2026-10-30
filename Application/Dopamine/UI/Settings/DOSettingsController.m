@@ -20,6 +20,7 @@
 #import "DOThemeManager.h"
 #import "DOSceneDelegate.h"
 #import "DOPSJetsamListItemsController.h"
+#import "DOPSAdditionalListItemsController.h"
 #import "DOButtonCell.h"
 
 @interface DOSettingsController ()
@@ -270,12 +271,6 @@
             [tweakInjectionSpecifier setProperty:@YES forKey:@"default"];
             [specifiers addObject:tweakInjectionSpecifier];
 
-            PSSpecifier *disableCrashReporterSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Disable_Crash_Reporter") target:self set:@selector(setCrashReporterDisabled:specifier:) get:@selector(readCrashReporterDisabled:) detail:nil cell:PSSwitchCell edit:nil];
-            [disableCrashReporterSpecifier setProperty:@YES forKey:@"enabled"];
-            [disableCrashReporterSpecifier setProperty:@"crashReporterDisabled" forKey:@"key"];
-            [disableCrashReporterSpecifier setProperty:@NO forKey:@"default"];
-            [specifiers addObject:disableCrashReporterSpecifier];
-            
             if (!envManager.isJailbroken) {
                 PSSpecifier *verboseLogSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Verbose_Logs") target:self set:defSetter get:defGetter detail:nil cell:PSSwitchCell edit:nil];
                 [verboseLogSpecifier setProperty:@YES forKey:@"enabled"];
@@ -304,12 +299,6 @@
             [jetsamSpecifier setProperty:@"jetsamOptionNumbers" forKey:@"valuesDataSource"];
             [jetsamSpecifier setProperty:@"jetsamOptionTitles" forKey:@"titlesDataSource"];
             [specifiers addObject:jetsamSpecifier];
-            
-            PSSpecifier *spinlockFixSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Spinlock_Fix_Enhanced") target:self set:@selector(setSpinlockFixEnhanced:specifier:) get:@selector(readSpinlockFixEnhanced:) detail:nil cell:PSSwitchCell edit:nil];
-            [spinlockFixSpecifier setProperty:@YES forKey:@"enabled"];
-            [spinlockFixSpecifier setProperty:@"spinlockFixEnhanced" forKey:@"key"];
-            [spinlockFixSpecifier setProperty:@NO forKey:@"default"];
-            [specifiers addObject:spinlockFixSpecifier];
             
             if (!envManager.isJailbroken && !envManager.isInstalledThroughTrollStore) {
                 PSSpecifier *removeJailbreakSwitchSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Button_Remove_Jailbreak") target:self set:@selector(setRemoveJailbreakEnabled:specifier:) get:defGetter detail:nil cell:PSSwitchCell edit:nil];
@@ -419,6 +408,12 @@
                     [appHideSpecifier setProperty:@"eye.slash.circle" forKey:@"image"];
                     [appHideSpecifier setProperty:@"appHidePressed" forKey:@"action"];
                     [specifiers addObject:appHideSpecifier];
+
+                    PSSpecifier *additionalSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Additional") target:self set:defSetter get:defGetter detail:nil cell:PSLinkListCell edit:nil];
+                    [additionalSpecifier setProperty:@YES forKey:@"enabled"];
+                    [additionalSpecifier setProperty:@"additional" forKey:@"key"];
+                    additionalSpecifier.detailControllerClass = [DOPSAdditionalListItemsController class];
+                    [specifiers addObject:additionalSpecifier];
 
                     PSSpecifier *mountGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
                     mountGroupSpecifier.name = DOLocalizedString(@"Section_Mount_Settings");
@@ -632,47 +627,12 @@
     return [self readPreferenceValue:specifier];
 }
 
-- (id)readSpinlockFixEnhanced:(PSSpecifier *)specifier
-{
-    DOEnvironmentManager *envManager = [DOEnvironmentManager sharedManager];
-    if (envManager.isJailbroken) {
-        return @(jbclient_jbsettings_get_bool("spinlockFixEnhanced"));
-    }
-    return [self readPreferenceValue:specifier];
-}
-
-- (void)setSpinlockFixEnhanced:(id)value specifier:(PSSpecifier *)specifier
-{
-    [self setPreferenceValue:value specifier:specifier];
-    DOEnvironmentManager *envManager = [DOEnvironmentManager sharedManager];
-    if (envManager.isJailbroken) {
-        jbclient_platform_jbsettings_set_bool("spinlockFixEnhanced", ((NSNumber *)value).boolValue);
-    }
-}
-
 - (void)setJetsamMultiplier:(id)value specifier:(PSSpecifier *)specifier
 {
     [self setPreferenceValue:value specifier:specifier];
     DOEnvironmentManager *envManager = [DOEnvironmentManager sharedManager];
     if (envManager.isJailbroken) {
         jbclient_platform_jbsettings_set_double("jetsamMultiplier", ((NSNumber *)value).doubleValue / 2);
-    }
-}
-
-- (id)readCrashReporterDisabled:(PSSpecifier *)specifier
-{
-    return @([[NSFileManager defaultManager] fileExistsAtPath:@"/var/mobile/.DopamineCrashReporterDisabled"]);
-}
-
-- (void)setCrashReporterDisabled:(id)value specifier:(PSSpecifier *)specifier
-{
-    BOOL disabled = ((NSNumber *)value).boolValue;
-    if (disabled) {
-        [[NSData data] writeToFile:@"/var/mobile/.DopamineCrashReporterDisabled" atomically:YES];
-        jbclient_platform_set_crashreporter_enabled(false);
-    } else {
-        [[NSFileManager defaultManager] removeItemAtPath:@"/var/mobile/.DopamineCrashReporterDisabled" error:nil];
-        jbclient_platform_set_crashreporter_enabled(true);
     }
 }
 
