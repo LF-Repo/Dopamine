@@ -305,6 +305,12 @@
             [jetsamSpecifier setProperty:@"jetsamOptionTitles" forKey:@"titlesDataSource"];
             [specifiers addObject:jetsamSpecifier];
             
+            PSSpecifier *spinlockFixSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Spinlock_Fix_Enhanced") target:self set:@selector(setSpinlockFixEnhanced:specifier:) get:@selector(readSpinlockFixEnhanced:) detail:nil cell:PSSwitchCell edit:nil];
+            [spinlockFixSpecifier setProperty:@YES forKey:@"enabled"];
+            [spinlockFixSpecifier setProperty:@"spinlockFixEnhanced" forKey:@"key"];
+            [spinlockFixSpecifier setProperty:@NO forKey:@"default"];
+            [specifiers addObject:spinlockFixSpecifier];
+            
             if (!envManager.isJailbroken && !envManager.isInstalledThroughTrollStore) {
                 PSSpecifier *removeJailbreakSwitchSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Button_Remove_Jailbreak") target:self set:@selector(setRemoveJailbreakEnabled:specifier:) get:defGetter detail:nil cell:PSSwitchCell edit:nil];
                 [removeJailbreakSwitchSpecifier setProperty:@YES forKey:@"enabled"];
@@ -624,6 +630,24 @@
         return @((v < 1 || isnan(v)) ? 6 : ceil(v * 2));
     }
     return [self readPreferenceValue:specifier];
+}
+
+- (id)readSpinlockFixEnhanced:(PSSpecifier *)specifier
+{
+    DOEnvironmentManager *envManager = [DOEnvironmentManager sharedManager];
+    if (envManager.isJailbroken) {
+        return @(jbclient_jbsettings_get_bool("spinlockFixEnhanced"));
+    }
+    return [self readPreferenceValue:specifier];
+}
+
+- (void)setSpinlockFixEnhanced:(id)value specifier:(PSSpecifier *)specifier
+{
+    [self setPreferenceValue:value specifier:specifier];
+    DOEnvironmentManager *envManager = [DOEnvironmentManager sharedManager];
+    if (envManager.isJailbroken) {
+        jbclient_platform_jbsettings_set_bool("spinlockFixEnhanced", ((NSNumber *)value).boolValue);
+    }
 }
 
 - (void)setJetsamMultiplier:(id)value specifier:(PSSpecifier *)specifier

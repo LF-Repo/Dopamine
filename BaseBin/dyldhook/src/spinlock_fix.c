@@ -15,7 +15,13 @@
 
 #include "machomerger_hook.h"
 
+// Defined in main.c; defaults to false (legacy), and is set from the user's
+// Dopamine "Enhanced Spinlock Fix" setting via checkin before loadDyldCache runs.
+// When false, every function below takes its original (pre-fix) path.
+extern bool gSpinlockFixEnhanced;
+
 // Small unsigned-to-decimal helper (self-contained: no snprintf/libc pull-in).
+// Only used by the enhanced subcache loop.
 static void __dsc_u32_to_str(char *out, uint32_t value)
 {
 	char tmp[12];
@@ -30,17 +36,18 @@ static void __dsc_u32_to_str(char *out, uint32_t value)
 
 char *__locate_dsc(void)
 {
-	// We make two assumptions here
-	// 1. This code is only called on iOS 15 arm64e (since the spinlock panic doesn't affect anything else)
-	// 2. This code is only called if the shared cache has been mapped in via a shared region
-	//
-	// Unlike the previous hardcoded single path, probe the suffix candidates so a
-	// device whose cache is named _arm64e vs _arm64 (or carries an _arm64e_x1
-	// variant) still gets found. A wrong path would make open() fail and silently
-	// skip the whole private-mapping pass, leaving every dsc __TEXT page shared.
 	static char dscPath[PATH_MAX] = {};
 	if (dscPath[0]) return dscPath;
 
+	if (!gSpinlockFixEnhanced) {
+		// Legacy: hardcoded single path (pre-fix behaviour). If the cache is not
+		// exactly this file, open() fails and the private-mapping pass skips.
+		strlcpy(dscPath, "/System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e", sizeof(dscPath));
+		return dscPath;
+	}
+
+	// Enhanced: probe suffix candidates so a device whose cache is named _arm64e
+	// vs _arm64 (or carries a variant) still gets found.
 	const char *base = "/System/Library/Caches/com.apple.dyld/dyld_shared_cache";
 	const char *suffixes[] = { "_arm64e", "_arm64", "" };
 	for (size_t i = 0; i < sizeof(suffixes) / sizeof(*suffixes); i++) {
@@ -48,7 +55,6 @@ char *__locate_dsc(void)
 		strlcat(dscPath, suffixes[i], sizeof(dscPath));
 		if (access(dscPath, F_OK) == 0) return dscPath;
 	}
-	// Fall back to the base name; open() may fail, in which case the caller bails.
 	strlcpy(dscPath, base, sizeof(dscPath));
 	return dscPath;
 }
@@ -81,16 +87,29 @@ void __dsc_enumerate_mappings(uintptr_t slide, bool (*enumeratorFunc)(int fd, st
 	lseek(dscFd, header.subCacheArrayOffset, SEEK_SET);
 	if (read(dscFd, subcacheEntries, sizeof(struct dyld_subcache_entry_v1) * header.subCacheArrayCount) != sizeof(struct dyld_subcache_entry_v1) * header.subCacheArrayCount) { close(dscFd); return; };
 
-	// Enumerate every subcache, including two-digit suffixes (.10, .11, ...). The
-	// old loop hardcoded a single digit and produced garbage beyond ".9", leaving
-	// those subcaches' executable mappings shared (and thus spinlock-unsafe).
 	for (uint32_t i = 0; i < header.subCacheArrayCount; i++) {
 		char subcachePath[PATH_MAX];
 		strlcpy(subcachePath, dscPath, sizeof(subcachePath));
-		strlcat(subcachePath, ".", sizeof(subcachePath));
-		char suffix[12];
-		__dsc_u32_to_str(suffix, i + 1);
-		strlcat(subcachePath, suffix, sizeof(subcachePath));
+
+		if (!gSpinlockFixEnhanced) {
+			// Legacy: single-digit suffix only. Beyond ".9" this produces a bogus
+			// name, so those subcaches' executable mappings stay shared.
+			char suffix[3];
+			suffix[0] = '.';
+			suffix[1] = '1' + i;
+			suffix[2] = '\0';
+			strlcat(subcachePath, suffix, sizeof(subcachePath));
+		}
+		else {
+			// Enhanced: correct decimal suffix for any number of subcaches.
+			char suffix[12];
+			char num[12];
+			__dsc_u32_to_str(num, i + 1);
+			suffix[0] = '.';
+			suffix[1] = '\0';
+			strlcat(subcachePath, suffix, sizeof(subcachePath));
+			strlcat(subcachePath, num, sizeof(subcachePath));
+		}
 
 		int subcacheFd = open(subcachePath, O_RDONLY);
 		if (subcacheFd >= 0) {
@@ -117,17 +136,27 @@ bool __dsc_mapping_make_private(int fd, struct dyld_cache_header *header, uintpt
 {
 	if (!(mapping->initProt & PROT_EXEC)) return true;
 
-	// Attach the cache's code signature to the fd so the MAP_PRIVATE executable
-	// mapping below passes code-signing. If the attach fails we still attempt the
-	// mmap: the cache file is already Apple-signed, and MAP_PRIVATE of it may
-	// succeed without the extra fcntl attach on some builds.
+	if (!gSpinlockFixEnhanced) {
+		// Legacy: only attempt the mmap when the fcntl attach succeeds, discard the
+		// mmap result (the inner `r` shadows the outer one), and always report
+		// success. This is the original pre-fix logic, bugs included.
+		int r = __dsc_attach_signature(fd, header);
+		if (r == 0) {
+			void *r = mmap((void *)(mapping->address + slide), mapping->size, PROT_READ | PROT_EXEC, MAP_FIXED | MAP_PRIVATE, fd, mapping->fileOffset);
+		}
+		return true;
+	}
+
+	// Enhanced: attach the cache's code signature so the MAP_PRIVATE executable
+	// mapping passes code-signing. If the attach fails we still attempt the mmap —
+	// the cache file is already Apple-signed, and MAP_PRIVATE of it may succeed
+	// without the extra fcntl attach on some builds.
 	__dsc_attach_signature(fd, header);
 
-	// MAP_FIXED | MAP_PRIVATE replaces the shared mapping with a private one, so
-	// a later write hit a normal private COW page instead of the shared region's
-	// spinlock-protected path. Check the result: a failure here (bad signature,
-	// address already in use, fd closed) left the page SHARED, and that is exactly
-	// the page whose later write deadlocks the spinlock → panic.
+	// MAP_FIXED | MAP_PRIVATE replaces the shared mapping with a private one, so a
+	// later write hits a normal private COW page instead of the shared region's
+	// spinlock-protected path. Check the result: a failure here left the page
+	// SHARED, and that is exactly the page whose later write deadlocks the spinlock.
 	void *mapped = mmap((void *)(mapping->address + slide), mapping->size,
 	                    PROT_READ | PROT_EXEC, MAP_FIXED | MAP_PRIVATE,
 	                    fd, mapping->fileOffset);
