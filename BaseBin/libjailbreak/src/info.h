@@ -48,6 +48,7 @@ struct system_info {
 	struct {
 		bool markAppsAsDebugged;
 		double jetsamMultiplier;
+		bool spinlockFixEnhanced;
 	} jailbreakSettings;
 
 	struct {
@@ -414,7 +415,8 @@ extern struct system_info gSystemInfo;
 
 #define JAILBREAK_SETTINGS_ITERATE(ctx, iterator) \
 	iterator(ctx, jailbreakSettings.markAppsAsDebugged); \
-	iterator(ctx, jailbreakSettings.jetsamMultiplier);
+	iterator(ctx, jailbreakSettings.jetsamMultiplier); \
+	iterator(ctx, jailbreakSettings.spinlockFixEnhanced);
 
 #define KERNEL_SYMBOLS_ITERATE(ctx, iterator) \
 	iterator(ctx, kernelSymbol.perfmon_dev_open); \

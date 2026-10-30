@@ -11,6 +11,13 @@
 
 bool gDyldHookLog = false;
 
+// Selects between the enhanced (fixed) and the legacy (original, pre-fix) private
+// dsc remapping in spinlock_fix.c. Defaults to false (legacy), and is overwritten
+// from the user's Dopamine setting once checkin replies, before dyld ever reaches
+// loadDyldCache (see dyldhook_perform_checkin). The value travels launchdhook ->
+// checkin reply -> jbinfo -> here, keeping dyldhook self-contained.
+bool gSpinlockFixEnhanced = false;
+
 __attribute__((section("__DATA,__jbinfo"))) static char jbinfoSection[0x4000];
 #define jbInfo ((struct dyld_jbinfo *)&jbinfoSection[0])
 
@@ -58,7 +65,7 @@ void dyldhook_perform_checkin(void)
 
 	// Tell jbserver (in launchd) that this process exists
 	// This will, amongst other things, disable page validation, which allows instruction hooks to be applied later
-	if (jbclient_mach_process_checkin(jbRootPathPtr, bootUUIDPtr, sandboxExtensionsPtr, &jbInfo->fullyDebugged, &jbInfo->forceCSAdhoc) == 0) {
+	if (jbclient_mach_process_checkin(jbRootPathPtr, bootUUIDPtr, sandboxExtensionsPtr, &jbInfo->fullyDebugged, &jbInfo->forceCSAdhoc, &jbInfo->spinlockFixEnhanced) == 0) {
 		if (gDyldHookLog) {
 			_simple_dprintf(2, "Performed checkin [%s %s %s]\n", jbRootPathPtr, bootUUIDPtr, sandboxExtensionsPtr);
 		}
@@ -67,6 +74,10 @@ void dyldhook_perform_checkin(void)
 		jbInfo->bootUUID = bootUUIDPtr;
 		jbInfo->sandboxExtensions = sandboxExtensionsPtr;
 		jbInfo->state = DYLD_STATE_CHECKED_IN;
+
+		// The user's spinlock preference now drives the enhanced/legacy choice for
+		// the remapping done by the loadDyldCache hook in spinlock_fix.c.
+		gSpinlockFixEnhanced = jbInfo->spinlockFixEnhanced;
 	}
 	else {
 		if (gDyldHookLog) {

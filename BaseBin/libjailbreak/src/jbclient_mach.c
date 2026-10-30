@@ -63,7 +63,7 @@ kern_return_t jbclient_mach_send_msg(mach_msg_header_t *hdr, struct jbserver_mac
 	return KERN_SUCCESS;
 }
 
-int jbclient_mach_process_checkin(char *jbRootPathOut, char *bootUUIDOut, char *sandboxExtensionsOut, bool *fullyDebuggedOut, bool *forceCSAdhocOut)
+int jbclient_mach_process_checkin(char *jbRootPathOut, char *bootUUIDOut, char *sandboxExtensionsOut, bool *fullyDebuggedOut, bool *forceCSAdhocOut, bool *spinlockFixEnhancedOut)
 {
 	struct jbserver_mach_msg_checkin msg;
 	msg.base.hdr.msgh_size = sizeof(msg);
@@ -86,6 +86,7 @@ int jbclient_mach_process_checkin(char *jbRootPathOut, char *bootUUIDOut, char *
 
 	if (fullyDebuggedOut) *fullyDebuggedOut = reply->fullyDebugged;
 	if (forceCSAdhocOut) *forceCSAdhocOut = reply->forceCSAdhoc;
+	if (spinlockFixEnhancedOut) *spinlockFixEnhancedOut = reply->spinlockFixEnhanced;
 
 	return (int)reply->base.status;
 }

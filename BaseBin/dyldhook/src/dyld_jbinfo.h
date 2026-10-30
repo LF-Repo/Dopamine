@@ -10,6 +10,7 @@ struct dyld_jbinfo {
 	char *sandboxExtensions;
 	bool fullyDebugged;
 	bool forceCSAdhoc;
+	bool spinlockFixEnhanced;
 
 	char data[];
 };
