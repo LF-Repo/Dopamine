@@ -8,6 +8,7 @@
 #import "DOPSAdditionalListItemsController.h"
 #import "DOUIManager.h"
 #import "DOEnvironmentManager.h"
+#import "DOPSListItemsController.h"
 #import <libjailbreak/jbclient_xpc.h>
 
 @interface DOPSAdditionalListItemsController ()
@@ -16,16 +17,21 @@
 
 @implementation DOPSAdditionalListItemsController
 
-// The specifier's own "key" (set on the parent specifier in DOSettingsController)
-// would pathologically be overridden by the valuesDataSource mechanism of the
-// PSListItemsController base class; read the keys straight from a fixed key instead.
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    _table.tableHeaderView = [DOPSListItemsController makeHeader:DOLocalizedString(@"Settings_Additional") withTarget:self];
+}
+
+- (void)dismiss
+{
+    [self.navigationController popViewControllerAnimated:YES];
+}
 
 - (NSArray *)specifiers
 {
     if (!_specifiers) {
-        _specifiers = [super specifiers];
-
-        NSMutableArray *specifiers = [_specifiers mutableCopy];
+        NSMutableArray *specifiers = [NSMutableArray new];
 
         PSSpecifier *spinlockFixSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Spinlock_Fix_Enhanced") target:self set:@selector(setSpinlockFixEnhanced:specifier:) get:@selector(readSpinlockFixEnhanced:) detail:nil cell:PSSwitchCell edit:nil];
         [spinlockFixSpecifier setProperty:@YES forKey:@"enabled"];
