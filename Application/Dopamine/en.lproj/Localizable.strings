@@ -47,6 +47,13 @@
 "Enhanced Spinlock Fix (iOS 15)" = "Enhanced Spinlock Fix (iOS 15)";
 "Additional" = "Additional";
 
+// Hide Manager Levels
+"HideManager_Level_Off" = "Off";
+"HideManager_Level_Low" = "Low";
+"HideManager_Level_High" = "High";
+"HideManager_Level_Max" = "Max";
+"HideManager_Select_Level" = "Select Hide Level";
+
 // Settings Buttons
 "Button_Remove_Jailbreak" = "Remove Jailbreak";
 "Button_Hide_Jailbreak" = "Hide Jailbreak";

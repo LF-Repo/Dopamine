@@ -113,6 +113,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID;
 - (NSArray<NSString *> *)allEnvironmentHiddenBundleIDs;
 
+// Hide Manager: unified per-app level derived from the original rule files.
+// 0 = Off, 1 = Low (block injection), 2 = High (hook hide), 3 = Max (no-inject).
+- (NSInteger)hideLevelForBundleID:(NSString *)bundleID;
+- (BOOL)setHideLevel:(NSInteger)level forBundleID:(NSString *)bundleID;
+
 - (void)mountDictionary:(NSDictionary *)dictionary writeToFile:(NSString *)path;
 - (void)fakeMount:(NSString *)path unmount:(BOOL)unmount shouldDeleteMntFiles:(BOOL)shouldDeleteMntFiles;
 @end

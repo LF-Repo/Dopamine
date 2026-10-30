@@ -393,14 +393,6 @@
                     hideSettingsGroupSpecifier.name = DOLocalizedString(@"Section_Hide_Settings");
                     [specifiers addObject:hideSettingsGroupSpecifier];
 
-                    PSSpecifier *injectionBlockSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
-                    [injectionBlockSpecifier setProperty:@"Block App Injection" forKey:@"title"];
-                    [injectionBlockSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
-                    [injectionBlockSpecifier setProperty:buttonHeight forKey:@"height"];
-                    [injectionBlockSpecifier setProperty:@"shield.slash" forKey:@"image"];
-                    [injectionBlockSpecifier setProperty:@"injectionBlockPressed" forKey:@"action"];
-                    [specifiers addObject:injectionBlockSpecifier];
-
                     PSSpecifier *appHideSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
                     [appHideSpecifier setProperty:@"Hide for App" forKey:@"title"];
                     [appHideSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
@@ -1002,48 +994,6 @@
     [self reloadSpecifiers];
 }
 
-- (void)injectionBlockPressed
-{
-    DOEnvironmentManager *env = [DOEnvironmentManager sharedManager];
-    NSArray<NSString *> *current = [env allInjectionBlockedBundleIDs];
-    NSString *currentStr = [current componentsJoinedByString:@", "];
-
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Block App Injection")
-                                                                   message:@"Enter bundle IDs to block injection from, separated by commas. Changes take effect after the target app is restarted."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.text = currentStr;
-        tf.placeholder = @"com.s1mplyc0de.P0stB0x, com.santander.app";
-        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        tf.autocorrectionType = UITextAutocorrectionTypeNo;
-        tf.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
-    }];
-
-    [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSString *input = alert.textFields.firstObject.text ?: @"";
-        NSArray *parts = [input componentsSeparatedByString:@","];
-        NSMutableArray<NSString *> *newList = [NSMutableArray array];
-        for (NSString *part in parts) {
-            NSString *trimmed = [part stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-            if (trimmed.length > 0) [newList addObject:trimmed];
-        }
-
-        for (NSString *bid in current) {
-            [env setInjectionBlocked:NO forBundleID:bid];
-        }
-        for (NSString *bid in newList) {
-            [env setInjectionBlocked:YES forBundleID:bid];
-        }
-
-        [self reloadSpecifiers];
-    }]];
-
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
 - (void)appHidePressed
 {
     DOAppHidePickerViewController *picker = [[DOAppHidePickerViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
@@ -1151,13 +1101,15 @@
         if (!bundleID || !name) continue;
         if ([bundleID hasPrefix:@"com.apple."]) continue;
 
-        BOOL hidden = [env isEnvironmentHiddenForBundleID:bundleID];
-        BOOL noInject = [env isEnvironmentNoInjectForBundleID:bundleID];
+        // Hide Manager: one unified level per app, derived from the original
+        // rule files (0 Off / 1 Low / 2 High / 3 Max).
+        NSInteger level = [env hideLevelForBundleID:bundleID];
         [self.allApps addObject:[@{
             @"bundleID": bundleID,
             @"name": name,
-            @"hidden": @(hidden),
-            @"noInject": @(noInject)
+            @"level": @(level),
+            @"hidden": @(level >= 2),
+            @"noInject": @(level == 3)
         } mutableCopy]];
     }
 
@@ -1291,6 +1243,36 @@
     return self.filteredApps.count;
 }
 
+
+// ===== Hide Manager: unified per-app level =====
+// 0 = Off, 1 = Low (block injection), 2 = High (hook hide), 3 = Max (no-inject)
+
+- (NSString *)hideLevelDisplayName:(NSInteger)hideLevel
+{
+    switch (hideLevel) {
+        case 0: return DOLocalizedString(@"HideManager_Level_Off");
+        case 1: return DOLocalizedString(@"HideManager_Level_Low");
+        case 2: return DOLocalizedString(@"HideManager_Level_High");
+        case 3: return DOLocalizedString(@"HideManager_Level_Max");
+        default: return @"";
+    }
+}
+
+- (UIColor *)hideLevelColor:(NSInteger)hideLevel
+{
+    switch (hideLevel) {
+        case 1: return [UIColor systemGreenColor];    // Low  - green
+        case 2: return [UIColor systemOrangeColor];   // High - orange
+        case 3: return [UIColor systemRedColor];      // Max  - red
+        default: return [UIColor clearColor];
+    }
+}
+
+- (NSInteger)hideLevelForAppInfo:(NSDictionary *)appInfo
+{
+    return [appInfo[@"level"] integerValue];
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     static NSString *cellId = @"AppHideCell";
@@ -1305,10 +1287,15 @@
 
     NSDictionary *appInfo = self.filteredApps[indexPath.row];
     NSString *bundleID = appInfo[@"bundleID"];
+    NSInteger level = [self hideLevelForAppInfo:appInfo];
 
-    BOOL noInject = [appInfo[@"noInject"] boolValue];
-    cell.textLabel.text = noInject ? [NSString stringWithFormat:@"%@ [NoInject]", appInfo[@"name"]] : appInfo[@"name"];
+    cell.textLabel.text = appInfo[@"name"];
     cell.detailTextLabel.text = bundleID;
+
+    // The name must never cover the level badge; the badge lives inside the
+    // accessory view, so the text label is laid out to its left and truncates.
+    cell.textLabel.numberOfLines = 1;
+    cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;
 
     UIImage *icon = [self iconForBundleID:bundleID];
     if (icon) {
@@ -1318,14 +1305,53 @@
     }
 
     UISwitch *toggle = [[UISwitch alloc] init];
-    toggle.on = [appInfo[@"hidden"] boolValue];
+    toggle.on = level > 0;
     // Tag by index into the *unfiltered* list: after a search the row is a
     // filtered index, and toggleChanged: looks the app up in allApps.
     toggle.tag = [self.allApps indexOfObject:appInfo];
     [toggle addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
-    cell.accessoryView = toggle;
+
+    // Level badge sits left of the switch inside a stack view, so the cell's
+    // text is always given the remaining width and truncated rather than drawn
+    // under the badge. Tapping the badge opens the level menu (like a long-press).
+    UILabel *badge = [[UILabel alloc] init];
+    badge.text = [self hideLevelDisplayName:level];
+    badge.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+    badge.textColor = [UIColor whiteColor];
+    badge.backgroundColor = [self hideLevelColor:level];
+    badge.layer.cornerRadius = 4;
+    badge.layer.masksToBounds = YES;
+    badge.textAlignment = NSTextAlignmentCenter;
+    badge.userInteractionEnabled = YES;
+    badge.hidden = (level == 0);
+    badge.translatesAutoresizingMaskIntoConstraints = NO;
+    [badge setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [badge setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [NSLayoutConstraint activateConstraints:@[
+        [badge.heightAnchor constraintEqualToConstant:20],
+        [badge.widthAnchor constraintGreaterThanOrEqualToConstant:38],
+    ]];
+
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(badgeTapped:)];
+    [badge addGestureRecognizer:tap];
+
+    UIStackView *accessory = [[UIStackView alloc] initWithArrangedSubviews:@[badge, toggle]];
+    accessory.axis = UILayoutConstraintAxisHorizontal;
+    accessory.alignment = UIStackViewAlignmentCenter;
+    accessory.spacing = 8;
+    cell.accessoryView = accessory;
 
     return cell;
+}
+
+- (void)badgeTapped:(UITapGestureRecognizer *)gesture
+{
+    UIView *v = gesture.view;
+    while (v && ![v isKindOfClass:[UITableViewCell class]]) v = v.superview;
+    if (!v) return;
+    NSIndexPath *indexPath = [self.tableView indexPathForCell:(UITableViewCell *)v];
+    if (!indexPath) return;
+    [self showHideLevelMenuForAppAtIndexPath:indexPath];
 }
 
 - (void)toggleChanged:(UISwitch *)sender
@@ -1333,26 +1359,29 @@
     if (sender.tag < 0 || sender.tag >= (NSInteger)self.allApps.count) return;
     NSDictionary *appInfo = self.allApps[sender.tag];
     NSString *bundleID = appInfo[@"bundleID"];
-    BOOL hidden = sender.on;
+    // Turning the switch on starts at High (the old "Hide for App" behaviour);
+    // Low and Max are picked from the level menu.
+    NSInteger newLevel = sender.on ? 2 : 0;
 
-    BOOL ok = [[DOEnvironmentManager sharedManager] setEnvironmentHidden:hidden forBundleID:bundleID];
-
-    for (NSMutableDictionary *dict in self.allApps) {
-        if ([dict[@"bundleID"] isEqualToString:bundleID]) {
-            dict[@"hidden"] = @(ok ? hidden : !hidden);
-            if (ok && !hidden) dict[@"noInject"] = @NO;
-            break;
-        }
-    }
-
+    BOOL ok = [[DOEnvironmentManager sharedManager] setHideLevel:newLevel forBundleID:bundleID];
     if (!ok) {
         // Persisting failed (permissions or a read-only/managed directory), so the
         // rule did not stick. Put the switch back and say so instead of letting it
         // look like the app was hidden when it was not.
-        [sender setOn:!hidden animated:YES];
+        [sender setOn:!sender.on animated:YES];
         [self presentWriteFailureAlert];
         return;
     }
+
+    for (NSMutableDictionary *dict in self.allApps) {
+        if ([dict[@"bundleID"] isEqualToString:bundleID]) {
+            dict[@"level"] = @(newLevel);
+            dict[@"hidden"] = @(newLevel >= 2);
+            dict[@"noInject"] = @(newLevel == 3);
+            break;
+        }
+    }
+    [self.tableView reloadData];
 
     UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     [fb impactOccurred];
@@ -1368,7 +1397,49 @@
     [self presentViewController:alert animated:YES completion:nil];
 }
 
-// Long-press a (hidden) app to toggle "无注入" (RootHide-style no-injection) mode.
+- (void)showHideLevelMenuForAppAtIndexPath:(NSIndexPath *)indexPath
+{
+    NSDictionary *appInfo = self.filteredApps[indexPath.row];
+    NSString *bundleID = appInfo[@"bundleID"];
+    NSInteger currentLevel = [self hideLevelForAppInfo:appInfo];
+
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:[NSString stringWithFormat:@"%@ - %@", appInfo[@"name"], DOLocalizedString(@"HideManager_Select_Level")]
+                         message:nil
+                  preferredStyle:UIAlertControllerStyleActionSheet];
+
+    for (NSInteger level = 0; level <= 3; level++) {
+        NSString *title = [self hideLevelDisplayName:level];
+        if (level == currentLevel) {
+            title = [title stringByAppendingString:@"  \u2713"];
+        }
+        UIAlertAction *action = [UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            BOOL ok = [[DOEnvironmentManager sharedManager] setHideLevel:level forBundleID:bundleID];
+            if (!ok) {
+                [self presentWriteFailureAlert];
+                return;
+            }
+            for (NSMutableDictionary *dict in self.allApps) {
+                if ([dict[@"bundleID"] isEqualToString:bundleID]) {
+                    dict[@"level"] = @(level);
+                    dict[@"hidden"] = @(level >= 2);
+                    dict[@"noInject"] = @(level == 3);
+                    break;
+                }
+            }
+            [self.tableView reloadData];
+
+            UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+            [fb impactOccurred];
+        }];
+        [alert addAction:action];
+    }
+
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+// Long-press a managed app (any level above Off) to change its hide level.
 - (void)handleLongPress:(UILongPressGestureRecognizer *)gesture
 {
     if (gesture.state != UIGestureRecognizerStateBegan) return;
@@ -1377,26 +1448,9 @@
     if (!indexPath) return;
 
     NSDictionary *appInfo = self.filteredApps[indexPath.row];
-    if (![appInfo[@"hidden"] boolValue]) return; // only meaningful when already hidden
-    NSString *bundleID = appInfo[@"bundleID"];
+    if ([self hideLevelForAppInfo:appInfo] == 0) return; // only meaningful when managed
 
-    BOOL noInject = ![appInfo[@"noInject"] boolValue];
-    BOOL ok = [[DOEnvironmentManager sharedManager] setEnvironmentNoInject:noInject forBundleID:bundleID];
-    if (!ok) {
-        [self presentWriteFailureAlert];
-        return;
-    }
-
-    for (NSMutableDictionary *dict in self.allApps) {
-        if ([dict[@"bundleID"] isEqualToString:bundleID]) {
-            dict[@"noInject"] = @(noInject);
-            break;
-        }
-    }
-    [self.tableView reloadData];
-
-    UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-    [fb impactOccurred];
+    [self showHideLevelMenuForAppAtIndexPath:indexPath];
 }
 
 @end

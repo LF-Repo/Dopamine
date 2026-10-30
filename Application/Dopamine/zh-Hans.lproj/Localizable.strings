@@ -44,6 +44,13 @@
 "Settings_Apps_JIT" = "允许 App 使用 JIT";
 "Settings_Jetsam_Multiplier" = "Jetsam 倍数";
 "Enhanced Spinlock Fix (iOS 15)" = "自旋锁增强修复（仅 iOS 15）";
+// Hide Manager Levels
+"HideManager_Level_Off" = "关闭";
+"HideManager_Level_Low" = "低";
+"HideManager_Level_High" = "高";
+"HideManager_Level_Max" = "最高";
+"HideManager_Select_Level" = "选择隐藏等级";
+
 "Additional" = "附加";
 
 // Settings Buttons

@@ -1155,6 +1155,48 @@ static BOOL gAppHideRulesCacheValid = NO;
 }
 
 
+// ===== Hide Manager unified level =====
+// A single per-app level derived from (and written back to) the ORIGINAL rule
+// files, so the on-disk format is unchanged:
+//   0 = Off      (no entries in either file)
+//   1 = Low      (BlockInjection in .DopamineInjectionRules.plist)
+//   2 = High     (HideEnvironment in .DopamineAppHideRules.plist)
+//   3 = Max      (HideEnvironment + HideNoInject)
+
+- (NSInteger)hideLevelForBundleID:(NSString *)bundleID
+{
+    if (!bundleID) return 0;
+    if ([self isEnvironmentNoInjectForBundleID:bundleID]) return 3;
+    if ([self isEnvironmentHiddenForBundleID:bundleID]) return 2;
+    if ([self isInjectionBlockedForBundleID:bundleID]) return 1;
+    return 0;
+}
+
+- (BOOL)setHideLevel:(NSInteger)level forBundleID:(NSString *)bundleID
+{
+    if (!bundleID) return NO;
+    if (level < 0 || level > 3) return NO;
+
+    switch (level) {
+        case 0: // Off: clear both rule files for this app
+            [self setInjectionBlocked:NO forBundleID:bundleID];
+            return [self setEnvironmentHidden:NO forBundleID:bundleID];
+        case 1: // Low: block injection only, no environment hiding
+            [self setEnvironmentHidden:NO forBundleID:bundleID];
+            [self setInjectionBlocked:YES forBundleID:bundleID];
+            return YES;
+        case 2: // High: hook hide (in-process), no injection blocking
+            [self setInjectionBlocked:NO forBundleID:bundleID];
+            [self setEnvironmentNoInject:NO forBundleID:bundleID];
+            return [self setEnvironmentHidden:YES forBundleID:bundleID];
+        case 3: // Max: no-inject global hide (implies hidden)
+            [self setInjectionBlocked:NO forBundleID:bundleID];
+            return [self setEnvironmentNoInject:YES forBundleID:bundleID];
+        default:
+            return NO;
+    }
+}
+
 #pragma mark - forkfix
 
 - (NSString *)forkfixPath
