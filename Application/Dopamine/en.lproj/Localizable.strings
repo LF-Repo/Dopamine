@@ -44,8 +44,8 @@
 "Settings_Apps_JIT" = "Allow JIT in Apps";
 "Settings_Allow_Old_arm64e_ABI_Libraries" = "Allow Legacy arm64e Libraries";
 "Settings_Jetsam_Multiplier" = "Jetsam Multiplier";
-"Settings_Spinlock_Fix_Enhanced" = "Enhanced Spinlock Fix (iOS 15)";
-"Settings_Additional" = "Additional";
+"Enhanced Spinlock Fix (iOS 15)" = "Enhanced Spinlock Fix (iOS 15)";
+"Additional" = "Additional";
 
 // Settings Buttons
 "Button_Remove_Jailbreak" = "Remove Jailbreak";

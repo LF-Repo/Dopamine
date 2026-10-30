@@ -20,7 +20,7 @@
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-    _table.tableHeaderView = [DOPSListItemsController makeHeader:DOLocalizedString(@"Settings_Additional") withTarget:self];
+    _table.tableHeaderView = [DOPSListItemsController makeHeader:DOLocalizedString(@"Additional") withTarget:self];
 }
 
 - (void)dismiss
@@ -33,7 +33,7 @@
     if (!_specifiers) {
         NSMutableArray *specifiers = [NSMutableArray new];
 
-        PSSpecifier *spinlockFixSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Spinlock_Fix_Enhanced") target:self set:@selector(setSpinlockFixEnhanced:specifier:) get:@selector(readSpinlockFixEnhanced:) detail:nil cell:PSSwitchCell edit:nil];
+        PSSpecifier *spinlockFixSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Enhanced Spinlock Fix (iOS 15)") target:self set:@selector(setSpinlockFixEnhanced:specifier:) get:@selector(readSpinlockFixEnhanced:) detail:nil cell:PSSwitchCell edit:nil];
         [spinlockFixSpecifier setProperty:@YES forKey:@"enabled"];
         [spinlockFixSpecifier setProperty:@"spinlockFixEnhanced" forKey:@"key"];
         [spinlockFixSpecifier setProperty:@NO forKey:@"default"];

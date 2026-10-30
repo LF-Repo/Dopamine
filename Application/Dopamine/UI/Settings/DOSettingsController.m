@@ -409,10 +409,12 @@
                     [appHideSpecifier setProperty:@"appHidePressed" forKey:@"action"];
                     [specifiers addObject:appHideSpecifier];
 
-                    PSSpecifier *additionalSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Additional") target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                    PSSpecifier *additionalSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                    [additionalSpecifier setProperty:@"Additional" forKey:@"title"];
                     [additionalSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
                     [additionalSpecifier setProperty:buttonHeight forKey:@"height"];
-                    [additionalSpecifier setProperty:@"gear" forKey:@"image"];
+                    [additionalSpecifier setProperty:@"gearshape" forKey:@"image"];
+                    [additionalSpecifier setProperty:@"additional" forKey:@"key"];
                     [additionalSpecifier setProperty:@"additionalPressed" forKey:@"action"];
                     [specifiers addObject:additionalSpecifier];
 
