@@ -4,7 +4,18 @@
 #include "private.h"
 #include "inline.h"
 
-#define HOOK_DYLIB_PATH "/usr/lib/systemhook.dylib"
+// The injected dylib path is NOT a compile-time constant any more: launchdhook
+// renames systemhook.dylib to a per-jailbreak random name at startup (see
+// launchdhook/src/hook_dylib_path.m), so a detector cannot match one fixed path
+// string. Every consumer reads this variable instead of a #define.
+//
+// It is defined in common.c (compiled into BOTH launchdhook and systemhook) and
+// keeps the legacy path until launchdhook overwrites it, so systemhook still
+// works if it is loaded by some path that never ran the rename.
+extern const char *gHookDylibPath;
+
+// Convenience macro so existing call sites keep working unchanged.
+#define HOOK_DYLIB_PATH gHookDylibPath
 
 typedef enum 
 {

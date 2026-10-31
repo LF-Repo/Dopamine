@@ -1,4 +1,5 @@
 #include "common.h"
+
 #include <xpc/xpc.h>
 #include <xpc_private.h>
 #include <mach-o/dyld.h>
@@ -16,6 +17,11 @@
 #include <libjailbreak/jbroot.h>
 #include <libjailbreak/hookd.h>
 #include <libkern/OSCacheControl.h>
+
+// Runtime-injected dylib path. Defaults to the legacy name so a systemhook that
+// is loaded before launchdhook renames it (or by a path that never renames) still
+// resolves to a real file.
+const char *gHookDylibPath = "/usr/lib/systemhook.dylib";
 
 bool string_has_prefix(const char *str, const char* prefix)
 {

@@ -41,6 +41,9 @@ extern void systemwide_domain_set_enabled(bool enabled);
 // Not exposed by the public SDK; same value RootHide uses in common.m.
 #define PROC_PIDUNIQIDENTIFIERINFO 17
 
+// Same path spawn_hook.m reads; kept here so this file does not depend on it.
+#define APP_HIDE_RULES_PATH "/var/mobile/Library/Preferences/.DopamineAppHideRules.plist"
+
 // string_has_prefix is defined in systemhook/src/common/common.c, which is
 // compiled into launchdhook as well.
 bool string_has_prefix(const char *str, const char *prefix);
@@ -908,6 +911,55 @@ bool app_hide_has_pending_no_inject_state(void)
 	return pending;
 }
 
+// App extensions of a hidden app (High/Max) must not run at all. The system
+// starts them in their own process, normally while the parent app is in the
+// background, and at that point no hide is active — so the extension would see
+// a fully visible jailbreak while still carrying the app's identity. Returning
+// EPERM from the spawn hook makes the system act as if the extension does not
+// exist, which is strictly better than letting it run and report.
+//
+// Detection is path-shape only (no plist parsing beyond the parent app's
+// Info.plist, which the shared rule reader already does), so the normal spawn
+// path pays just a couple of strstr calls.
+bool app_hide_should_refuse_extension_launch(const char *path)
+{
+	if (!path) return false;
+
+	// Only extensions are refused, never the app itself. Cover the three
+	// directory shapes iOS uses: .appex bundles, PlugIns inside a bundle, and
+	// the Extensions directory some system apps keep.
+	if (!strstr(path, ".appex/") && !strstr(path, "/PlugIns/") && !strstr(path, "/Extensions/")) {
+		return false;
+	}
+
+	// Resolve the owning .app and read its bundle id, then apply the same rule
+	// table the rest of launchd uses. Extensions live inside their parent
+	// bundle, so everything before ".app/" is the app root.
+	__block bool refuse = false;
+	@autoreleasepool {
+		NSString *nsPath = [NSString stringWithUTF8String:path];
+		NSRange appRange = [nsPath rangeOfString:@".app/"];
+		if (appRange.location != NSNotFound) {
+			NSString *appPath = [nsPath substringToIndex:appRange.location + 4];
+			NSString *infoPlistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+			NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
+			NSString *bundleID = info[@"CFBundleIdentifier"];
+			if (bundleID) {
+				NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:@APP_HIDE_RULES_PATH];
+				NSDictionary *appRule = rules[bundleID];
+				// High (HideEnvironment) and Max (HideNoInject) both mean the user
+				// asked for this app to be hidden; Low (BlockInjection only) does
+				// not, because the app is not hidden from itself and its
+				// extensions are expected to keep working.
+				if (appRule && ([appRule[@"HideNoInject"] boolValue] ||
+				                [appRule[@"HideEnvironment"] boolValue])) {
+					refuse = true;
+				}
+			}
+		}
+	}
+	return refuse;
+}
 bool app_hide_is_jailbreak_app(const char *path)
 {
 	// A "jailbreak app" is an app bundle (contains ".app/") installed inside

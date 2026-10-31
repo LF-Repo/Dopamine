@@ -162,6 +162,7 @@ __attribute__((constructor)) static void initializer(void)
 
 	initXPCHooks();
 	initDaemonHooks();
+	initHookDylibPath();
 	initSpawnHooks();
 	initIPCHooks();
 	initJetsamHook();

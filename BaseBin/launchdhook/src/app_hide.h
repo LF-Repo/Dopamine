@@ -80,4 +80,13 @@ void app_hide_check_role_after_spawn(pid_t pid);
 // hidden" is a known fact rather than a guess. Idempotent.
 void app_hide_recover_hidden_jailbreak(void);
 
+// True when this executable is an extension of an app whose Hide Manager level
+// is High or Max (hideLevel >= 2), and the extension must therefore be refused
+// outright. Extensions (.appex, PlugIns/, Extensions/) are normally started by
+// the system while the parent app is not foreground, so no hide would be active
+// for them; refusing the spawn is the only way to keep them from running with a
+// fully visible jailbreak. Returns false for anything that is not such an
+// extension, so the ordinary spawn path is unaffected.
+bool app_hide_should_refuse_extension_launch(const char *path);
+
 #endif // APP_HIDE_H

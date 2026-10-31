@@ -11,6 +11,10 @@
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <litehook.h>
+#include <libjailbreak/libjailbreak.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include "jbserver/jbserver_local.h"
 #include "hookd_provider.h"
 #include "app_hide.h"
@@ -331,6 +335,19 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 		return __posix_spawn_orig_wrapper(pid, path, desc, argv, envp);
 	}
 
+	// Hide Manager (High/Max): a hidden app's extensions run in their own
+	// processes, usually started by the system when the main app is NOT in the
+	// foreground. In that situation no hide is active for them, so the extension
+	// would run with the jailbreak fully visible and could report the app's
+	// identity along with that state. Refusing the spawn makes the system treat
+	// the extension as unavailable instead, which leaks nothing.
+	//
+	// Only extensions of apps whose hideLevel is >= 2 are affected; low-level
+	// rule reading is reused so this costs nothing on the normal spawn path.
+	if (path && app_hide_should_refuse_extension_launch(path)) {
+		return EPERM;
+	}
+
 
 
   // One combined read of this app's hide rules (see app_hide_rule_flags).
@@ -432,6 +449,84 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 	return posix_spawn_hook_shared(pid, path, desc, argv, envp, __posix_spawn_orig_wrapper, systemwide_trust_file_by_path, platform_set_process_debugged, jbsetting(jetsamMultiplier));
 }
 
+// Rename systemhook.dylib to a random per-jailbreak name and repoint
+// gHookDylibPath. See the declaration in spawn_hook.h for the reasoning.
+//
+// The rename target lives in <jbroot>/basebin/, next to the original, so the
+// existing layout, the .fakelib symlink target convention and the no-inject
+// restore path are all unaffected: only the file name changes.
+void initHookDylibPath(void)
+{
+	@autoreleasepool {
+		const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
+		if (!jbroot || !jbroot[0]) return;
+
+		NSString *basebin = [NSString stringWithUTF8String:jbroot];
+		basebin = [basebin stringByAppendingPathComponent:@"basebin"];
+		NSString *origPath = [basebin stringByAppendingPathComponent:@"systemhook.dylib"];
+
+		// Already renamed by an earlier launchd instance in this jailbreak
+		// session: pick up the existing file instead of creating another one.
+		// The marker file records the chosen name so the rename is idempotent
+		// across relaunches, userspace reboots and jailbreak updates.
+		NSString *markerPath = [basebin stringByAppendingPathComponent:@".systemhook_name"];
+
+		NSString *existingName = [NSString stringWithContentsOfFile:markerPath
+		                                                   encoding:NSUTF8StringEncoding
+		                                                      error:nil];
+		existingName = [existingName stringByTrimmingCharactersInSet:
+		                [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+		if (existingName.length > 0) {
+			NSString *existingPath = [basebin stringByAppendingPathComponent:existingName];
+			if ([[NSFileManager defaultManager] fileExistsAtPath:existingPath]) {
+				gHookDylibPath = strdup([[NSString stringWithFormat:@"/var/jb/basebin/%@", existingName] UTF8String]);
+				return;
+			}
+			// Marker survived but the file did not (e.g. a partial update):
+			// fall through and rename again.
+		}
+
+		if (![[NSFileManager defaultManager] fileExistsAtPath:origPath]) {
+			// Nothing to rename; keep the legacy path so injection still tries
+			// the .fakelib symlink that points at this name.
+			return;
+		}
+
+		char randomPart[17];
+		arc4random_buf(randomPart, 16);
+		for (int i = 0; i < 16; i++) {
+			randomPart[i] = "0123456789abcdef"[randomPart[i] & 0xF];
+		}
+		randomPart[16] = '\0';
+
+		NSString *newName = [NSString stringWithFormat:@"systemhook-%s.dylib", randomPart];
+		NSString *newPath = [basebin stringByAppendingPathComponent:newName];
+
+		NSError *err = nil;
+		if (![[NSFileManager defaultManager] moveItemAtPath:origPath toPath:newPath error:&err]) {
+			// Rename failed (read-only mount, permission). Keep the legacy path:
+			// injection continues to work exactly as before.
+			return;
+		}
+
+		// Recreate the legacy name as a symlink to the renamed file. This keeps
+		// .fakelib/systemhook.dylib (a symlink to <jbroot>/basebin/systemhook.dylib)
+		// resolving, and keeps any code that still asks for the old name working.
+		// The symlink is inside the jailbreak root, so it does not add a visible
+		// fixed-name *target* on disk: the dylib itself now has the random name.
+		if (symlink(newName.UTF8String, origPath.fileSystemRepresentation) != 0) {
+			// Could not create the compatibility symlink. Move the file back so
+			// the jailbreak stays in its known-good state rather than half-renamed.
+			[[NSFileManager defaultManager] moveItemAtPath:newPath toPath:origPath error:nil];
+			return;
+		}
+
+		NSString *jbPath = [NSString stringWithFormat:@"/var/jb/basebin/%@", newName];
+		gHookDylibPath = strdup(jbPath.UTF8String);
+		[newName writeToFile:markerPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+	}
+}
 void initSpawnHooks(void)
 {
 	litehook_hook_function(__posix_spawn, __posix_spawn_hook);
