@@ -25,7 +25,10 @@
 #include "hidejb_rules.h"
 
 #include <litehook.h>
-#include <substrate.h>
+#include <dlfcn.h>
+// substrate.h used to pull these in; hidejb still uses objc_msgSend and friends.
+#include <objc/runtime.h>
+#include <objc/message.h>
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -40,7 +43,6 @@
 #include <sys/mount.h>
 #include <sys/sysctl.h>
 #include <sys/syscall.h>
-#include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include <mach-o/dyld_images.h>
 #include <mach-o/loader.h>
@@ -65,6 +67,34 @@ extern kern_return_t mach_vm_region_recurse(vm_map_read_t target_task, mach_vm_a
 #endif
 
 static bool gEnabled = false;
+
+// MSHookFunction comes from ellekit. Linking it directly would add an
+// LC_LOAD_DYLIB for libellekit, so dyld loads that framework into every hidden
+// app and exposes its real path (plus whatever state ellekit sets up). Resolve
+// it at runtime instead: the dependency disappears from systemhook, and if it
+// cannot be found the file hooks are simply skipped rather than crashing.
+typedef void (*MShookFunc)(void *symbol, void *replace, void **result);
+static MShookFunc gMSHookFunction = NULL;
+static bool gMSHookResolved = false;
+
+// Our own dlopen hook refuses paths containing "libellekit"/"CydiaSubstrate",
+// so the resolver must run BEFORE the hooks are installed. The flag guards the
+// re-entrant case (hidejb_init called twice in one process).
+static bool gResolvingMSHook = false;
+
+static MShookFunc hidejb_mshook(void)
+{
+	if (!gMSHookResolved) {
+		gMSHookResolved = true;
+		gResolvingMSHook = true;
+		void *h = dlopen("/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", RTLD_NOW);
+		if (!h) h = dlopen("/usr/lib/libellekit.dylib", RTLD_NOW);
+		if (!h) h = dlopen("/var/jb/usr/lib/libellekit.dylib", RTLD_NOW);
+		if (h) gMSHookFunction = (MShookFunc)dlsym(h, "MSHookFunction");
+		gResolvingMSHook = false;
+	}
+	return gMSHookFunction;
+}
 
 // Indices of injected jailbreak dylibs (systemhook, libellekit, ...) in the
 // dyld image list, plus a UNIQUE benign path per entry.
@@ -544,7 +574,9 @@ static void hidejb_patch_all_image_infos(void)
 static void *(*orig_dlopen)(const char *, int);
 static void *hidejb_dlopen(const char *path, int mode)
 {
-	if (gEnabled && path) {
+	// gResolvingMSHook: the resolver is loading ellekit to get MSHookFunction;
+	// blocking that path here would make the resolver fail against itself.
+	if (gEnabled && path && !gResolvingMSHook) {
 		if (strstr(path, "systemhook") || strstr(path, "libellekit") ||
 		    strstr(path, "CydiaSubstrate") || strstr(path, "libjailbreak") ||
 		    strstr(path, "TweakLoader")) {
@@ -832,42 +864,48 @@ void hidejb_init(const char *jbroot)
 	// ALL callers — including Foundation/UIKit internals — go through our hooks.
 	// litehook_rebind_symbol only rewrites the app's own GOT entries, so it misses
 	// the internal stat/access/open calls that NSFileManager & friends make.
+	MShookFunc MSHook = hidejb_mshook();
+	if (!MSHook) {
+		// ellekit is unavailable: skip the instruction hooks instead of crashing.
+		// The path-based hide is off for this process, but nothing else breaks.
+		return;
+	}
 	if (!(gDisabled & (HIDE_OFF_FILE | HIDE_OFF_F_QUERY))) {
-	MSHookFunction((void *)stat,         (void *)hidejb_stat,         (void **)&orig_stat);
-	MSHookFunction((void *)lstat,        (void *)hidejb_lstat,        (void **)&orig_lstat);
-	MSHookFunction((void *)fstatat,      (void *)hidejb_fstatat,      (void **)&orig_fstatat);
-	MSHookFunction((void *)access,       (void *)hidejb_access,       (void **)&orig_access);
-	MSHookFunction((void *)faccessat,    (void *)hidejb_faccessat,    (void **)&orig_faccessat);
+	MSHook((void *)stat,         (void *)hidejb_stat,         (void **)&orig_stat);
+	MSHook((void *)lstat,        (void *)hidejb_lstat,        (void **)&orig_lstat);
+	MSHook((void *)fstatat,      (void *)hidejb_fstatat,      (void **)&orig_fstatat);
+	MSHook((void *)access,       (void *)hidejb_access,       (void **)&orig_access);
+	MSHook((void *)faccessat,    (void *)hidejb_faccessat,    (void **)&orig_faccessat);
 	}
 	if (!(gDisabled & (HIDE_OFF_FILE | HIDE_OFF_F_DIR))) {
-	MSHookFunction((void *)opendir,      (void *)hidejb_opendir,      (void **)&orig_opendir);
-	MSHookFunction((void *)readdir,      (void *)hidejb_readdir,      (void **)&orig_readdir);
+	MSHook((void *)opendir,      (void *)hidejb_opendir,      (void **)&orig_opendir);
+	MSHook((void *)readdir,      (void *)hidejb_readdir,      (void **)&orig_readdir);
 	}
 	if (!(gDisabled & (HIDE_OFF_FILE | HIDE_OFF_F_PATH))) {
-	MSHookFunction((void *)realpath,     (void *)hidejb_realpath,     (void **)&orig_realpath);
-	MSHookFunction((void *)readlink,     (void *)hidejb_readlink,     (void **)&orig_readlink);
-	MSHookFunction((void *)readlinkat,   (void *)hidejb_readlinkat,   (void **)&orig_readlinkat);
+	MSHook((void *)realpath,     (void *)hidejb_realpath,     (void **)&orig_realpath);
+	MSHook((void *)readlink,     (void *)hidejb_readlink,     (void **)&orig_readlink);
+	MSHook((void *)readlinkat,   (void *)hidejb_readlinkat,   (void **)&orig_readlinkat);
 	}
 	if (!(gDisabled & (HIDE_OFF_FILE | HIDE_OFF_F_FOPEN))) {
-	MSHookFunction((void *)fopen,        (void *)hidejb_fopen,        (void **)&orig_fopen);
+	MSHook((void *)fopen,        (void *)hidejb_fopen,        (void **)&orig_fopen);
 	}
 	if (!(gDisabled & (HIDE_OFF_FILE | HIDE_OFF_F_STATFS))) {
-	MSHookFunction((void *)statfs,       (void *)hidejb_statfs,       (void **)&orig_statfs);
-	MSHookFunction((void *)getfsstat,    (void *)hidejb_getfsstat,    (void **)&orig_getfsstat);
+	MSHook((void *)statfs,       (void *)hidejb_statfs,       (void **)&orig_statfs);
+	MSHook((void *)getfsstat,    (void *)hidejb_getfsstat,    (void **)&orig_getfsstat);
 	}
 	if (!(gDisabled & HIDE_OFF_SYSCTL)) {
-	MSHookFunction((void *)sysctlbyname,  (void *)hidejb_sysctlbyname,  (void **)&orig_sysctlbyname);
-	MSHookFunction((void *)__sysctlbyname, (void *)hidejb___sysctlbyname, (void **)&orig___sysctlbyname);
-	MSHookFunction((void *)__sysctl,       (void *)hidejb___sysctl,       (void **)&orig___sysctl);
+	MSHook((void *)sysctlbyname,  (void *)hidejb_sysctlbyname,  (void **)&orig_sysctlbyname);
+	MSHook((void *)__sysctlbyname, (void *)hidejb___sysctlbyname, (void **)&orig___sysctlbyname);
+	MSHook((void *)__sysctl,       (void *)hidejb___sysctl,       (void **)&orig___sysctl);
 	}
 
 	if (!(gDisabled & HIDE_OFF_DYLD)) {
-	MSHookFunction((void *)_dyld_get_image_name,        (void *)hidejb_dyld_get_image_name,        (void **)&orig_dyld_get_image_name);
+	MSHook((void *)_dyld_get_image_name,        (void *)hidejb_dyld_get_image_name,        (void **)&orig_dyld_get_image_name);
 	}
 	if (!(gDisabled & HIDE_OFF_DL)) {
-	MSHookFunction((void *)dlopen,                      (void *)hidejb_dlopen,                      (void **)&orig_dlopen);
-	MSHookFunction((void *)dladdr,                      (void *)hidejb_dladdr,                      (void **)&orig_dladdr);
-	MSHookFunction((void *)dlsym,                       (void *)hidejb_dlsym,                       (void **)&orig_dlsym);
+	MSHook((void *)dlopen,                      (void *)hidejb_dlopen,                      (void **)&orig_dlopen);
+	MSHook((void *)dladdr,                      (void *)hidejb_dladdr,                      (void **)&orig_dladdr);
+	MSHook((void *)dlsym,                       (void *)hidejb_dlsym,                       (void **)&orig_dlsym);
 	}
 
 #ifndef __arm64e__
