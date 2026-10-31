@@ -1246,110 +1246,6 @@
 #define kHideLevelBadgeTag 9337
 #define kHideBadgeWidthOn 46
 
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    static NSString *cellId = @"AppHideCell";
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellId];
-    UISwitch *toggle;
-    UILabel *badge;
-    NSLayoutConstraint *badgeWidth;
-
-    if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cellId];
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-        cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
-        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-
-        // The switch is the cell's accessory, so the bundle-ID line (and the
-        // name when no badge is shown) keeps its full width and never truncates.
-        toggle = [[UISwitch alloc] init];
-        [toggle sizeToFit];
-        [toggle addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView = toggle;
-
-        // The badge lives inside the contentView on the name's line only: it
-        // shrinks the name (which truncates when too long) but never the
-        // identifier below it. It stays mounted at width 0 when Off so the
-        // show/hide transition can animate.
-        badge = [[UILabel alloc] init];
-        badge.tag = kHideLevelBadgeTag;
-        badge.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
-        badge.textColor = [UIColor whiteColor];
-        badge.textAlignment = NSTextAlignmentCenter;
-        badge.layer.cornerRadius = 4;
-        badge.layer.masksToBounds = YES;
-        badge.userInteractionEnabled = YES;
-        badge.alpha = 0;
-        badge.translatesAutoresizingMaskIntoConstraints = NO;
-        [cell.contentView addSubview:badge];
-
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(badgeTapped:)];
-        [badge addGestureRecognizer:tap];
-
-        CGFloat switchW = toggle.frame.size.width;
-        badgeWidth = [badge.widthAnchor constraintEqualToConstant:0];
-        NSLayoutConstraint *nameTrailing = [cell.textLabel.trailingAnchor constraintEqualToAnchor:badge.leadingAnchor constant:-6];
-        nameTrailing.priority = 999; // beats the cell default label trailing, stays below required
-        [NSLayoutConstraint activateConstraints:@[
-            [badge.centerYAnchor constraintEqualToAnchor:cell.textLabel.centerYAnchor],
-            [badge.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-(switchW + 12)],
-            [badge.heightAnchor constraintEqualToConstant:20],
-            badgeWidth,
-            nameTrailing,
-        ]];
-    } else {
-        toggle = (UISwitch *)cell.accessoryView;
-        badge = (UILabel *)[cell.contentView viewWithTag:kHideLevelBadgeTag];
-        for (NSLayoutConstraint *con in cell.contentView.constraints) {
-            if (con.firstItem == badge && con.firstAttribute == NSLayoutAttributeWidth) { badgeWidth = con; break; }
-        }
-    }
-
-    NSDictionary *appInfo = self.filteredApps[indexPath.row];
-    NSString *bundleID = appInfo[@"bundleID"];
-    NSInteger level = [self hideLevelForAppInfo:appInfo];
-
-    cell.textLabel.text = appInfo[@"name"];
-    cell.detailTextLabel.text = bundleID;
-    cell.textLabel.numberOfLines = 1;
-    cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-
-    UIImage *icon = [self iconForBundleID:bundleID];
-    if (icon) {
-        cell.imageView.image = [self roundedIcon:icon size:CGSizeMake(42, 42) cornerRadius:9];
-    } else {
-        cell.imageView.image = [UIImage systemImageNamed:@"app"];
-    }
-
-    // Tag by index into the *unfiltered* list: after a search the row is a
-    // filtered index, and toggleChanged: looks the app up in allApps.
-    toggle.tag = [self.allApps indexOfObject:appInfo];
-    toggle.on = level > 0;
-
-    badge.text = (level > 0) ? [self hideLevelDisplayName:level] : @"";
-    badge.backgroundColor = [self hideLevelColor:level];
-
-    CGFloat targetWidth = (level > 0) ? kHideBadgeWidthOn : 0;
-    CGFloat targetAlpha = (level > 0) ? 1.0 : 0.0;
-    void (^applyBadge)(void) = ^{
-        badgeWidth.constant = targetWidth;
-        badge.alpha = targetAlpha;
-        [cell layoutIfNeeded];
-    };
-    if (fabs(badgeWidth.constant - targetWidth) < 0.5 && fabs(badge.alpha - targetAlpha) < 0.01) {
-        applyBadge();
-    } else {
-        [UIView animateWithDuration:0.25 animations:applyBadge];
-    }
-
-    return cell;
-}
-
-
-// ===== Hide Manager: unified per-app level =====
-// 0 = Off, 1 = Low (block injection), 2 = High (hook hide), 3 = Max (no-inject)
-
 - (NSString *)hideLevelDisplayName:(NSInteger)hideLevel
 {
     switch (hideLevel) {
@@ -1376,15 +1272,136 @@
     return [appInfo[@"level"] integerValue];
 }
 
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    static NSString *cellId = @"AppHideCell";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellId];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cellId];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+        cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
+        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+
+        // The switch is the cell's own accessory, so the identifier line keeps
+        // the full width and never truncates.
+        UISwitch *toggle = [[UISwitch alloc] init];
+        [toggle sizeToFit];
+        [toggle addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
+
+        // The badge is pinned to the right edge of the contentView (which the
+        // cell already shrinks to make room for the accessory), so it forms one
+        // column on every row. Its width constraint is what animates: at 0 the
+        // badge is gone and the name gets the full line back.
+        UILabel *badge = [[UILabel alloc] init];
+        badge.tag = kHideLevelBadgeTag;
+        badge.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+        badge.textColor = [UIColor whiteColor];
+        badge.textAlignment = NSTextAlignmentCenter;
+        badge.layer.cornerRadius = 4;
+        badge.layer.masksToBounds = YES;
+        badge.userInteractionEnabled = YES;
+        badge.translatesAutoresizingMaskIntoConstraints = NO;
+        [cell.contentView addSubview:badge];
+
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(badgeTapped:)];
+        [badge addGestureRecognizer:tap];
+
+        NSLayoutConstraint *badgeWidth = [badge.widthAnchor constraintEqualToConstant:0];
+        NSLayoutConstraint *nameTrailing = [cell.textLabel.trailingAnchor constraintEqualToAnchor:badge.leadingAnchor constant:-6];
+        nameTrailing.priority = 999; // beats the default label trailing, stays below required
+        [NSLayoutConstraint activateConstraints:@[
+            [badge.centerYAnchor constraintEqualToAnchor:cell.textLabel.centerYAnchor],
+            [badge.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-2],
+            [badge.heightAnchor constraintEqualToConstant:20],
+            badgeWidth,
+            nameTrailing,
+        ]];
+    }
+
+    NSDictionary *appInfo = self.filteredApps[indexPath.row];
+    NSString *bundleID = appInfo[@"bundleID"];
+    NSInteger level = [self hideLevelForAppInfo:appInfo];
+
+    cell.textLabel.text = appInfo[@"name"];
+    cell.detailTextLabel.text = bundleID;
+    cell.textLabel.numberOfLines = 1;
+    cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+
+    UIImage *icon = [self iconForBundleID:bundleID];
+    if (icon) {
+        cell.imageView.image = [self roundedIcon:icon size:CGSizeMake(42, 42) cornerRadius:9];
+    } else {
+        cell.imageView.image = [UIImage systemImageNamed:@"app"];
+    }
+
+    // Tag by index into the *unfiltered* list: after a search the row is a
+    // filtered index, and toggleChanged: looks the app up in allApps.
+    ((UISwitch *)cell.accessoryView).tag = [self.allApps indexOfObject:appInfo];
+    ((UISwitch *)cell.accessoryView).on = level > 0;
+
+    [self applyLevel:level toBadgeInCell:cell animated:NO];
+    return cell;
+}
+
+// Single source of truth for the badge state. Bindings run WITHOUT animation:
+// a reused cell inheriting an in-flight animation was what made badges flicker
+// or vanish while scrolling. Only user interactions animate, via animated:YES.
+- (void)applyLevel:(NSInteger)level toBadgeInCell:(UITableViewCell *)cell animated:(BOOL)animated
+{
+    UIView *badgeView = [cell.contentView viewWithTag:kHideLevelBadgeTag];
+    if (![badgeView isKindOfClass:[UILabel class]]) return;
+    UILabel *badge = (UILabel *)badgeView;
+    NSLayoutConstraint *badgeWidth = nil;
+    for (NSLayoutConstraint *con in cell.contentView.constraints) {
+        if (con.firstItem == badge && con.firstAttribute == NSLayoutAttributeWidth) { badgeWidth = con; break; }
+    }
+    if (!badgeWidth) return;
+
+    badge.text = (level > 0) ? [self hideLevelDisplayName:level] : @"";
+    badge.backgroundColor = [self hideLevelColor:level];
+    CGFloat targetWidth = (level > 0) ? kHideBadgeWidthOn : 0;
+    CGFloat targetAlpha = (level > 0) ? 1.0 : 0.0;
+
+    void (^apply)(void) = ^{
+        badgeWidth.constant = targetWidth;
+        badge.alpha = targetAlpha;
+        [cell layoutIfNeeded];
+    };
+    if (animated) {
+        [UIView animateWithDuration:0.25 animations:apply];
+    } else {
+        [UIView performWithoutAnimation:apply];
+    }
+}
+
+- (UITableViewCell *)cellOwningView:(UIView *)view
+{
+    UIView *v = view;
+    while (v && ![v isKindOfClass:[UITableViewCell class]]) v = v.superview;
+    return (UITableViewCell *)v;
+}
 
 - (void)badgeTapped:(UITapGestureRecognizer *)gesture
 {
-    UIView *v = gesture.view;
-    while (v && ![v isKindOfClass:[UITableViewCell class]]) v = v.superview;
-    if (!v) return;
-    NSIndexPath *indexPath = [self.tableView indexPathForCell:(UITableViewCell *)v];
+    UITableViewCell *cell = [self cellOwningView:gesture.view];
+    if (!cell) return;
+    NSIndexPath *indexPath = [self.tableView indexPathForCell:cell];
     if (!indexPath) return;
     [self showHideLevelMenuForAppAtIndexPath:indexPath];
+}
+
+- (void)updateAppInfo:(NSString *)bundleID toLevel:(NSInteger)level
+{
+    for (NSMutableDictionary *dict in self.allApps) {
+        if ([dict[@"bundleID"] isEqualToString:bundleID]) {
+            dict[@"level"] = @(level);
+            dict[@"hidden"] = @(level >= 2);
+            dict[@"noInject"] = @(level == 3);
+            break;
+        }
+    }
 }
 
 - (void)toggleChanged:(UISwitch *)sender
@@ -1398,23 +1415,16 @@
 
     BOOL ok = [[DOEnvironmentManager sharedManager] setHideLevel:newLevel forBundleID:bundleID];
     if (!ok) {
-        // Persisting failed (permissions or a read-only/managed directory), so the
-        // rule did not stick. Put the switch back and say so instead of letting it
-        // look like the app was hidden when it was not.
+        // Persisting failed, so the rule did not stick. Put the switch back and
+        // say so instead of letting it look like the app was hidden when it was not.
         [sender setOn:!sender.on animated:YES];
         [self presentWriteFailureAlert];
         return;
     }
 
-    for (NSMutableDictionary *dict in self.allApps) {
-        if ([dict[@"bundleID"] isEqualToString:bundleID]) {
-            dict[@"level"] = @(newLevel);
-            dict[@"hidden"] = @(newLevel >= 2);
-            dict[@"noInject"] = @(newLevel == 3);
-            break;
-        }
-    }
-    [self.tableView reloadData];
+    [self updateAppInfo:bundleID toLevel:newLevel];
+    UITableViewCell *cell = [self cellOwningView:sender];
+    if (cell) [self applyLevel:newLevel toBadgeInCell:cell animated:YES];
 
     UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     [fb impactOccurred];
@@ -1435,6 +1445,7 @@
     NSDictionary *appInfo = self.filteredApps[indexPath.row];
     NSString *bundleID = appInfo[@"bundleID"];
     NSInteger currentLevel = [self hideLevelForAppInfo:appInfo];
+    UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
 
     UIAlertController *alert = [UIAlertController
         alertControllerWithTitle:[NSString stringWithFormat:@"%@ - %@", appInfo[@"name"], DOLocalizedString(@"HideManager_Select_Level")]
@@ -1452,15 +1463,12 @@
                 [self presentWriteFailureAlert];
                 return;
             }
-            for (NSMutableDictionary *dict in self.allApps) {
-                if ([dict[@"bundleID"] isEqualToString:bundleID]) {
-                    dict[@"level"] = @(level);
-                    dict[@"hidden"] = @(level >= 2);
-                    dict[@"noInject"] = @(level == 3);
-                    break;
-                }
+            [self updateAppInfo:bundleID toLevel:level];
+            if (cell) {
+                UISwitch *sw = (UISwitch *)cell.accessoryView;
+                [sw setOn:(level > 0) animated:YES];
+                [self applyLevel:level toBadgeInCell:cell animated:YES];
             }
-            [self.tableView reloadData];
 
             UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
             [fb impactOccurred];
