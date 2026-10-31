@@ -126,3 +126,14 @@
 "Button_Material" = "Knopmateriaal";
 "Material_Original" = "Origineel";
 "Material_Glass" = "Glas";
+// Hide Manager
+"Hide Manager" = "Verbergbeheer";
+"HideManager_Level_Off" = "Uit";
+"HideManager_Level_Low" = "Laag";
+"HideManager_Level_High" = "Hoog";
+"HideManager_Level_Max" = "Maximaal";
+"HideManager_Select_Level" = "Kies verbergingsniveau";
+
+// Additional page
+"Additional" = "Extra";
+"Enhanced Spinlock Fix (iOS 15)" = "Verbeterde Spinlock-fix (iOS 15)";

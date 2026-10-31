@@ -126,3 +126,14 @@
 "Button_Material" = "Materyal ng Button";
 "Material_Original" = "Orihinal";
 "Material_Glass" = "Salamin";
+// Hide Manager
+"Hide Manager" = "Tagapamahala ng Pagtatago";
+"HideManager_Level_Off" = "Naka-off";
+"HideManager_Level_Low" = "Mababa";
+"HideManager_Level_High" = "Mataas";
+"HideManager_Level_Max" = "Pinakamataas";
+"HideManager_Select_Level" = "Piliin ang antas ng pagtatago";
+
+// Additional page
+"Additional" = "Karagdagim";
+"Enhanced Spinlock Fix (iOS 15)" = "Pinahusay na Spinlock Fix (iOS 15)";

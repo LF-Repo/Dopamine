@@ -118,3 +118,14 @@
 "Button_Material" = "Materiale dei pulsanti";
 "Material_Original" = "Originale";
 "Material_Glass" = "Vetro";
+// Hide Manager
+"Hide Manager" = "Gestione occultamento";
+"HideManager_Level_Off" = "Disattivato";
+"HideManager_Level_Low" = "Basso";
+"HideManager_Level_High" = "Alto";
+"HideManager_Level_Max" = "Massimo";
+"HideManager_Select_Level" = "Seleziona livello di occultamento";
+
+// Additional page
+"Additional" = "Aggiuntivo";
+"Enhanced Spinlock Fix (iOS 15)" = "Correzione Spinlock migliorata (iOS 15)";

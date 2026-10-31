@@ -126,3 +126,14 @@
 "Button_Material" = "วัสดุปุ่ม";
 "Material_Original" = "ต้นฉบับ";
 "Material_Glass" = "กระจก";
+// Hide Manager
+"Hide Manager" = "จัดการการซ่อน";
+"HideManager_Level_Off" = "ปิด";
+"HideManager_Level_Low" = "ต่ำ";
+"HideManager_Level_High" = "สูง";
+"HideManager_Level_Max" = "สูงสุด";
+"HideManager_Select_Level" = "เลือกดับการซ่อน";
+
+// Additional page
+"Additional" = "เพิ่มเติม";
+"Enhanced Spinlock Fix (iOS 15)" = "การแก้ไข Spinlock ที่ปรับปรุงแล้ว (iOS 15)";

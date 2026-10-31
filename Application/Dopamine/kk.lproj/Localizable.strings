@@ -126,3 +126,14 @@
 "Button_Material" = "Түйме материалы";
 "Material_Original" = "Түпнұсқа";
 "Material_Glass" = "Шыны";
+// Hide Manager
+"Hide Manager" = "Жасыру менеджері";
+"HideManager_Level_Off" = "Өшірулі";
+"HideManager_Level_Low" = "Төмен";
+"HideManager_Level_High" = "Жоғары";
+"HideManager_Level_Max" = "Ең жоғары";
+"HideManager_Select_Level" = "Жасыру деңгейін таңдау";
+
+// Additional page
+"Additional" = "Қосымша";
+"Enhanced Spinlock Fix (iOS 15)" = "Жақсартылған Spinlock түзетуі (iOS 15)";

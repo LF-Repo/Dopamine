@@ -153,3 +153,14 @@
 "Button_Material" = "按钮材质";
 "Material_Original" = "原版";
 "Material_Glass" = "玻璃";
+// Hide Manager
+"Hide Manager" = "隐藏管理";
+"HideManager_Level_Off" = "关闭";
+"HideManager_Level_Low" = "低";
+"HideManager_Level_High" = "高";
+"HideManager_Level_Max" = "最高";
+"HideManager_Select_Level" = "选择隐藏等级";
+
+// Additional page
+"Additional" = "附加";
+"Enhanced Spinlock Fix (iOS 15)" = "自旋锁增强修复（仅 iOS 15）";

@@ -126,3 +126,14 @@
 "Button_Material" = "Υλικό κουμπιών";
 "Material_Original" = "Αρχικό";
 "Material_Glass" = "Γυαλί";
+// Hide Manager
+"Hide Manager" = "Διαχείριση απόκρυψης";
+"HideManager_Level_Off" = "Ανενεργό";
+"HideManager_Level_Low" = "Χαμηλό";
+"HideManager_Level_High" = "Υψηλό";
+"HideManager_Level_Max" = "Μέγιστο";
+"HideManager_Select_Level" = "Επιλογή επιπέδου απόκρυψης";
+
+// Additional page
+"Additional" = "Πρόσθετα";
+"Enhanced Spinlock Fix (iOS 15)" = "Βελτιωμένη διόρθωση Spinlock (iOS 15)";

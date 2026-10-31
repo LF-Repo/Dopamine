@@ -133,3 +133,14 @@
 "Button_Material" = "버튼 소재";
 "Material_Original" = "기본";
 "Material_Glass" = "유리";
+// Hide Manager
+"Hide Manager" = "숨김 관리";
+"HideManager_Level_Off" = "끔";
+"HideManager_Level_Low" = "낮음";
+"HideManager_Level_High" = "높음";
+"HideManager_Level_Max" = "최대";
+"HideManager_Select_Level" = "숨김 수준 선택";
+
+// Additional page
+"Additional" = "추가";
+"Enhanced Spinlock Fix (iOS 15)" = "향상된 스핀록 수정 (iOS 15)";

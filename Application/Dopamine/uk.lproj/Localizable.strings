@@ -126,3 +126,14 @@
 "Button_Material" = "Матеріал кнопок";
 "Material_Original" = "Оригінал";
 "Material_Glass" = "Скло";
+// Hide Manager
+"Hide Manager" = "Керування приховуванням";
+"HideManager_Level_Off" = "Вимк.";
+"HideManager_Level_Low" = "Низький";
+"HideManager_Level_High" = "Високий";
+"HideManager_Level_Max" = "Максимальний";
+"HideManager_Select_Level" = "Вибрати рівень приховування";
+
+// Additional page
+"Additional" = "Додатково";
+"Enhanced Spinlock Fix (iOS 15)" = "Покращене виправлення Spinlock (iOS 15)";

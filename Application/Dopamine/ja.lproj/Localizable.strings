@@ -132,3 +132,14 @@
 "Button_Material" = "ボタンの素材";
 "Material_Original" = "オリジナル";
 "Material_Glass" = "ガラス";
+// Hide Manager
+"Hide Manager" = "隠蔽管理";
+"HideManager_Level_Off" = "オフ";
+"HideManager_Level_Low" = "低";
+"HideManager_Level_High" = "高";
+"HideManager_Level_Max" = "最大";
+"HideManager_Select_Level" = "隠蔽レベルを選択";
+
+// Additional page
+"Additional" = "追加";
+"Enhanced Spinlock Fix (iOS 15)" = "強化スピンロック修正 (iOS 15)";

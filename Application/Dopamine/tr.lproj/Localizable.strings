@@ -126,3 +126,14 @@
 "Button_Material" = "Düğme malzemesi";
 "Material_Original" = "Orijinal";
 "Material_Glass" = "Cam";
+// Hide Manager
+"Hide Manager" = "Gizleme yöneticisi";
+"HideManager_Level_Off" = "Kapalı";
+"HideManager_Level_Low" = "Düşük";
+"HideManager_Level_High" = "Yüksek";
+"HideManager_Level_Max" = "Maksimum";
+"HideManager_Select_Level" = "Gizleme düzeyini seç";
+
+// Additional page
+"Additional" = "Ek";
+"Enhanced Spinlock Fix (iOS 15)" = "Gelişmiş Spinlock düzeltmesi (iOS 15)";

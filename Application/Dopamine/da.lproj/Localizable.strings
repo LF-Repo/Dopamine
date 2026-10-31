@@ -126,3 +126,14 @@
 "Button_Material" = "Knapmateriale";
 "Material_Original" = "Original";
 "Material_Glass" = "Glas";
+// Hide Manager
+"Hide Manager" = "Skjul-administrator";
+"HideManager_Level_Off" = "Fra";
+"HideManager_Level_Low" = "Lav";
+"HideManager_Level_High" = "Høj";
+"HideManager_Level_Max" = "Maks";
+"HideManager_Select_Level" = "Vælg skjuleaske";
+
+// Additional page
+"Additional" = "Ekstra";
+"Enhanced Spinlock Fix (iOS 15)" = "Forbedret Spinlock-fix (iOS 15)";

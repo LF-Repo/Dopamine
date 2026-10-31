@@ -129,3 +129,14 @@
 "Button_Material" = "Chất liệu nút";
 "Material_Original" = "Gốc";
 "Material_Glass" = "Kính";
+// Hide Manager
+"Hide Manager" = "Quản lý ẩn";
+"HideManager_Level_Off" = "Tắt";
+"HideManager_Level_Low" = "Thấp";
+"HideManager_Level_High" = "Cao";
+"HideManager_Level_Max" = "Tối đa";
+"HideManager_Select_Level" = "Chọn mức ẩn";
+
+// Additional page
+"Additional" = "Bổ sung";
+"Enhanced Spinlock Fix (iOS 15)" = "Sửa Spinlock nâng cao (iOS 15)";

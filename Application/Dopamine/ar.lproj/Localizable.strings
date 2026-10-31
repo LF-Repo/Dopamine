@@ -126,3 +126,14 @@
 "Button_Material" = "مادة الأزرار";
 "Material_Original" = "أصلي";
 "Material_Glass" = "زجاجي";
+// Hide Manager
+"Hide Manager" = "مدير الإخفاء";
+"HideManager_Level_Off" = "إيقاف";
+"HideManager_Level_Low" = "منخفض";
+"HideManager_Level_High" = "مرتفع";
+"HideManager_Level_Max" = "أقصى";
+"HideManager_Select_Level" = "اختر مستوى الإخفاء";
+
+// Additional page
+"Additional" = "إضافي";
+"Enhanced Spinlock Fix (iOS 15)" = "إصلاح Spinlock المحسّن (iOS 15)";

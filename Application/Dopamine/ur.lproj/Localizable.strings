@@ -126,3 +126,14 @@
 "Button_Material" = "بٹن مواد";
 "Material_Original" = "اصل";
 "Material_Glass" = "شیشہ";
+// Hide Manager
+"Hide Manager" = "چھپانے کا منتظم";
+"HideManager_Level_Off" = "بند";
+"HideManager_Level_Low" = "کم";
+"HideManager_Level_High" = "زیادہ";
+"HideManager_Level_Max" = "زیادہ سے زیادہ";
+"HideManager_Select_Level" = "چھپانے کی سطح منتخب کریں";
+
+// Additional page
+"Additional" = "اضافی";
+"Enhanced Spinlock Fix (iOS 15)" = "بہتر اسپن لاک فکس (iOS 15)";
