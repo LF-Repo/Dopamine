@@ -394,7 +394,7 @@
                     [specifiers addObject:hideSettingsGroupSpecifier];
 
                     PSSpecifier *appHideSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
-                    [appHideSpecifier setProperty:@"Hide for App" forKey:@"title"];
+                    [appHideSpecifier setProperty:@"Hide Manager" forKey:@"title"];
                     [appHideSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
                     [appHideSpecifier setProperty:buttonHeight forKey:@"height"];
                     [appHideSpecifier setProperty:@"eye.slash.circle" forKey:@"image"];
@@ -1026,7 +1026,7 @@
 {
     [super viewDidLoad];
 
-    self.title = DOLocalizedString(@"Hide for App");
+    self.title = DOLocalizedString(@"Hide Manager");
     self.tableView.rowHeight = 64;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.tableView.separatorInset = UIEdgeInsetsMake(0, 68, 0, 0);
@@ -1243,16 +1243,67 @@
     return self.filteredApps.count;
 }
 
+#define kHideLevelBadgeTag 9337
+#define kHideBadgeWidthOn 46
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     static NSString *cellId = @"AppHideCell";
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellId];
+    UISwitch *toggle;
+    UILabel *badge;
+    NSLayoutConstraint *badgeWidth;
+
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cellId];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
         cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+
+        // The switch is the cell's accessory, so the bundle-ID line (and the
+        // name when no badge is shown) keeps its full width and never truncates.
+        toggle = [[UISwitch alloc] init];
+        [toggle sizeToFit];
+        [toggle addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
+
+        // The badge lives inside the contentView on the name's line only: it
+        // shrinks the name (which truncates when too long) but never the
+        // identifier below it. It stays mounted at width 0 when Off so the
+        // show/hide transition can animate.
+        badge = [[UILabel alloc] init];
+        badge.tag = kHideLevelBadgeTag;
+        badge.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+        badge.textColor = [UIColor whiteColor];
+        badge.textAlignment = NSTextAlignmentCenter;
+        badge.layer.cornerRadius = 4;
+        badge.layer.masksToBounds = YES;
+        badge.userInteractionEnabled = YES;
+        badge.alpha = 0;
+        badge.translatesAutoresizingMaskIntoConstraints = NO;
+        [cell.contentView addSubview:badge];
+
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(badgeTapped:)];
+        [badge addGestureRecognizer:tap];
+
+        CGFloat switchW = toggle.frame.size.width;
+        badgeWidth = [badge.widthAnchor constraintEqualToConstant:0];
+        NSLayoutConstraint *nameTrailing = [cell.textLabel.trailingAnchor constraintEqualToAnchor:badge.leadingAnchor constant:-6];
+        nameTrailing.priority = 999; // beats the cell default label trailing, stays below required
+        [NSLayoutConstraint activateConstraints:@[
+            [badge.centerYAnchor constraintEqualToAnchor:cell.textLabel.centerYAnchor],
+            [badge.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-(switchW + 12)],
+            [badge.heightAnchor constraintEqualToConstant:20],
+            badgeWidth,
+            nameTrailing,
+        ]];
+    } else {
+        toggle = (UISwitch *)cell.accessoryView;
+        badge = (UILabel *)[cell.contentView viewWithTag:kHideLevelBadgeTag];
+        for (NSLayoutConstraint *con in cell.contentView.constraints) {
+            if (con.firstItem == badge && con.firstAttribute == NSLayoutAttributeWidth) { badgeWidth = con; break; }
+        }
     }
 
     NSDictionary *appInfo = self.filteredApps[indexPath.row];
@@ -1261,8 +1312,6 @@
 
     cell.textLabel.text = appInfo[@"name"];
     cell.detailTextLabel.text = bundleID;
-
-    // One line, hard truncation: the name can never run under the badge.
     cell.textLabel.numberOfLines = 1;
     cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;
 
@@ -1273,43 +1322,27 @@
         cell.imageView.image = [UIImage systemImageNamed:@"app"];
     }
 
-    // Accessory = [badge][switch] with fixed frames (no Auto Layout): a stack
-    // view gets a zero frame from the cell's accessory layout and collapses
-    // onto the icon side, which broke the previous attempt. The badge slot is
-    // a constant width on every row, so the switches line up vertically and
-    // the badge reads as a column right after the app name.
-    UISwitch *toggle = [[UISwitch alloc] init];
-    [toggle sizeToFit];
-    toggle.on = level > 0;
     // Tag by index into the *unfiltered* list: after a search the row is a
     // filtered index, and toggleChanged: looks the app up in allApps.
     toggle.tag = [self.allApps indexOfObject:appInfo];
-    [toggle addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
+    toggle.on = level > 0;
 
-    UILabel *badge = [[UILabel alloc] init];
     badge.text = (level > 0) ? [self hideLevelDisplayName:level] : @"";
-    badge.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
-    badge.textColor = [UIColor whiteColor];
-    badge.backgroundColor = (level > 0) ? [self hideLevelColor:level] : [UIColor clearColor];
-    badge.layer.cornerRadius = 4;
-    badge.layer.masksToBounds = YES;
-    badge.textAlignment = NSTextAlignmentRight;
-    badge.userInteractionEnabled = YES;
+    badge.backgroundColor = [self hideLevelColor:level];
 
-    CGFloat badgeW = 46, badgeH = 20, spacing = 8;
-    CGSize switchSize = toggle.frame.size;
-    CGFloat totalW = badgeW + spacing + switchSize.width;
-    CGFloat totalH = switchSize.height;
-    UIView *accessory = [[UIView alloc] initWithFrame:CGRectMake(0, 0, totalW, totalH)];
-    badge.frame = CGRectMake(0, (totalH - badgeH) / 2.0, badgeW, badgeH);
-    toggle.frame = CGRectMake(badgeW + spacing, (totalH - switchSize.height) / 2.0, switchSize.width, switchSize.height);
-    [accessory addSubview:badge];
-    [accessory addSubview:toggle];
+    CGFloat targetWidth = (level > 0) ? kHideBadgeWidthOn : 0;
+    CGFloat targetAlpha = (level > 0) ? 1.0 : 0.0;
+    void (^applyBadge)(void) = ^{
+        badgeWidth.constant = targetWidth;
+        badge.alpha = targetAlpha;
+        [cell layoutIfNeeded];
+    };
+    if (fabs(badgeWidth.constant - targetWidth) < 0.5 && fabs(badge.alpha - targetAlpha) < 0.01) {
+        applyBadge();
+    } else {
+        [UIView animateWithDuration:0.25 animations:applyBadge];
+    }
 
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(badgeTapped:)];
-    [badge addGestureRecognizer:tap];
-
-    cell.accessoryView = accessory;
     return cell;
 }
 

@@ -74,7 +74,8 @@
 "Section_Mount_Settings" = "Mount Settings";
 "Disable_Crash_Reporter" = "Disable Crash Reporter";
 "Block App Injection" = "Block App Injection";
-"Hide for App" = "Hide for App";
+"Hide for App" = "Hide Manager";
+"Hide Manager" = "Hide Manager";
 "App_Hide_Header" = "Select apps to hide jailbreak environment";
 "App_Hide_Footer" = "When enabled, the selected app will not see /var/jb or any jailbreak-related files. Changes take effect after restarting the app.";
 "App_Hide_Search_Placeholder" = "Search apps";
