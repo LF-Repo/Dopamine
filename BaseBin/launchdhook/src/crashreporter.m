@@ -15,6 +15,14 @@
 #include <mach-o/dyld.h>
 #include <libjailbreak/util.h>
 #include <signal.h>
+#include <spawn.h>
+
+// Declared locally instead of including inline.h: relative include paths from
+// src/ resolve differently depending on how the file is passed to cc.
+struct _posix_spawn_args_desc;
+int __posix_spawn_inline(pid_t *restrict pid, const char *restrict path,
+                        struct _posix_spawn_args_desc *desc,
+                        char *const argv[restrict], char *const envp[restrict]);
 extern CFStringRef CFCopySystemVersionString(void);
 
 void abort_with_reason(uint32_t reason_namespace, uint64_t reason_code, const char *reason_string, uint64_t reason_flags);
@@ -369,6 +377,18 @@ void *crashreporter_listen(void *arg)
 
 		mach_msg(&reply.header, MACH_SEND_MSG | MACH_MSG_OPTION_NONE, reply.header.msgh_size, 0, MACH_PORT_NULL, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
 	}
+}
+
+// Tear the reporter down and keep it down for the duration of the spawn. Both
+// the exception port and the signal handlers are restored by resume, so leaving
+// them off is what makes the child inherit a clean task.
+int crashreporter_spawn_without_reporting(pid_t *restrict pid, const char *restrict path,
+                                          struct _posix_spawn_args_desc *desc,
+                                          char *const argv[restrict], char *const envp[restrict])
+{
+	crashreporter_pause();
+	// Deliberately no resume here; the caller restores it after the spawn.
+	return __posix_spawn_inline(pid, path, desc, argv, envp);
 }
 
 void crashreporter_pause(void)

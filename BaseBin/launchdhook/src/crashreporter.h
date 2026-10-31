@@ -43,5 +43,13 @@ void crashreporter_pause(void);
 void crashreporter_resume(void);
 void crashreporter_set_enabled(bool enabled);
 
+// Spawn a child while the crash reporter stays torn down. The child then
+// inherits a task with no exception port and default signal handlers, instead
+// of decorated state that anti-tamper flags as "suspicious open port" and
+// "signal handler installed".
+int crashreporter_spawn_without_reporting(pid_t *restrict pid, const char *restrict path,
+                                          struct _posix_spawn_args_desc *desc,
+                                          char *const argv[restrict], char *const envp[restrict]);
+
 FILE *crashreporter_open_outfile(const char *source, char **nameOut);
 void crashreporter_save_outfile(FILE *f);

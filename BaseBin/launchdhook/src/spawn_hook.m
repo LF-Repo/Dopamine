@@ -332,7 +332,9 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 
 	// Check whether this App is on the injection block list
 	if (path && should_block_injection(path)) {
-		return __posix_spawn_orig_wrapper(pid, path, desc, argv, envp);
+		int r = crashreporter_spawn_without_reporting(pid, path, desc, argv, envp);
+		crashreporter_resume();
+		return r;
 	}
 
 	// Hide Manager (High/Max): a hidden app's extensions run in their own
@@ -376,7 +378,8 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			if (darwinRole >= 3) {
 				// Background/non-ui launch: bare spawn (no injection), but no global hide.
 				pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
-				int r = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, (char *const *)envp);
+				int r = crashreporter_spawn_without_reporting(blacklistedPidp, path, desc, argv, (char *const *)envp);
+				crashreporter_resume();
 				pid_t childPid = *blacklistedPidp;
 				if (pid) *pid = childPid;
 				app_hide_commit_pid(blacklistedPidp);
@@ -386,7 +389,8 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			// Foreground launch: global hide + bare spawn + restore on exit.
 			app_hide_global_hide();
 			pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
-			int r = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, (char *const *)envp);
+			int r = crashreporter_spawn_without_reporting(blacklistedPidp, path, desc, argv, (char *const *)envp);
+			crashreporter_resume();
 			pid_t childPid = *blacklistedPidp;
 			if (pid) *pid = childPid;
 			app_hide_commit_pid(blacklistedPidp);
@@ -431,12 +435,13 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 		envbuf_unsetenv(&envc, "_SafeMode");
 		envbuf_unsetenv(&envc, "_MSSafeMode");
 
-		// __posix_spawn_orig_wrapper 内部已做 crashreporter_pause/resume，
-		// 避免子进程继承异常端口而被越狱检测发现。
-		// 同时把这个隐藏 App 的 pid 标记进黑名单（RootHide 式进程隐藏）：
-		// launchd 的 XPC 回复钩子会据此过滤它的进程/coalition 枚举结果。
+		// Keep the crash reporter torn down across the spawn so the child inherits
+		// a task with no exception port and default signal handlers. The wrapper
+		// would otherwise restore both, which is exactly what the "suspicious open
+		// port" and "signal handler installed" checks look for.
 		pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
-		int r = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, envc);
+		int r = crashreporter_spawn_without_reporting(blacklistedPidp, path, desc, argv, envc);
+		crashreporter_resume();
 		envbuf_free(envc);
 		if (pid) *pid = *blacklistedPidp;
 		app_hide_commit_pid(blacklistedPidp);
