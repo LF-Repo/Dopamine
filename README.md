@@ -5,7 +5,9 @@
 > A fork of the original Dopamine repository
 
 > [!WARNING]
-> This fork is experimental. It may be unstable and is not recommended for daily use! Use at your own risk and back up your data first!
+> This fork is experimental.  
+> It may be unstable and is not recommended for daily use!
+> Use at your own risk and back up your data first!
 
 A rootless semi-untethered jailbreak for iOS 15.0 - 17.3.1 (arm64e), iOS 15.0 - 18.7.1, 26.0 - 26.0.1 (A12/A13) and iOS 15.0 - 18.7.1 (arm64). More details will follow here soon.
 
