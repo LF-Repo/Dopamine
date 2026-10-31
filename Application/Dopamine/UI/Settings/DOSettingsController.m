@@ -1353,9 +1353,17 @@
     UIView *badgeView = [cell.contentView viewWithTag:kHideLevelBadgeTag];
     if (![badgeView isKindOfClass:[UILabel class]]) return;
     UILabel *badge = (UILabel *)badgeView;
+    // A single-view constraint (badge.widthAnchor == const) is installed on the
+    // badge itself, not on contentView. Searching the wrong owner made this
+    // method return early every time, leaving the badge at width 0 forever.
     NSLayoutConstraint *badgeWidth = nil;
-    for (NSLayoutConstraint *con in cell.contentView.constraints) {
+    for (NSLayoutConstraint *con in badge.constraints) {
         if (con.firstItem == badge && con.firstAttribute == NSLayoutAttributeWidth) { badgeWidth = con; break; }
+    }
+    if (!badgeWidth) {
+        for (NSLayoutConstraint *con in cell.contentView.constraints) {
+            if (con.firstItem == badge && con.firstAttribute == NSLayoutAttributeWidth) { badgeWidth = con; break; }
+        }
     }
     if (!badgeWidth) return;
 
