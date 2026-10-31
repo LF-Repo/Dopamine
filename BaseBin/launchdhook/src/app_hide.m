@@ -1267,11 +1267,25 @@ void app_hide_log_child_runtime_state(pid_t pid)
 	mach_port_t task = MACH_PORT_NULL;
 	kern_return_t tfpKr = task_for_pid(mach_task_self(), pid, &task);
 	if (tfpKr != KERN_SUCCESS) {
-		// task_for_pid fails for processes that are not ours and carry hardened
-		// entitlements. Fall back to the task port we can get from the BSD info
-		// path so the dump still tells us whether the ports are clear.
 		app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d task_for_pid failed (kr=%d)", pid, tfpKr]);
 	} else {
+		// Exception ports are already proven NULL, so enumerate the task's whole
+		// port namespace. That is what a "suspicious open ports" check actually
+		// walks; a plain exception-port dump cannot see these.
+		int totalPorts = 0;
+		int sendRecvPorts = 0;
+		mach_port_name_t *names = NULL;
+		mach_port_type_t *types = NULL;
+		unsigned int nameCount = 0;
+		if (mach_port_names(task, &names, &nameCount, &types, NULL) == KERN_SUCCESS && names) {
+			totalPorts = (int)nameCount;
+			for (unsigned int i = 0; i < nameCount; i++) {
+				if (types[i] & MACH_PORT_TYPE_SEND_RECEIVE) sendRecvPorts++;
+			}
+			vm_deallocate(mach_task_self(), (vm_address_t)names, nameCount * sizeof(mach_port_name_t));
+			if (types) vm_deallocate(mach_task_self(), (vm_address_t)types, nameCount * sizeof(mach_port_type_t));
+		}
+		app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d ports total=%d sendrecv=%d", pid, totalPorts, sendRecvPorts]);
 
 		exception_mask_t masks[EXC_TYPES_COUNT] = {0};
 		mach_port_t ports[EXC_TYPES_COUNT] = {0};
