@@ -264,9 +264,10 @@
     UIView *oldStack = [self.view viewWithTag:DOMainStackTag];
     [oldStack removeFromSuperview];
 
-    // The update button is built by a separate method and pinned above the
-    // jailbreak button, so it is NOT part of the stack. Detach it explicitly:
-    // its constraints reference the button that setupStack is about to replace.
+    // jailbreakBtn and updateButton live on self.view, not in the stack, and
+    // their constraints reference views the rebuild replaces.
+    [self.jailbreakBtn removeFromSuperview];
+    self.jailbreakBtn = nil;
     [self.updateButton removeFromSuperview];
     self.updateButton = nil;
 

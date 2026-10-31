@@ -371,13 +371,37 @@ __attribute__((constructor)) static void initializer(void)
 		}
 	}
 
-	// Unset DYLD_INSERT_LIBRARIES, but only if systemhook itself is the only thing contained in it
-	// Feeable attempt at making jailbreak detection harder
+	// Unset DYLD_INSERT_LIBRARIES once every entry in it is one of our own
+	// dylibs. Left in place it hands a detector the exact paths (including the
+	// randomised systemhook name), which is how the injection gets spotted.
+	// Compared by basename because the variable can carry the fakelib path while
+	// HOOK_DYLIB_PATH points at the renamed file in the real jbroot.
 	const char *dyldInsertLibraries = getenv("DYLD_INSERT_LIBRARIES");
 	if (dyldInsertLibraries) {
-		if (!strcmp(dyldInsertLibraries, HOOK_DYLIB_PATH)) {
-			unsetenv("DYLD_INSERT_LIBRARIES");
+		static const char *const kOurLibNames[] = {
+			"systemhook", "libellekit", "ellekit", "CydiaSubstrate",
+			"libsubstrate", "libsubstitute", "libhooker", "MobileSubstrate",
+			"TweakLoader", "TweakInject", NULL
+		};
+		bool onlyOurs = true;
+		const char *p = dyldInsertLibraries;
+		while (p && *p && onlyOurs) {
+			const char *end = strchr(p, ':');
+			size_t len = end ? (size_t)(end - p) : strlen(p);
+			const char *base = p;
+			for (size_t i = 0; i < len; i++) {
+				if (p[i] == '/') base = p + i + 1;
+			}
+			size_t blen = len - (size_t)(base - p);
+			bool ours = false;
+			for (int i = 0; kOurLibNames[i] && !ours; i++) {
+				size_t mlen = strlen(kOurLibNames[i]);
+				if (blen >= mlen && strncmp(base, kOurLibNames[i], mlen) == 0) ours = true;
+			}
+			if (!ours) onlyOurs = false;
+			p = end ? end + 1 : NULL;
 		}
+		if (onlyOurs) unsetenv("DYLD_INSERT_LIBRARIES");
 	}
 
 	// On iOS 26+, hooks have to be applied through hookd
