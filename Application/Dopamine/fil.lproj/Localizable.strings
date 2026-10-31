@@ -122,4 +122,7 @@
 "Status_Title_Select_Package_Managers" = "Pumili ng mga Package Manager(s)";
 "Select_Package_Managers_Install_Message" = "Kung hindi ka sigurado kung alin ang pipiliin, piliin ang Sileo";
 "Continue" = "Magpatuloy";
-
+// Button material
+"Button_Material" = "Materyal ng Button";
+"Material_Original" = "Orihinal";
+"Material_Glass" = "Salamin";

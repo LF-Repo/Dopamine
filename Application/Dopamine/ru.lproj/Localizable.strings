@@ -122,4 +122,7 @@
 "Status_Title_Select_Package_Managers" = "Выберите менеджер(ы) пакетов";
 "Select_Package_Managers_Install_Message" = "Если вы не знаете, какой из них выбрать, выберите Sileo";
 "Continue" = "Продолжить";
-
+// Button material
+"Button_Material" = "Материал кнопок";
+"Material_Original" = "Оригинал";
+"Material_Glass" = "Стекло";

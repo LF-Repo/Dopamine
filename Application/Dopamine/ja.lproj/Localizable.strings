@@ -128,4 +128,7 @@
 "Status_Title_Select_Package_Managers" = "パッケージマネージャーを選択";
 "Select_Package_Managers_Install_Message" = "どちらを選択するか迷った場合は、Sileoを選択することをおすすめします。";
 "Continue" = "続行";
-
+// Button material
+"Button_Material" = "ボタンの素材";
+"Material_Original" = "オリジナル";
+"Material_Glass" = "ガラス";

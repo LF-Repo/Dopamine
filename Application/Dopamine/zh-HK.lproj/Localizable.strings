@@ -122,4 +122,7 @@
 "Status_Title_Select_Package_Managers" = "選定包管理器（越獄商店）";
 "Select_Package_Managers_Install_Message" = "若不確定如何選擇，請使用 Sileo";
 "Continue" = "繼續";
-
+// Button material
+"Button_Material" = "按鈕材質";
+"Material_Original" = "原版";
+"Material_Glass" = "玻璃";

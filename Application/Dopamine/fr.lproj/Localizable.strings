@@ -122,4 +122,7 @@
 "Status_Title_Select_Package_Managers" = "Gestionnaires de paquets";
 "Select_Package_Managers_Install_Message" = "Selectionnez les gestionnaires de paquets à installer, si vous n'êtes pas sûr de votre choix, sélectionnez Sileo";
 "Continue" = "Continuer";
-
+// Button material
+"Button_Material" = "Matière des boutons";
+"Material_Original" = "Original";
+"Material_Glass" = "Verre";

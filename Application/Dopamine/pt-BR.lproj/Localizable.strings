@@ -115,4 +115,7 @@
 "Status_Title_Select_Package_Managers" = "Escolha o(s) Gerenciador(es) de Pacotes";
 "Select_Package_Managers_Install_Message" = "Se estiver em dúvida, selecione o Sileo";
 "Continue" = "Continuar";
-
+// Button material
+"Button_Material" = "Material dos botões";
+"Material_Original" = "Original";
+"Material_Glass" = "Vidro";

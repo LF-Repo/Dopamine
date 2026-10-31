@@ -122,4 +122,7 @@
 "Status_Title_Select_Package_Managers" = "Vælg Pakkehåndteringsprogram(mer)";
 "Select_Package_Managers_Install_Message" = "If you are unsure which one to select, select Sileo";
 "Continue" = "Continue";
-
+// Button material
+"Button_Material" = "Knapmateriale";
+"Material_Original" = "Original";
+"Material_Glass" = "Glas";

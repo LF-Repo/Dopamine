@@ -94,8 +94,12 @@
 + (NSString*)enabledMaterialKey
 {
     id value = [[DOPreferenceManager sharedManager] preferenceValueForKey:@"buttonMaterial"];
-    if ([value isKindOfClass:[NSString class]] && [value isEqualToString:@"custom"]) {
-        return @"custom";
+    if ([value isKindOfClass:[NSString class]]) {
+        // "glass" is the current name for the filled look. "custom" is the name
+        // it shipped under before, so an existing preference keeps working
+        // instead of silently reverting to the stock appearance after update.
+        if ([value isEqualToString:@"glass"]) return @"glass";
+        if ([value isEqualToString:@"custom"]) return @"glass";
     }
     // Anything unset or unrecognised keeps the stock Dopamine look.
     return @"original";
@@ -103,19 +107,21 @@
 
 + (NSArray*)getAvailableMaterialKeys
 {
-    return @[ @"original", @"custom" ];
+    return @[ @"original", @"glass" ];
 }
 
 + (NSArray*)getAvailableMaterialNames
 {
-    return @[ @"Original", @"Custom" ];
+    // Bare names: DOSettingsController's materialNames method prefixes each with
+    // "Material_" and localises it through DOLocalizedString.
+    return @[ @"Original", @"Glass" ];
 }
 
 // Fill colour for the settings-row buttons. nil means "no fill", which is the
 // stock Dopamine appearance.
 + (UIColor*)settingsButtonFillColor
 {
-    if ([[DOThemeManager enabledMaterialKey] isEqualToString:@"custom"]) {
+    if ([[DOThemeManager enabledMaterialKey] isEqualToString:@"glass"]) {
         return [UIColor colorWithWhite:1 alpha:0.08];
     }
     return nil;

@@ -114,4 +114,7 @@
 "Status_Title_Select_Package_Managers" = "Seleziona i Package Manager";
 "Select_Package_Managers_Install_Message" = "Se non sei sicuro/a di quale scegliere, scegli Sileo";
 "Continue" = "Continua";
-
+// Button material
+"Button_Material" = "Materiale dei pulsanti";
+"Material_Original" = "Originale";
+"Material_Glass" = "Vetro";

@@ -122,4 +122,7 @@
 "Status_Title_Select_Package_Managers" = "اختر مدير الحزمة";
 "Select_Package_Managers_Install_Message" = "إذا كنت محتارًا في الاختيار، فاختر Sileo";
 "Continue" = "استمرار";
-
+// Button material
+"Button_Material" = "مادة الأزرار";
+"Material_Original" = "أصلي";
+"Material_Glass" = "زجاجي";

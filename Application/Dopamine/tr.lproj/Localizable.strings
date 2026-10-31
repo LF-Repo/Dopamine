@@ -122,4 +122,7 @@
 "Status_Title_Select_Package_Managers" = "Paket Yöneticisi Seçin";
 "Select_Package_Managers_Install_Message" = "If you are unsure which one to select, select Sileo";
 "Continue" = "Continue";
-
+// Button material
+"Button_Material" = "Düğme malzemesi";
+"Material_Original" = "Orijinal";
+"Material_Glass" = "Cam";

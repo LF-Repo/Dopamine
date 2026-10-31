@@ -149,3 +149,7 @@
 "Mount_Input_Message" = "输入原始文件夹路径，将以只读方式绑定挂载到 /var/jb/mnt/ 下的副本。";
 "Error_Mount_Empty" = "请输入文件夹路径。";
 "Empty_Mount_List" = "还没有挂载。";
+// Button material
+"Button_Material" = "按钮材质";
+"Material_Original" = "原版";
+"Material_Glass" = "玻璃";

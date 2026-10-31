@@ -129,4 +129,7 @@
 "Status_Title_Select_Package_Managers" = "Paket Manager auswählen";
 "Select_Package_Managers_Install_Message" = "Bei Unklarheiten, wähle Sileo aus";
 "Continue" = "Fortsetzen";
-
+// Button material
+"Button_Material" = "Tastenmaterial";
+"Material_Original" = "Original";
+"Material_Glass" = "Glas";

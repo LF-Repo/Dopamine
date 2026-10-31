@@ -27,18 +27,36 @@
 @property(nonatomic) BOOL hideStatusBar;
 @property(nonatomic) BOOL hideHomeIndicator;
 
+// What the header was last built with, so viewWillAppear: only rebuilds the
+// stack when the Uptime / version switches actually changed.
+@property(nonatomic) NSNumber *headerShowsUptimeBuilt;
+@property(nonatomic) NSNumber *headerShowsVersionBuilt;
+
 @end
+
+// Tag on the root stack view, used to find and replace it when the header has to
+// be rebuilt after a preference change.
+#define DOMainStackTag 70210
 
 @implementation DOMainViewController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
     [self setupStack];
+
+    // Record what the header was built with, so the first viewWillAppear: does
+    // not rebuild a stack that is already correct.
+    DOPreferenceManager *prefs = [DOPreferenceManager sharedManager];
+    _headerShowsUptimeBuilt = @([prefs boolPreferenceValueForKey:@"showUptime" fallback:NO]);
+    _headerShowsVersionBuilt = @([prefs boolPreferenceValueForKey:@"showVersion" fallback:NO]);
 }
 
 -(void)setupStack
 {
     UIStackView *stackView = [[UIStackView alloc] init];
+    // Tagged so a preference change can tear the whole stack down and rebuild it
+    // (Uptime / version subtitles are baked into the header at construction time).
+    stackView.tag = DOMainStackTag;
     [stackView setAxis:UILayoutConstraintAxisVertical];
     [stackView setAlignment:UIStackViewAlignmentTrailing];
     [stackView setDistribution:UIStackViewDistributionEqualSpacing];
@@ -224,6 +242,39 @@
 {
     [super viewWillAppear:animated];
     [self.jailbreakBtn.button setTitle:[self jailbreakButtonTitle] forState:UIControlStateNormal];
+    [self rebuildStackIfHeaderPreferencesChanged];
+}
+
+// Uptime and version are rendered into the header at construction time, so
+// flipping either switch in Settings only becomes visible after the stack is
+// rebuilt. Rebuilding on every appearance would be wasteful and would visibly
+// re-run the layout animation, so remember what the header was built from and
+// rebuild only when it actually differs.
+- (void)rebuildStackIfHeaderPreferencesChanged
+{
+    DOPreferenceManager *prefs = [DOPreferenceManager sharedManager];
+    BOOL showUptime = [prefs boolPreferenceValueForKey:@"showUptime" fallback:NO];
+    BOOL showVersion = [prefs boolPreferenceValueForKey:@"showVersion" fallback:NO];
+
+    if (showUptime == _headerShowsUptimeBuilt.boolValue &&
+        showVersion == _headerShowsVersionBuilt.boolValue) {
+        return;
+    }
+
+    UIView *oldStack = [self.view viewWithTag:DOMainStackTag];
+    [oldStack removeFromSuperview];
+
+    // The update button is built by a separate method and pinned above the
+    // jailbreak button, so it is NOT part of the stack. Detach it explicitly:
+    // its constraints reference the button that setupStack is about to replace.
+    [self.updateButton removeFromSuperview];
+    self.updateButton = nil;
+
+    _headerShowsUptimeBuilt = @(showUptime);
+    _headerShowsVersionBuilt = @(showVersion);
+
+    [self setupStack];
+    [self setNeedsStatusBarAppearanceUpdate];
 }
 
 - (void)startJailbreak

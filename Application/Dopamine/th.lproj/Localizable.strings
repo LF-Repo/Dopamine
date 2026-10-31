@@ -122,4 +122,7 @@
 "Status_Title_Select_Package_Managers" = "เลือก Package Manager(s) ที่ต้องการ";
 "Select_Package_Managers_Install_Message" = "ถ้าไม่แน่ใจว่าจะเลือกอันไหน ให้เลือก Sileo";
 "Continue" = "ดำเนินการต่อ";
-
+// Button material
+"Button_Material" = "วัสดุปุ่ม";
+"Material_Original" = "ต้นฉบับ";
+"Material_Glass" = "กระจก";

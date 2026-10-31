@@ -122,4 +122,7 @@
 "Status_Title_Select_Package_Managers" = "Selecteer Package Manager(s)";
 "Select_Package_Managers_Install_Message" = "Als u niet zeker weet welke u moet selecteren, selecteer dan Sileo";
 "Continue" = "Doorgaan";
-
+// Button material
+"Button_Material" = "Knopmateriaal";
+"Material_Original" = "Origineel";
+"Material_Glass" = "Glas";

@@ -122,4 +122,7 @@
 "Status_Title_Select_Package_Managers" = "Wybierz menedżer(y) pakietów";
 "Select_Package_Managers_Install_Message" = "Jeżeli nie jesteś pewien który wybrać, wybierz Sileo";
 "Continue" = "Kontynuuj";
-
+// Button material
+"Button_Material" = "Materiał przycisków";
+"Material_Original" = "Oryginalny";
+"Material_Glass" = "Szkło";

@@ -84,7 +84,7 @@
 "App_Hide_Save_Failed_Message" = "Dopamine could not write the hide rules. This folder may be protected by iOS. Check that Full Disk Access is granted (Settings -> Privacy & Security -> Full Disk Access).";
 "Button_Material" = "Button Material";
 "Material_Original" = "Original";
-"Material_Custom" = "Custom";
+"Material_Glass" = "Glass";
 "App_Hide_NoInject_Tag" = "[NoInject]";
 "Reboot Device" = "Reboot Device";
 "Show_Uptime" = "Show System Uptime";

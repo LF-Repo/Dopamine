@@ -122,4 +122,7 @@
 "Status_Title_Select_Package_Managers" = "Επιλογή εφαρμογής/ών διαχείρισης πακέτων";
 "Select_Package_Managers_Install_Message" = "Αν δεν είστε σίγουροι, επιλέξτε το Sileo";
 "Continue" = "Συνέχεια";
-
+// Button material
+"Button_Material" = "Υλικό κουμπιών";
+"Material_Original" = "Αρχικό";
+"Material_Glass" = "Γυαλί";
