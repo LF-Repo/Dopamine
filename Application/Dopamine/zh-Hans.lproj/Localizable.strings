@@ -73,7 +73,7 @@
 "Disable_Crash_Reporter" = "禁用崩溃报告";
 "Block App Injection" = "阻止 App 注入";
 "Hide for App" = "Hide Manager";
-"Hide Manager" = "Hide Manager";
+"Hide Manager" = "隐藏管理";
 "App_Hide_Header" = "选择要对哪些 App 隐藏越狱环境";
 "App_Hide_Footer" = "启用后，所选 App 将看不到 /var/jb 及任何越狱相关文件。重启该 App 后生效。";
 "App_Hide_Search_Placeholder" = "搜索 App";
