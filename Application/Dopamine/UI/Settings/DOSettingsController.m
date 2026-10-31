@@ -1353,16 +1353,22 @@
     UIView *badgeView = [cell.contentView viewWithTag:kHideLevelBadgeTag];
     if (![badgeView isKindOfClass:[UILabel class]]) return;
     UILabel *badge = (UILabel *)badgeView;
-    // A single-view constraint (badge.widthAnchor == const) is installed on the
-    // badge itself, not on contentView. Searching the wrong owner made this
-    // method return early every time, leaving the badge at width 0 forever.
-    NSLayoutConstraint *badgeWidth = nil;
-    for (NSLayoutConstraint *con in badge.constraints) {
-        if (con.firstItem == badge && con.firstAttribute == NSLayoutAttributeWidth) { badgeWidth = con; break; }
-    }
+
+    // Keep the width constraint on the cell so this never has to search for it.
+    // Searching used to miss it entirely depending on which view owned the
+    // constraint, and the early return left some badges permanently at width 0.
+    NSLayoutConstraint *badgeWidth = objc_getAssociatedObject(cell, @selector(applyLevel:toBadgeInCell:animated:));
     if (!badgeWidth) {
-        for (NSLayoutConstraint *con in cell.contentView.constraints) {
+        for (NSLayoutConstraint *con in badge.constraints) {
             if (con.firstItem == badge && con.firstAttribute == NSLayoutAttributeWidth) { badgeWidth = con; break; }
+        }
+        if (!badgeWidth) {
+            for (NSLayoutConstraint *con in cell.contentView.constraints) {
+                if (con.firstItem == badge && con.firstAttribute == NSLayoutAttributeWidth) { badgeWidth = con; break; }
+            }
+        }
+        if (badgeWidth) {
+            objc_setAssociatedObject(cell, @selector(applyLevel:toBadgeInCell:animated:), badgeWidth, OBJC_ASSOCIATION_ASSIGN);
         }
     }
     if (!badgeWidth) return;
@@ -1372,10 +1378,9 @@
     CGFloat targetWidth = (level > 0) ? kHideBadgeWidthOn : 0;
     CGFloat targetAlpha = (level > 0) ? 1.0 : 0.0;
 
-    // Only touch the constant here. Forcing layoutIfNeeded: while the cell is
-    // still being dequeued lays the badge out against a stale contentView width,
-    // which is what made the badge appear on some rows and disappear on others.
-    // The layout pass the table view runs after returning the cell resolves it.
+    // Only change the constant; the table view's own layout pass after returning
+    // the cell resolves it. Forcing layoutIfNeeded: here laid the badge out
+    // against a stale contentView width while the cell was still being dequeued.
     void (^apply)(void) = ^{
         badgeWidth.constant = targetWidth;
         badge.alpha = targetAlpha;

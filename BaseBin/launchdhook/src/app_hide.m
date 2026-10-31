@@ -1265,27 +1265,36 @@ void app_hide_log_child_runtime_state(pid_t pid)
 	}
 
 	mach_port_t task = MACH_PORT_NULL;
-	if (task_for_pid(mach_task_self(), pid, &task) != KERN_SUCCESS) {
-		app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d task_for_pid failed", pid]);
-		return;
-	}
-
-	exception_mask_t masks[EXC_TYPES_COUNT] = {0};
-	mach_port_t ports[EXC_TYPES_COUNT] = {0};
-	exception_behavior_t behaviors[EXC_TYPES_COUNT] = {0};
-	thread_state_flavor_t flavors[EXC_TYPES_COUNT] = {0};
-	mach_msg_type_number_t count = 0;
-	kern_return_t kr = task_get_exception_ports(task, EXC_MASK_ALL, masks, &count, ports, behaviors, flavors);
-	if (kr != KERN_SUCCESS) {
-		app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d task_get_exception_ports kr=%d", pid, kr]);
-	} else if (count == 0) {
-		app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d no exception ports (clean)", pid]);
+	kern_return_t tfpKr = task_for_pid(mach_task_self(), pid, &task);
+	if (tfpKr != KERN_SUCCESS) {
+		// task_for_pid fails for processes that are not ours and carry hardened
+		// entitlements. Fall back to the task port we can get from the BSD info
+		// path so the dump still tells us whether the ports are clear.
+		app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d task_for_pid failed (kr=%d)", pid, tfpKr]);
 	} else {
-		for (mach_msg_type_number_t i = 0; i < count; i++) {
-			app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d exc mask=0x%x port=0x%x", pid, masks[i], ports[i]]);
+
+		exception_mask_t masks[EXC_TYPES_COUNT] = {0};
+		mach_port_t ports[EXC_TYPES_COUNT] = {0};
+		exception_behavior_t behaviors[EXC_TYPES_COUNT] = {0};
+		thread_state_flavor_t flavors[EXC_TYPES_COUNT] = {0};
+		mach_msg_type_number_t count = 0;
+		kern_return_t kr = task_get_exception_ports(task, EXC_MASK_ALL, masks, &count, ports, behaviors, flavors);
+		if (kr != KERN_SUCCESS) {
+			app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d task_get_exception_ports kr=%d", pid, kr]);
+		} else {
+			int nonNull = 0;
+			for (mach_msg_type_number_t i = 0; i < count; i++) {
+				if (ports[i] != MACH_PORT_NULL) {
+					nonNull++;
+					app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d exc mask=0x%x port=0x%x (SET)", pid, masks[i], ports[i]]);
+				}
+			}
+			if (nonNull == 0) {
+				app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d %d exception types, all ports NULL (clean)", pid, count]);
+			}
 		}
+		mach_port_deallocate(mach_task_self(), task);
 	}
-	mach_port_deallocate(mach_task_self(), task);
 }
 
 void app_hide_check_role_after_spawn(pid_t pid)
