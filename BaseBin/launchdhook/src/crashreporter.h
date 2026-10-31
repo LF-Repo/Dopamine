@@ -1,5 +1,11 @@
 #import <mach/mach.h>
 #include <stdio.h>
+#include <sys/types.h>  // pid_t
+#include <spawn.h>
+
+// Only used through a pointer below; forward-declaring keeps this header free of
+// the private kernel-spawn structure definitions.
+struct _posix_spawn_args_desc;
 
 typedef int                             exception_type_t;
 typedef integer_t                       exception_data_type_t;
