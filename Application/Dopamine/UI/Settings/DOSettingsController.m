@@ -1372,16 +1372,30 @@
     CGFloat targetWidth = (level > 0) ? kHideBadgeWidthOn : 0;
     CGFloat targetAlpha = (level > 0) ? 1.0 : 0.0;
 
+    // Only touch the constant here. Forcing layoutIfNeeded: while the cell is
+    // still being dequeued lays the badge out against a stale contentView width,
+    // which is what made the badge appear on some rows and disappear on others.
+    // The layout pass the table view runs after returning the cell resolves it.
     void (^apply)(void) = ^{
         badgeWidth.constant = targetWidth;
         badge.alpha = targetAlpha;
-        [cell layoutIfNeeded];
     };
     if (animated) {
         [UIView animateWithDuration:0.25 animations:apply];
     } else {
         [UIView performWithoutAnimation:apply];
     }
+    [cell setNeedsLayout];
+}
+
+// The table view lays cells out after cellForRowAtIndexPath: returns, so re-apply
+// the badge once more at display time. This is the safety net for reused cells
+// whose constraints were resolved before the final width was known.
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    NSDictionary *appInfo = self.filteredApps[indexPath.row];
+    if (!appInfo) return;
+    [self applyLevel:[self hideLevelForAppInfo:appInfo] toBadgeInCell:cell animated:NO];
 }
 
 - (UITableViewCell *)cellOwningView:(UIView *)view

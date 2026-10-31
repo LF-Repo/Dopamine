@@ -1249,6 +1249,45 @@ static void app_hide_start_watchdog(void)
 	});
 }
 
+// Runtime snapshot of what an anti-tamper check observes in the app: exception
+// ports (queried with EXC_MASK_ALL, which is what those checks use) and the
+// POSIX signal dispositions. Logged once the app has finished launching, since
+// a snapshot taken right after spawn reflects pre-exec state and tells us nothing.
+void app_hide_log_child_runtime_state(pid_t pid)
+{
+	if (pid <= 0) return;
+
+	unsigned char bsdinfoBuf[256] = {0};
+	if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, bsdinfoBuf, sizeof(bsdinfoBuf)) > 0) {
+		uint32_t sigignore = *(uint32_t *)(bsdinfoBuf + 112);
+		uint32_t sigcatch = *(uint32_t *)(bsdinfoBuf + 116);
+		app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d sigignore=0x%x sigcatch=0x%x", pid, sigignore, sigcatch]);
+	}
+
+	mach_port_t task = MACH_PORT_NULL;
+	if (task_for_pid(mach_task_self(), pid, &task) != KERN_SUCCESS) {
+		app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d task_for_pid failed", pid]);
+		return;
+	}
+
+	exception_mask_t masks[EXC_TYPES_COUNT] = {0};
+	mach_port_t ports[EXC_TYPES_COUNT] = {0};
+	exception_behavior_t behaviors[EXC_TYPES_COUNT] = {0};
+	thread_state_flavor_t flavors[EXC_TYPES_COUNT] = {0};
+	mach_msg_type_number_t count = 0;
+	kern_return_t kr = task_get_exception_ports(task, EXC_MASK_ALL, masks, &count, ports, behaviors, flavors);
+	if (kr != KERN_SUCCESS) {
+		app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d task_get_exception_ports kr=%d", pid, kr]);
+	} else if (count == 0) {
+		app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d no exception ports (clean)", pid]);
+	} else {
+		for (mach_msg_type_number_t i = 0; i < count; i++) {
+			app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d exc mask=0x%x port=0x%x", pid, masks[i], ports[i]]);
+		}
+	}
+	mach_port_deallocate(mach_task_self(), task);
+}
+
 void app_hide_check_role_after_spawn(pid_t pid)
 {
 	if (pid <= 0) return;
@@ -1264,6 +1303,7 @@ void app_hide_check_role_after_spawn(pid_t pid)
 		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
 			int appState = app_hide_get_app_state(pid);
 			app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d (advisory)", pid, appState]);
+			app_hide_log_child_runtime_state(pid);
 		});
 }
 

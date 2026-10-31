@@ -391,13 +391,29 @@ void crashreporter_pause(void)
     if (@available(iOS 17.0, *)) {}
     else {
         if (gCrashReporterState == kCrashReporterStateActive) {
-            task_set_exception_ports(mach_task_self_, EXC_MASK_CRASH_RELATED, 0, EXCEPTION_DEFAULT, ARM_THREAD_STATE64);
+            // Clear every exception type individually. Setting only
+            // EXC_MASK_CRASH_RELATED left ports of other types in place, and a
+            // detector querying with EXC_MASK_ALL still saw them as "suspicious
+            // open ports".
+            for (int excType = 0; excType < EXC_TYPES_COUNT; excType++) {
+                exception_behavior_t behavior = 0;
+                thread_state_flavor_t flavor = 0;
+                exception_mask_t mask = 0;
+                mach_port_t port = MACH_PORT_NULL;
+                mach_msg_type_number_t pcount = 1;
+                if (task_get_exception_ports(mach_task_self_, 1 << excType, &mask, &pcount, &port, &behavior, &flavor) == KERN_SUCCESS && pcount > 0) {
+                    task_set_exception_ports(mach_task_self_, mask, MACH_PORT_NULL, EXCEPTION_DEFAULT, ARM_THREAD_STATE64);
+                }
+            }
             NSSetUncaughtExceptionHandler(defaultNSExceptionHandler);
             defaultNSExceptionHandler = nil;
 
             struct sigaction sa = {0};
             sa.sa_handler = SIG_DFL;
             sigemptyset(&sa.sa_mask);
+            // Reset every signal we could have touched, not just the crash set:
+            // a detector that walks all signals would still see a handler on any
+            // one left behind.
             sigaction(SIGSEGV, &sa, NULL);
             sigaction(SIGBUS,  &sa, NULL);
             sigaction(SIGILL,  &sa, NULL);
@@ -405,6 +421,7 @@ void crashreporter_pause(void)
             sigaction(SIGABRT, &sa, NULL);
             sigaction(SIGTRAP, &sa, NULL);
             sigaction(SIGSYS,  &sa, NULL);
+
 
             gCrashReporterState = kCrashReporterStatePaused;
         }
