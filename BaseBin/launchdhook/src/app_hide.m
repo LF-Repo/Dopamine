@@ -131,6 +131,29 @@ void *app_hide_alloc_pid(void)
 	return pidp;
 }
 
+// Drop entries whose process is gone or whose pid was reused. Caller must hold
+// the write lock. Without this the dictionary only ever grew: the log showed
+// "blacklist size" climbing 15 -> 24 and never coming back down, because
+// commit stores an entry for every spawn and only the exit path removes one.
+static void app_hide_prune_dead_entries_locked(void)
+{
+	if (!gBlacklistedState.count) return;
+
+	NSMutableArray<NSNumber *> *dead = nil;
+	for (NSNumber *pidNum in gBlacklistedState) {
+		pid_t pid = pidNum.intValue;
+		// A pid that no longer exists, or one whose pidversion changed (the pid
+		// was recycled by a different process), must not stay "blacklisted".
+		if (pid <= 1 || kill(pid, 0) != 0 || proc_get_pidversion(pid) != gBlacklistedState[pidNum].intValue) {
+			if (!dead) dead = [NSMutableArray array];
+			[dead addObject:pidNum];
+		}
+	}
+	for (NSNumber *pidNum in dead) {
+		[gBlacklistedState removeObjectForKey:pidNum];
+	}
+}
+
 static void app_hide_log(NSString *msg);
 
 void app_hide_commit_pid(void *pidp)
@@ -141,9 +164,13 @@ void app_hide_commit_pid(void *pidp)
 		state_init();
 		int pidversion = proc_get_pidversion(pid);
 		pthread_rwlock_wrlock(&gStateLock);
+		app_hide_prune_dead_entries_locked();
 		gBlacklistedState[@(pid)] = @(pidversion);
+		NSUInteger size = gBlacklistedState.count;
 		pthread_rwlock_unlock(&gStateLock);
-		app_hide_log([NSString stringWithFormat:@"commit pid %d (version %d), blacklist size %lu", pid, pidversion, (unsigned long)gBlacklistedState.count]);
+		// Format outside the lock: building an NSString while holding the write
+		// rwlock adds an allocation on the hot spawn path and can block readers.
+		app_hide_log([NSString stringWithFormat:@"commit pid %d (version %d), blacklist size %lu", pid, pidversion, (unsigned long)size]);
 	}
 	free(pidp);
 }
@@ -1158,6 +1185,12 @@ static void app_hide_start_watchdog(void)
 		dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
 			5 * NSEC_PER_SEC, 1 * NSEC_PER_SEC);
 		dispatch_source_set_event_handler(timer, ^{
+			// launchd's GCD worker threads do not maintain a wrapping autorelease
+			// pool for their blocks, and this handler runs forever on a 5s timer
+			// while creating NSStrings for the log. Without this pool the temporary
+			// objects accumulate unboundedly and the process eventually faults inside
+			// libobjc — which is exactly where the observed launchd panics died.
+			@autoreleasepool {
 			// Two independent checks, because a hide can go wrong in two ways:
 
 			// 1. We believe we are hidden but nothing needs us to be. This is the
@@ -1208,6 +1241,7 @@ static void app_hide_start_watchdog(void)
 				app_hide_do_restore();
 				pthread_mutex_unlock(&gNoInjectActionLock);
 			}
+			}
 		});
 		dispatch_resume(timer);
 	});
@@ -1230,8 +1264,10 @@ void app_hide_check_role_after_spawn(pid_t pid)
 	// that decision, using liveness instead of a racy one-shot state read.
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC),
 		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-			int appState = app_hide_get_app_state(pid);
-			app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d (advisory)", pid, appState]);
+			@autoreleasepool {
+				int appState = app_hide_get_app_state(pid);
+				app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d (advisory)", pid, appState]);
+			}
 		});
 }
 
@@ -1245,6 +1281,9 @@ void app_hide_watch_exit(pid_t pid)
 	dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC, (uintptr_t)pid, DISPATCH_PROC_EXIT,
 		dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
 	dispatch_source_set_event_handler(source, ^{
+		// Same reason as the watchdog handler: launchd's dispatch workers do not
+		// wrap their blocks in an autorelease pool.
+		@autoreleasepool {
 		app_hide_log([NSString stringWithFormat:@"watch_exit: pid %d exited", pid]);
 		app_hide_remove_pid(pid);
 		// Drop the pid from the tracked set, then re-derive the hide state. If it
@@ -1254,6 +1293,7 @@ void app_hide_watch_exit(pid_t pid)
 		app_hide_set_remove(pid);
 		pthread_mutex_unlock(&gNoInjectLock);
 		app_hide_reconcile("exit");
+		}
 		dispatch_source_cancel(source);
 	});
 	dispatch_resume(source);

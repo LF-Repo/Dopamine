@@ -202,6 +202,39 @@ static NSMutableArray *readHideMap(void)
 	return existing ? [existing mutableCopy] : [NSMutableArray array];
 }
 
+// Rename a file inside its own directory. The cross-directory move into the
+// quarantine root needs write access there and is what fails for some paths on
+// iOS 15 (the Preferences files that cfprefsd keeps busy, for example), leaving
+// the file in plain sight. A same-directory rename is atomic and needs no new
+// directory, so it succeeds where the move did not.
+//
+// The new basename starts with "com.apple.hidden." because the audit whitelist
+// matches Apple's bundle ids: a renamed file is then treated as a system file and
+// never picked up as a hiding candidate again, which keeps it from being touched
+// twice. Returns the new path, or nil if even the rename failed.
+static NSString *renameInPlace(NSString *src)
+{
+	NSFileManager *fm = [NSFileManager defaultManager];
+	NSString *dir = [src stringByDeletingLastPathComponent];
+	NSString *name = [src lastPathComponent];
+
+	// NAME_MAX is 255 bytes. Trim the original part so the prefix cannot push the
+	// whole name over the limit, which would make the rename fail with ENAMETOOLONG
+	// on an otherwise hideable file.
+	NSString *base = name;
+	if (base.length > 180) base = [base substringToIndex:180];
+
+	NSString *candidate = [dir stringByAppendingPathComponent:
+	                       [NSString stringWithFormat:@"com.apple.hidden.%@", base]];
+	for (int n = 1; [fm fileExistsAtPath:candidate]; n++) {
+		candidate = [dir stringByAppendingPathComponent:
+		             [NSString stringWithFormat:@"com.apple.hidden.%@.%d", base, n]];
+	}
+
+	if (![fm moveItemAtPath:src toPath:candidate error:nil]) return nil;
+	return candidate;
+}
+
 static void hideItemAtPath(NSString *src)
 {
 	NSFileManager *fm = [NSFileManager defaultManager];
@@ -225,6 +258,27 @@ static void hideItemAtPath(NSString *src)
 	}
 
 	if (![fm moveItemAtPath:src toPath:dst error:nil]) {
+		// The cross-directory move failed. Try the in-place rename before giving
+		// up: it needs no write access to the quarantine root and no spare space,
+		// so it succeeds on the files where the move cannot (iOS 15 keeps some
+		// Preferences files busy under cfprefsd). The map entry is rewritten to
+		// point at the renamed path so the existing restore path handles it
+		// unchanged.
+		NSString *renamed = renameInPlace(src);
+		if (renamed) {
+			NSMutableArray *fresh = readHideMap();
+			for (NSUInteger i = 0; i < fresh.count; i++) {
+				NSDictionary *e = fresh[i];
+				if ([e[@"dst"] isEqualToString:dst]) {
+					fresh[i] = @{ @"src": src, @"dst": renamed };
+					break;
+				}
+			}
+			[fresh writeToFile:hideMapPath() atomically:YES];
+			auditLog([NSString stringWithFormat:@"hide ok (renamed in place): %@ -> %@", src, renamed]);
+			return;
+		}
+
 		// Roll this entry back —and only this one —so restore doesn't try to
 		// move a file that is still sitting in its original place. Read the map
 		// fresh again: another hider may have appended since our write, and
@@ -430,6 +484,13 @@ static void runJailbreakLibraryAudit(void)
 		NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:path error:nil];
 
 		for (NSString *name in children) {
+			// Already renamed by renameInPlace(): it is hidden, and touching it
+			// again would nest the prefix and orphan the map entry. Some rule
+			// directories (Containers, Application Support) only carry a default
+			// blacklist and no Apple-id whitelist regex, so without this check the
+			// renamed file would be picked straight back up on the next pass.
+			if ([name hasPrefix:@"com.apple.hidden."]) continue;
+
 			BOOL white = doAuditName(name, whitelist, whitelistRegex);
 			BOOL black = [blacklist containsObject:name];
 			NSString *result = nil;
