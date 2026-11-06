@@ -144,42 +144,6 @@ void app_hide_commit_pid(void *pidp)
 		gBlacklistedState[@(pid)] = @(pidversion);
 		pthread_rwlock_unlock(&gStateLock);
 		app_hide_log([NSString stringWithFormat:@"commit pid %d (version %d), blacklist size %lu", pid, pidversion, (unsigned long)gBlacklistedState.count]);
-
-		// Diagnostic: read POSIX signal dispositions (pbi_sigignore / pbi_sigcatch).
-		// These fields were removed from the iOS 26 SDK's struct proc_bsdinfo, but
-		// they still exist at fixed offsets 112 / 116 in the iOS 16 runtime struct
-		// (our actual device). Read them via a raw buffer + fixed offsets so the
-		// compiler never sees the removed field names.
-		unsigned char bsdinfoBuf[256] = {0};
-		if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, bsdinfoBuf, sizeof(bsdinfoBuf)) > 0) {
-			uint32_t sigignore = *(uint32_t *)(bsdinfoBuf + 112);
-			uint32_t sigcatch = *(uint32_t *)(bsdinfoBuf + 116);
-			app_hide_log([NSString stringWithFormat:@"  child %d sigignore=0x%x sigcatch=0x%x", pid, sigignore, sigcatch]);
-		}
-
-		// Diagnostic: dump the child's mach exception ports so we can see what a
-		// "signal handlers set" detector observes on a bare (no-inject) app.
-		mach_port_t task = MACH_PORT_NULL;
-		if (task_for_pid(mach_task_self(), pid, &task) != KERN_SUCCESS) {
-			app_hide_log([NSString stringWithFormat:@"  child %d task_for_pid failed", pid]);
-		} else {
-			exception_mask_t masks[EXC_TYPES_COUNT] = {0};
-			mach_port_t ports[EXC_TYPES_COUNT] = {0};
-			exception_behavior_t behaviors[EXC_TYPES_COUNT] = {0};
-			thread_state_flavor_t flavors[EXC_TYPES_COUNT] = {0};
-			mach_msg_type_number_t count = 0;
-			kern_return_t kr = task_get_exception_ports(task, EXC_MASK_ALL, masks, &count, ports, behaviors, flavors);
-			if (kr != KERN_SUCCESS) {
-				app_hide_log([NSString stringWithFormat:@"  child %d task_get_exception_ports kr=%d", pid, kr]);
-			} else if (count == 0) {
-				app_hide_log([NSString stringWithFormat:@"  child %d no exception ports (clean)", pid]);
-			} else {
-				for (mach_msg_type_number_t i = 0; i < count; i++) {
-					app_hide_log([NSString stringWithFormat:@"  child %d exc mask=0x%x port=0x%x", pid, masks[i], ports[i]]);
-				}
-			}
-			mach_port_deallocate(mach_task_self(), task);
-		}
 	}
 	free(pidp);
 }
@@ -1253,64 +1217,6 @@ static void app_hide_start_watchdog(void)
 // ports (queried with EXC_MASK_ALL, which is what those checks use) and the
 // POSIX signal dispositions. Logged once the app has finished launching, since
 // a snapshot taken right after spawn reflects pre-exec state and tells us nothing.
-void app_hide_log_child_runtime_state(pid_t pid)
-{
-	if (pid <= 0) return;
-
-	unsigned char bsdinfoBuf[256] = {0};
-	if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, bsdinfoBuf, sizeof(bsdinfoBuf)) > 0) {
-		uint32_t sigignore = *(uint32_t *)(bsdinfoBuf + 112);
-		uint32_t sigcatch = *(uint32_t *)(bsdinfoBuf + 116);
-		app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d sigignore=0x%x sigcatch=0x%x", pid, sigignore, sigcatch]);
-	}
-
-	mach_port_t task = MACH_PORT_NULL;
-	kern_return_t tfpKr = task_for_pid(mach_task_self(), pid, &task);
-	if (tfpKr != KERN_SUCCESS) {
-		app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d task_for_pid failed (kr=%d)", pid, tfpKr]);
-	} else {
-		// Exception ports are already proven NULL, so enumerate the task's whole
-		// port namespace. That is what a "suspicious open ports" check actually
-		// walks; a plain exception-port dump cannot see these.
-		int totalPorts = 0;
-		int sendRecvPorts = 0;
-		mach_port_name_t *names = NULL;
-		mach_port_type_t *types = NULL;
-		unsigned int nameCount = 0;
-		if (mach_port_names(task, &names, &nameCount, &types, NULL) == KERN_SUCCESS && names) {
-			totalPorts = (int)nameCount;
-			for (unsigned int i = 0; i < nameCount; i++) {
-				if (types[i] & MACH_PORT_TYPE_SEND_RECEIVE) sendRecvPorts++;
-			}
-			vm_deallocate(mach_task_self(), (vm_address_t)names, nameCount * sizeof(mach_port_name_t));
-			if (types) vm_deallocate(mach_task_self(), (vm_address_t)types, nameCount * sizeof(mach_port_type_t));
-		}
-		app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d ports total=%d sendrecv=%d", pid, totalPorts, sendRecvPorts]);
-
-		exception_mask_t masks[EXC_TYPES_COUNT] = {0};
-		mach_port_t ports[EXC_TYPES_COUNT] = {0};
-		exception_behavior_t behaviors[EXC_TYPES_COUNT] = {0};
-		thread_state_flavor_t flavors[EXC_TYPES_COUNT] = {0};
-		mach_msg_type_number_t count = 0;
-		kern_return_t kr = task_get_exception_ports(task, EXC_MASK_ALL, masks, &count, ports, behaviors, flavors);
-		if (kr != KERN_SUCCESS) {
-			app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d task_get_exception_ports kr=%d", pid, kr]);
-		} else {
-			int nonNull = 0;
-			for (mach_msg_type_number_t i = 0; i < count; i++) {
-				if (ports[i] != MACH_PORT_NULL) {
-					nonNull++;
-					app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d exc mask=0x%x port=0x%x (SET)", pid, masks[i], ports[i]]);
-				}
-			}
-			if (nonNull == 0) {
-				app_hide_log([NSString stringWithFormat:@"runtimecheck: pid %d %d exception types, all ports NULL (clean)", pid, count]);
-			}
-		}
-		mach_port_deallocate(mach_task_self(), task);
-	}
-}
-
 void app_hide_check_role_after_spawn(pid_t pid)
 {
 	if (pid <= 0) return;
@@ -1326,7 +1232,6 @@ void app_hide_check_role_after_spawn(pid_t pid)
 		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
 			int appState = app_hide_get_app_state(pid);
 			app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d (advisory)", pid, appState]);
-			app_hide_log_child_runtime_state(pid);
 		});
 }
 
