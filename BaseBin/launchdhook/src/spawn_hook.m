@@ -328,6 +328,19 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			}
 			return r;
 		}
+
+		// Any other process spawned while the jailbreak is hidden would load the
+		// STOCK dyld: fakelib is unmounted, so /usr/lib/dyld has no spinlock fix.
+		// Injecting systemhook into it would inline-hook shared-cache functions and
+		// write the shared __TEXT without the MAP_PRIVATE remap, which is exactly
+		// the arm64e iOS 15 spinlock deadlock ("Spinlock timeout") observed here.
+		// Bare-spawn it (no injection) so it never touches the shared cache text.
+		pid_t *plainPidp = (pid_t *)app_hide_alloc_pid();
+		int plainR = crashreporter_spawn_without_reporting(plainPidp, path, desc, argv, envp);
+		crashreporter_resume();
+		if (pid) *pid = *plainPidp;
+		app_hide_commit_pid(plainPidp);
+		return plainR;
 	}
 
 	// Check whether this App is on the injection block list
