@@ -28,6 +28,7 @@
 #import "boomerang.h"
 #import "update.h"
 #import "jbserver/jbserver_local.h"
+#import "jbserver/jbsettings.h"
 #import "asl.h"
 #import "app_hide_monitor.h"
 #import "app_hide.h"
@@ -151,6 +152,11 @@ __attribute__((constructor)) static void initializer(void)
 	}
 
 	cs_allow_invalid(proc_self(), false);
+
+	// gSystemInfo starts zeroed on every launchd start, so the settings the user
+	// chose (spinlock fix, jetsam multiplier, JIT) would read back as off. Restore
+	// them from disk before any hook or client can observe the defaults.
+	jbsettings_load();
 
 	if (__builtin_available(iOS 19.0, *)) {
 		// On iOS 26+, hooks have to be applied through hookd
