@@ -147,3 +147,12 @@
 "NoInject_Auto_Close" = "無注入の自動終了";
 "NoInject_Auto_Close_Description" = "この時間が経過すると無注入の隠蔽を自動で解除します。長くすると隠蔽は長持ちしますが、その間他の App から越獄ファイルが見えなくなります。";
 "NoInject_Auto_Close_Never" = "なし";
+// Hide Manager page
+"App_Hide_Header" = "越獄環境を隠す App を選択";
+"App_Hide_Footer" = "有効にすると、選択した App は /var/jb や越獄関連のファイルを認識できません。変更は App の再起動後に反映されます。";
+"App_Hide_Search_Placeholder" = "App を検索";
+"App_Hide_Search_No_Results" = "一致する App はありません。";
+"App_Hide_Save_Failed_Title" = "保存できませんでした";
+"App_Hide_Save_Failed_Message" = "Dopamine は隠蔽ルールを書き込めませんでした。このフォルダは iOS によって保護されている可能性があります。フルディスクアクセスが許可されているか確認してください（設定 → プライバシーとセキュリティ → フルディスクアクセス）。";
+"Hide for App" = "隠蔽管理";
+"Disable_Crash_Reporter" = "クラッシュレポータを無効化";

@@ -142,3 +142,12 @@
 "NoInject_Auto_Close_Description" = "在此時長後自動解除無注入隱藏。時間越長隱藏越久，但越獄檔案在更長時間內對其他 App 不可見。";
 "NoInject_Auto_Close_Never" = "永不";
 "Recommended" = "推薦";
+// Hide Manager page
+"App_Hide_Header" = "選擇要對哪些 App 隱藏越獄環境";
+"App_Hide_Footer" = "啟用後，所選 App 將看不到 /var/jb 及任何越獄相關檔案。重啟該 App 後生效。";
+"App_Hide_Search_Placeholder" = "搜尋 App";
+"App_Hide_Search_No_Results" = "沒有符合的 App。";
+"App_Hide_Save_Failed_Title" = "無法儲存";
+"App_Hide_Save_Failed_Message" = "無法寫入越獄隱藏規則。該目錄可能已被 iOS 保護。請檢查是否已授予完整磁碟存取權（設定 → 隱私權與安全性 → 完整磁碟存取權）。";
+"Hide for App" = "隱藏管理";
+"Disable_Crash_Reporter" = "停用當機報告";

@@ -142,3 +142,12 @@
 "NoInject_Auto_Close_Description" = "Awtomatikong tinatanggal ang NoInject na pagtatago pagkatapos ng tagal na ito. Mas mahaba ay mas matagal na nakatago, ngunit hindi makikita ng ibang app ang mga file ng jailbreak sa panahong iyon.";
 "NoInject_Auto_Close_Never" = "Hinding-hindi";
 "Recommended" = "Inirerekomenda";
+// Hide Manager page
+"App_Hide_Header" = "Pumili ng apps para itago ang jailbreak environment";
+"App_Hide_Footer" = "Kapag naka-enable, hindi makikita ng napiling app ang /var/jb o anumang file na may kinalaman sa jailbreak. Magkakabisa ang mga pagbabago pagkatapos i-restart ang app.";
+"App_Hide_Search_Placeholder" = "Maghanap ng apps";
+"App_Hide_Search_No_Results" = "Walang tugmang apps.";
+"App_Hide_Save_Failed_Title" = "Hindi Ma-save";
+"App_Hide_Save_Failed_Message" = "Hindi naisulat ng Dopamine ang mga patakaran ng pagtatago. Maaaring protektado ng iOS ang folder na ito. Tiyakin na nabigyan ng Full Disk Access (Settings → Privacy & Security → Full Disk Access).";
+"Hide for App" = "Tagapamahala ng Pagtatago";
+"Disable_Crash_Reporter" = "I-disable ang Crash Reporter";

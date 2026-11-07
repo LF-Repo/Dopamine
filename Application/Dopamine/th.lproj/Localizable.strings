@@ -142,3 +142,12 @@
 "NoInject_Auto_Close_Description" = "ยกเลิกการซ่อน NoInject โดยอัตโนมัติหลังจากเวลานี้ นานขึ้นจะซ่อนนานขึ้น แต่ไฟล์ jailbreak จะไม่ปรากฏต่อแอปอื่นในช่วงนั้น";
 "NoInject_Auto_Close_Never" = "ไม่เลย";
 "Recommended" = "แนะนำ";
+// Hide Manager page
+"App_Hide_Header" = "เลือกแอปที่ต้องการซ่อนสภาพแวดล้อม jailbreak";
+"App_Hide_Footer" = "เมื่อเปิดใช้งาน แอปที่เลือกจะไม่เห็น /var/jb หรือไฟล์ที่เกี่ยวข้องกับ jailbreak การเปลี่ยนแปลงจะมีผลหลังรีสตาร์ทแอป";
+"App_Hide_Search_Placeholder" = "ค้นหาแอป";
+"App_Hide_Search_No_Results" = "ไม่พบแอปที่ตรงกัน";
+"App_Hide_Save_Failed_Title" = "บันทึกไม่ได้";
+"App_Hide_Save_Failed_Message" = "Dopamine ไม่สามารถเขียนกฎการซ่อนได้ โฟลเดอร์นี้อาจถูกป้องกันโดย iOS โปรดตรวจสอบว่าได้รับสิทธิ์เข้าถึงดิสก์ทั้งหมดแล้ว (การตั้งค่า → ความเป็นส่วนตัวและความปลอดภัย → การเข้าถึงดิสก์ทั้งหมด)";
+"Hide for App" = "จัดการการซ่อน";
+"Disable_Crash_Reporter" = "ปิดใช้งานตัวรายงานการขัดข้อง";

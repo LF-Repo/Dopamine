@@ -142,3 +142,12 @@
 "NoInject_Auto_Close_Description" = "Bu süreden sonra NoInject gizlemesini otomatik olarak kaldırır. Daha uzun süre daha uzun gizler, ancak bu süre boyunca jailbreak dosyaları diğer uygulamalara görünmez.";
 "NoInject_Auto_Close_Never" = "Hiçbir zaman";
 "Recommended" = "Önerilen";
+// Hide Manager page
+"App_Hide_Header" = "Jailbreak ortamının gizleneceği uygulamaları seçin";
+"App_Hide_Footer" = "Etkinleştirildiğinde seçilen uygulama /var/jb veya jailbreak ile ilgili dosyaları göremez. Değişiklikler uygulama yeniden başlatıldıktan sonra geçerli olur.";
+"App_Hide_Search_Placeholder" = "Uygulama ara";
+"App_Hide_Search_No_Results" = "Eşleşen uygulama yok.";
+"App_Hide_Save_Failed_Title" = "Kaydedilemedi";
+"App_Hide_Save_Failed_Message" = "Dopamine gizleme kurallarını yazamadı. Bu klasör iOS tarafından korunuyor olabilir. Tam Disk Erişimi verildiğinden emin olun (Ayarlar → Gizlilik ve Güvenlik → Tam Disk Erişimi).";
+"Hide for App" = "Gizleme yöneticisi";
+"Disable_Crash_Reporter" = "Çökme raporlayıcısını devre dışı bırak";

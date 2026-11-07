@@ -148,3 +148,12 @@
 "NoInject_Auto_Close" = "NoInject automatisch beenden";
 "NoInject_Auto_Close_Description" = "Hebt die NoInject-Verbergung nach dieser Zeit automatisch auf. Länger bedeutet länger verborgen, aber die Jailbreak-Dateien bleiben so lange für andere Apps unsichtbar.";
 "NoInject_Auto_Close_Never" = "Nie";
+// Hide Manager page
+"App_Hide_Header" = "Apps auswählen, für die die Jailbreak-Umgebung verborgen wird";
+"App_Hide_Footer" = "Wenn aktiviert, sieht die ausgewählte App weder /var/jb noch jailbreak-bezogene Dateien. Änderungen werden nach einem Neustart der App wirksam.";
+"App_Hide_Search_Placeholder" = "Apps durchsuchen";
+"App_Hide_Search_No_Results" = "Keine passenden Apps.";
+"App_Hide_Save_Failed_Title" = "Speichern fehlgeschlagen";
+"App_Hide_Save_Failed_Message" = "Dopamine konnte die Verstecken-Regeln nicht schreiben. Dieser Ordner ist möglicherweise durch iOS geschützt. Prüfe, ob Vollständiger Festplattenzugriff erteilt ist (Einstellungen → Datenschutz & Sicherheit → Vollständiger Festplattenzugriff).";
+"Hide for App" = "Verstecken-Manager";
+"Disable_Crash_Reporter" = "Absturzbericht deaktivieren";

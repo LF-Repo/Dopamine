@@ -168,3 +168,10 @@
 "NoInject_Auto_Close" = "无注入自动关闭";
 "NoInject_Auto_Close_Description" = "在此时长后自动解除无注入隐藏。时间越长隐藏越久，但越狱文件在更长时间内对其他 App 不可见。";
 "NoInject_Auto_Close_Never" = "永不";
+// Hide Manager page
+"App_Hide_Header" = "选择要对哪些 App 隐藏越狱环境";
+"App_Hide_Footer" = "启用后，所选 App 将看不到 /var/jb 及任何越狱相关文件。重启该 App 后生效。";
+"App_Hide_Search_Placeholder" = "搜索 App";
+"App_Hide_Search_No_Results" = "没有匹配的 App。";
+"App_Hide_Save_Failed_Title" = "无法保存";
+"App_Hide_Save_Failed_Message" = "无法写入越狱隐藏规则。该目录可能已被 iOS 保护。请检查是否已授予完全访问权限（设置 → 隐私与安全性 → 完全访问权限）。";

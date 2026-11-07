@@ -142,3 +142,12 @@
 "NoInject_Auto_Close_Description" = "يرفع إخفاء NoInject تلقائيًا بعد هذه المدة. المدة الأطول تخفي لفترة أطول، لكن ملفات الجلبريك تبقى مخفية عن التطبيقات الأخرى خلالها.";
 "NoInject_Auto_Close_Never" = "أبدًا";
 "Recommended" = "موصى به";
+// Hide Manager page
+"App_Hide_Header" = "حدد التطبيقات لإخفاء بيئة الجلبريك";
+"App_Hide_Footer" = "عند التفعيل، لن يرى التطبيق المحدد ‎/var/jb‎ أو أي ملفات متعلقة بالجلبريك. تسري التغييرات بعد إعادة تشغيل التطبيق.";
+"App_Hide_Search_Placeholder" = "البحث في التطبيقات";
+"App_Hide_Search_No_Results" = "لا توجد تطبيقات مطابقة.";
+"App_Hide_Save_Failed_Title" = "تعذر الحفظ";
+"App_Hide_Save_Failed_Message" = "تعذر على Dopamine كتابة قواعد الإخفاء. قد يكون هذا المجلد محميًا بواسطة iOS. تحقق من منح صلاحية الوصول الكامل (الإعدادات ← الخصوصية والأمان ← الوصول الكامل).";
+"Hide for App" = "إدارة الإخفاء";
+"Disable_Crash_Reporter" = "تعطيل مُبلّغ الأعطال";

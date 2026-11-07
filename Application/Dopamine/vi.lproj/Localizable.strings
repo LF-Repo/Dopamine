@@ -144,3 +144,12 @@
 "NoInject_Auto_Close" = "Tự động đóng NoInject";
 "NoInject_Auto_Close_Description" = "Tự động gỡ ẩn NoInject sau khoảng thời gian này. Lâu hơn sẽ ẩn lâu hơn, nhưng tệp jailbreak không hiển thị với ứng dụng khác trong thời gian đó.";
 "NoInject_Auto_Close_Never" = "Không bao giờ";
+// Hide Manager page
+"App_Hide_Header" = "Chọn ứng dụng để ẩn môi trường jailbreak";
+"App_Hide_Footer" = "Khi bật, ứng dụng đã chọn sẽ không thấy /var/jb hoặc bất kỳ tệp nào liên quan đến jailbreak. Thay đổi có hiệu lực sau khi khởi động lại ứng dụng.";
+"App_Hide_Search_Placeholder" = "Tìm ứng dụng";
+"App_Hide_Search_No_Results" = "Không có ứng dụng phù hợp.";
+"App_Hide_Save_Failed_Title" = "Không thể lưu";
+"App_Hide_Save_Failed_Message" = "Dopamine không thể ghi quy tắc ẩn. Thư mục này có thể được iOS bảo vệ. Hãy kiểm tra xem đã cấp Quyền truy cập toàn bộ ổ đĩa chưa (Cài đặt → Quyền riêng tư và Bảo mật → Quyền truy cập toàn bộ ổ đĩa).";
+"Hide for App" = "Quản lý ẩn";
+"Disable_Crash_Reporter" = "Tắt trình báo cáo lỗi";

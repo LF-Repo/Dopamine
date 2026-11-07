@@ -142,3 +142,12 @@
 "NoInject_Auto_Close_Description" = "Ophæver NoInject-skjulningen automatisk efter denne tid. Længere skjuler længere, men jailbreak-filerne er usynlige for andre apps i mellemtiden.";
 "NoInject_Auto_Close_Never" = "Aldrig";
 "Recommended" = "Anbefalet";
+// Hide Manager page
+"App_Hide_Header" = "Vælg apps, hvor jailbreak-miljøet skal skjules";
+"App_Hide_Footer" = "Når den er aktiveret, kan den valgte app ikke se /var/jb eller jailbreak-relaterede filer. Ændringer træder i kraft, når appen genstartes.";
+"App_Hide_Search_Placeholder" = "Søg efter apps";
+"App_Hide_Search_No_Results" = "Ingen matchende apps.";
+"App_Hide_Save_Failed_Title" = "Kunne ikke gemme";
+"App_Hide_Save_Failed_Message" = "Dopamine kunne ikke skrive skjulningsreglerne. Denne mappe er muligvis beskyttet af iOS. Kontroller, at Fuld diskadgang er givet (Indstillinger → Anonymitet og sikkerhed → Fuld diskadgang).";
+"Hide for App" = "Skjul-administrator";
+"Disable_Crash_Reporter" = "Deaktiver crash-rapportering";

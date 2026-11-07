@@ -142,3 +142,12 @@
 "NoInject_Auto_Close_Description" = "Lève automatiquement le masquage NoInject après ce délai. Plus long protège plus longtemps, mais les fichiers du jailbreak restent invisibles aux autres apps pendant ce temps.";
 "NoInject_Auto_Close_Never" = "Jamais";
 "Recommended" = "Recommandé";
+// Hide Manager page
+"App_Hide_Header" = "Sélectionnez les apps dont l'environnement jailbreak doit être masqué";
+"App_Hide_Footer" = "Une fois activé, l'app sélectionnée ne verra ni /var/jb ni aucun fichier lié au jailbreak. Les changements prennent effet après redémarrage de l'app.";
+"App_Hide_Search_Placeholder" = "Rechercher des apps";
+"App_Hide_Search_No_Results" = "Aucune app correspondante.";
+"App_Hide_Save_Failed_Title" = "Échec de l'enregistrement";
+"App_Hide_Save_Failed_Message" = "Dopamine n'a pas pu écrire les règles de masquage. Ce dossier est peut-être protégé par iOS. Vérifiez que l'accès complet au disque est accordé (Réglages → Confidentialité et sécurité → Accès complet au disque).";
+"Hide for App" = "Gestion du masquage";
+"Disable_Crash_Reporter" = "Désactiver le rapporteur de plantage";

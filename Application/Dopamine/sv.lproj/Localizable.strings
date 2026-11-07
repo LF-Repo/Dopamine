@@ -142,3 +142,12 @@
 "NoInject_Auto_Close_Description" = "Upphäver NoInject-gömmandet automatiskt efter denna tid. Längre gömer längre, men jailbreak-filerna är osynliga för andra appar under tiden.";
 "NoInject_Auto_Close_Never" = "Aldrig";
 "Recommended" = "Rekommenderas";
+// Hide Manager page
+"App_Hide_Header" = "Välj appar för vilka jailbreak-miljön ska döljas";
+"App_Hide_Footer" = "När det är aktiverat ser den valda appen inte /var/jb eller jailbreak-relaterade filer. Ändringar gäller efter att appen startats om.";
+"App_Hide_Search_Placeholder" = "Sök appar";
+"App_Hide_Search_No_Results" = "Inga matchande appar.";
+"App_Hide_Save_Failed_Title" = "Kunde inte spara";
+"App_Hide_Save_Failed_Message" = "Dopamine kunde inte skriva gömmingsreglerna. Den här mappen kan vara skyddad av iOS. Kontrollera att Full diskenhetsåtkomst är given (Inställningar → Integritet och säkerhet → Full diskenhetsåtkomst).";
+"Hide for App" = "Döljningshanterare";
+"Disable_Crash_Reporter" = "Inaktivera kraschrapporteraren";

@@ -135,3 +135,12 @@
 "NoInject_Auto_Close_Description" = "Remove automaticamente a ocultação NoInject após este tempo. Mais longo oculta por mais tempo, mas os arquivos do jailbreak ficam invisíveis para outros apps.";
 "NoInject_Auto_Close_Never" = "Nunca";
 "Recommended" = "Recomendado";
+// Hide Manager page
+"App_Hide_Header" = "Selecione apps para ocultar o ambiente do jailbreak";
+"App_Hide_Footer" = "Quando ativado, o app selecionado não verá /var/jb nem arquivos relacionados ao jailbreak. As alterações entram em vigor após reiniciar o app.";
+"App_Hide_Search_Placeholder" = "Pesquisar apps";
+"App_Hide_Search_No_Results" = "Nenhum app correspondente.";
+"App_Hide_Save_Failed_Title" = "Não foi possível salvar";
+"App_Hide_Save_Failed_Message" = "O Dopamine não conseguiu gravar as regras de ocultação. Esta pasta pode estar protegida pelo iOS. Verifique se o Acesso Total ao Disco foi concedido (Ajustes → Privacidade e Segurança → Acesso Total ao Disco).";
+"Hide for App" = "Gerenciador de ocultação";
+"Disable_Crash_Reporter" = "Desativar o Relatório de Falhas";

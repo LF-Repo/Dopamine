@@ -142,3 +142,12 @@
 "NoInject_Auto_Close_Description" = "Heeft de NoInject-verberging na deze tijd automatisch op. Langer betekent langer verborgen, maar de jailbreak-bestanden blijven zo lang onzichtbaar voor andere apps.";
 "NoInject_Auto_Close_Never" = "Nooit";
 "Recommended" = "Aanbevolen";
+// Hide Manager page
+"App_Hide_Header" = "Kies apps waarvoor de jailbreak-omgeving verborgen wordt";
+"App_Hide_Footer" = "Indien ingeschakeld ziet de geselecteerde app geen /var/jb of jailbreak-gerelateerde bestanden. Wijzigingen gelden na herstart van de app.";
+"App_Hide_Search_Placeholder" = "Apps zoeken";
+"App_Hide_Search_No_Results" = "Geen overeenkomende apps.";
+"App_Hide_Save_Failed_Title" = "Opslaan mislukt";
+"App_Hide_Save_Failed_Message" = "Dopamine kon de verbergregels niet schrijven. Deze map is mogelijk beveiligd door iOS. Controleer of Volledige schijftoegang is verleend (Instellingen → Privacy en beveiliging → Volledige schijftoegang).";
+"Hide for App" = "Verbergbeheer";
+"Disable_Crash_Reporter" = "Crashreporter uitschakelen";
