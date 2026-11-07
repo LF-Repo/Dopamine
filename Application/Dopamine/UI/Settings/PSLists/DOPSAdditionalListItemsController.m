@@ -34,6 +34,14 @@
     if (!_specifiers) {
         NSMutableArray *specifiers = [NSMutableArray new];
 
+        // Everything on this page shares ONE section. A group specifier starts a
+        // new section, so the extra empty group previously used to carry the footer
+        // rendered as its own section and left the blank block seen under the rows.
+        // Attaching the footer to the single leading group keeps the page tight.
+        PSSpecifier *groupSpecifier = [PSSpecifier emptyGroupSpecifier];
+        [groupSpecifier setProperty:DOLocalizedString(@"NoInject_Auto_Close_Description") forKey:@"footerText"];
+        [specifiers addObject:groupSpecifier];
+
         PSSpecifier *spinlockFixSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Enhanced Spinlock Fix (iOS 15)") target:self set:@selector(setSpinlockFixEnhanced:specifier:) get:@selector(readSpinlockFixEnhanced:) detail:nil cell:PSSwitchCell edit:nil];
         [spinlockFixSpecifier setProperty:@YES forKey:@"enabled"];
         [spinlockFixSpecifier setProperty:@"spinlockFixEnhanced" forKey:@"key"];
@@ -41,7 +49,7 @@
         [specifiers addObject:spinlockFixSpecifier];
 
         // Auto-close multiplier for NoInject hiding, presented the same way as the
-        // Jetsam multiplier: a value list with 1x..4x and a footer explaining it.
+        // Jetsam multiplier: a value list with 1x..4x plus Never.
         PSSpecifier *autoCloseSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"NoInject_Auto_Close") target:self set:@selector(setNoInjectAutoClose:specifier:) get:@selector(readNoInjectAutoClose:) detail:nil cell:PSLinkListCell edit:nil];
         autoCloseSpecifier.detailControllerClass = [DOPSListItemsController class];
         [autoCloseSpecifier setProperty:@YES forKey:@"enabled"];
@@ -50,10 +58,6 @@
         [autoCloseSpecifier setProperty:@"noInjectAutoCloseNumbers" forKey:@"valuesDataSource"];
         [autoCloseSpecifier setProperty:@"noInjectAutoCloseTitles" forKey:@"titlesDataSource"];
         [specifiers addObject:autoCloseSpecifier];
-
-        PSSpecifier *autoCloseFooterSpecifier = [PSSpecifier emptyGroupSpecifier];
-        [autoCloseFooterSpecifier setProperty:DOLocalizedString(@"NoInject_Auto_Close_Description") forKey:@"footerText"];
-        [specifiers addObject:autoCloseFooterSpecifier];
 
         PSSpecifier *disableCrashReporterSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Disable_Crash_Reporter") target:self set:@selector(setCrashReporterDisabled:specifier:) get:@selector(readCrashReporterDisabled:) detail:nil cell:PSSwitchCell edit:nil];
         [disableCrashReporterSpecifier setProperty:@YES forKey:@"enabled"];
@@ -68,8 +72,8 @@
 
 #pragma mark - Auto close multiplier
 
-// The list stores an index (2..8); the jailbreak stores a multiplier (index/2).
-// Reading back divides by two so the row shown matches what launchdhook uses.
+// The list stores an index: -1 means "never", 2..8 means multiplier index/2.
+// Reading back converts the stored multiplier into that index.
 - (id)readNoInjectAutoClose:(PSSpecifier *)specifier
 {
     DOEnvironmentManager *envManager = [DOEnvironmentManager sharedManager];
@@ -77,7 +81,9 @@
     if (envManager.isJailbroken) {
         multiplier = jbclient_jbsettings_get_double("noInjectRestoreMultiplier");
     }
-    if (multiplier <= 0) multiplier = 1.0;
+    // A negative value is the "never" sentinel written by setNoInjectAutoClose:.
+    if (multiplier < 0) return @(-1);
+    if (multiplier == 0) multiplier = 1.0;
     NSInteger index = (NSInteger)llround(multiplier * 2);
     if (index < 2) index = 2;
     if (index > 8) index = 8;
@@ -87,18 +93,25 @@
 - (void)setNoInjectAutoClose:(id)value specifier:(PSSpecifier *)specifier
 {
     NSInteger index = ((NSNumber *)value).integerValue;
-    if (index < 2) index = 2;
-    if (index > 8) index = 8;
 
     DOEnvironmentManager *envManager = [DOEnvironmentManager sharedManager];
-    if (envManager.isJailbroken) {
-        jbclient_platform_jbsettings_set_double("noInjectRestoreMultiplier", (double)index / 2.0);
+    if (!envManager.isJailbroken) return;
+
+    if (index < 0) {
+        // "Never": a negative sentinel, because 0 is reserved for "unset" so a
+        // device that never touched this setting keeps its 30s default.
+        jbclient_platform_jbsettings_set_double("noInjectRestoreMultiplier", -1.0);
+        return;
     }
+
+    if (index < 2) index = 2;
+    if (index > 8) index = 8;
+    jbclient_platform_jbsettings_set_double("noInjectRestoreMultiplier", (double)index / 2.0);
 }
 
 // Same shape as the Jetsam multiplier list: the stored value is an index, and
 // the multiplier is index/2. Default @2 == 1x, which is the previous 30s delay,
-// so an untouched setting behaves exactly as before.
+// so an untouched setting behaves exactly as before. -1 is "never".
 - (NSArray *)noInjectAutoCloseNumbers
 {
     return @[
@@ -109,19 +122,21 @@
     @6,
     @7,
     @8,
+    @-1,
     ];
 }
 
 - (NSArray *)noInjectAutoCloseTitles
 {
     return @[
-        @"1x",
+        [NSString stringWithFormat:@"1x (%@)", DOLocalizedString(@"Recommended")],
         @"1.5x",
         @"2x",
         @"2.5x",
-        [NSString stringWithFormat:@"3x (%@)", DOLocalizedString(@"Recommended")],
+        @"3x",
         @"3.5x",
         @"4x",
+        DOLocalizedString(@"NoInject_Auto_Close_Never"),
     ];
 }
 

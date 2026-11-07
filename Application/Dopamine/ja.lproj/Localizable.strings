@@ -146,3 +146,4 @@
 // NoInject auto-close
 "NoInject_Auto_Close" = "無注入の自動終了";
 "NoInject_Auto_Close_Description" = "この時間が経過すると無注入の隠蔽を自動で解除します。長くすると隠蔽は長持ちしますが、その間他の App から越獄ファイルが見えなくなります。";
+"NoInject_Auto_Close_Never" = "なし";

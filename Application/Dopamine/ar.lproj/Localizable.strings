@@ -140,3 +140,5 @@
 // NoInject auto-close
 "NoInject_Auto_Close" = "إغلاق NoInject التلقائي";
 "NoInject_Auto_Close_Description" = "يرفع إخفاء NoInject تلقائيًا بعد هذه المدة. المدة الأطول تخفي لفترة أطول، لكن ملفات الجلبريك تبقى مخفية عن التطبيقات الأخرى خلالها.";
+"NoInject_Auto_Close_Never" = "أبدًا";
+"Recommended" = "موصى به";

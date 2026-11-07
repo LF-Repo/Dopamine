@@ -133,3 +133,5 @@
 // NoInject auto-close
 "NoInject_Auto_Close" = "Fechamento automático do NoInject";
 "NoInject_Auto_Close_Description" = "Remove automaticamente a ocultação NoInject após este tempo. Mais longo oculta por mais tempo, mas os arquivos do jailbreak ficam invisíveis para outros apps.";
+"NoInject_Auto_Close_Never" = "Nunca";
+"Recommended" = "Recomendado";

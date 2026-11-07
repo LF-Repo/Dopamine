@@ -143,3 +143,4 @@
 // NoInject auto-close
 "NoInject_Auto_Close" = "Tự động đóng NoInject";
 "NoInject_Auto_Close_Description" = "Tự động gỡ ẩn NoInject sau khoảng thời gian này. Lâu hơn sẽ ẩn lâu hơn, nhưng tệp jailbreak không hiển thị với ứng dụng khác trong thời gian đó.";
+"NoInject_Auto_Close_Never" = "Không bao giờ";

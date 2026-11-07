@@ -147,3 +147,4 @@
 // NoInject auto-close
 "NoInject_Auto_Close" = "노인젝트 자동 종료";
 "NoInject_Auto_Close_Description" = "이 시간이 지나면 노인젝트 숨김을 자동으로 해제합니다. 길게 설정하면 더 오래 숨겨지지만 그동안 다른 App은 탈옥 파일을 볼 수 없습니다.";
+"NoInject_Auto_Close_Never" = "사용 안 함";

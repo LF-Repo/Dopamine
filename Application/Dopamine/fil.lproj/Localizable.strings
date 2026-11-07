@@ -140,3 +140,5 @@
 // NoInject auto-close
 "NoInject_Auto_Close" = "Awtomatikong pagsara ng NoInject";
 "NoInject_Auto_Close_Description" = "Awtomatikong tinatanggal ang NoInject na pagtatago pagkatapos ng tagal na ito. Mas mahaba ay mas matagal na nakatago, ngunit hindi makikita ng ibang app ang mga file ng jailbreak sa panahong iyon.";
+"NoInject_Auto_Close_Never" = "Hinding-hindi";
+"Recommended" = "Inirerekomenda";

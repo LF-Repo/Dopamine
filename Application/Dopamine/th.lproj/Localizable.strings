@@ -140,3 +140,5 @@
 // NoInject auto-close
 "NoInject_Auto_Close" = "ปิด NoInject อัตโนมัติ";
 "NoInject_Auto_Close_Description" = "ยกเลิกการซ่อน NoInject โดยอัตโนมัติหลังจากเวลานี้ นานขึ้นจะซ่อนนานขึ้น แต่ไฟล์ jailbreak จะไม่ปรากฏต่อแอปอื่นในช่วงนั้น";
+"NoInject_Auto_Close_Never" = "ไม่เลย";
+"Recommended" = "แนะนำ";

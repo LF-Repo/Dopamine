@@ -140,3 +140,5 @@
 // NoInject auto-close
 "NoInject_Auto_Close" = "Автозакриття NoInject";
 "NoInject_Auto_Close_Description" = "Автоматично знімає приховування NoInject після цього часу. Довше — приховування триває довше, але файли джейлбрейку весь цей час недоступні іншим застосункам.";
+"NoInject_Auto_Close_Never" = "Ніколи";
+"Recommended" = "Рекомендовано";

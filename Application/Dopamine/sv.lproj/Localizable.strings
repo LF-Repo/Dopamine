@@ -140,3 +140,5 @@
 // NoInject auto-close
 "NoInject_Auto_Close" = "Stäng NoInject automatiskt";
 "NoInject_Auto_Close_Description" = "Upphäver NoInject-gömmandet automatiskt efter denna tid. Längre gömer längre, men jailbreak-filerna är osynliga för andra appar under tiden.";
+"NoInject_Auto_Close_Never" = "Aldrig";
+"Recommended" = "Rekommenderas";

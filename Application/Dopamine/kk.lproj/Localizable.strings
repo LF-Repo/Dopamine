@@ -140,3 +140,5 @@
 // NoInject auto-close
 "NoInject_Auto_Close" = "NoInject автожабу";
 "NoInject_Auto_Close_Description" = "Осы уақыттан кейін NoInject жасыруын автоматты түрде алып тастайды. Ұзағырақ — ұзағырақ жасырады, бірақ сол уақытта jailbreak файлдары басқа қосымшаларға көрінбейді.";
+"NoInject_Auto_Close_Never" = "Ешқашан";
+"Recommended" = "Ұсынылады";

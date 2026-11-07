@@ -454,14 +454,26 @@ static bool app_hide_set_remove(pid_t pid)
 // given back in exchange for the device behaving normally.
 #define APP_HIDE_RESTORE_DELAY_SEC 30
 
-// The delay actually used. The stored value is a multiplier on the 30s baseline
-// so the UI can offer the same 1x..4x list the Jetsam multiplier uses. Anything
-// unset or out of range falls back to 1x, which is the previous hardcoded 30s
-// and therefore the old behaviour for anyone who never touches the setting.
-static int app_hide_restore_delay_seconds(void)
+// Raw multiplier as configured. Negative means "never auto-close" — the hide
+// lasts until the app exits. Zero means the setting was never written, which
+// falls back to 1x so a fresh device keeps the historical 30s behaviour.
+#define APP_HIDE_RESTORE_MULTIPLIER_NEVER (-1.0)
+
+static double app_hide_restore_multiplier(void)
 {
 	double multiplier = jbsetting(noInjectRestoreMultiplier);
-	if (multiplier <= 0 || multiplier > 16) multiplier = 1;
+	// Never: negative sentinel or anything out of the supported upper range.
+	if (multiplier < 0) return APP_HIDE_RESTORE_MULTIPLIER_NEVER;
+	if (multiplier == 0 || multiplier > 16) return 1;
+	return multiplier;
+}
+
+// The delay actually used, in seconds. Returns 0 for "never", which the scheduler
+// checks before arming anything.
+static int app_hide_restore_delay_seconds(void)
+{
+	double multiplier = app_hide_restore_multiplier();
+	if (multiplier <= 0) return 0;
 	return (int)(APP_HIDE_RESTORE_DELAY_SEC * multiplier);
 }
 
@@ -548,6 +560,10 @@ static void app_hide_schedule_restore_timeout(void)
 	// A timer is already armed (a second spawn inside the same window): leave it
 	// running so the deadline stays anchored to when the window opened.
 	if (gNoInjectRestoreTimer) return;
+
+	// A multiplier of 0 (or anything non-positive) means "never": the user asked
+	// for the hide to stay until the app itself exits, so no timer is armed at all.
+	if (app_hide_restore_multiplier() <= 0) return;
 
 	int delaySec = app_hide_restore_delay_seconds();
 	gNoInjectRestoreTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,

@@ -176,3 +176,4 @@
 // NoInject auto-close
 "NoInject_Auto_Close" = "NoInject Auto-Close";
 "NoInject_Auto_Close_Description" = "Automatically lifts the NoInject hide after this delay. Longer delays stay hidden longer but keep the jailbreak files unavailable to other apps for that time.";
+"NoInject_Auto_Close_Never" = "Never";
