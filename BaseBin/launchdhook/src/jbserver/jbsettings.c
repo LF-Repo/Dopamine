@@ -4,6 +4,8 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <stdio.h>
 #include <string.h>
+#include <limits.h>
+#include <dispatch/dispatch.h>
 
 // The jailbreak settings live in gSystemInfo, which is plain in-memory state and
 // resets to zero whenever launchd restarts (userspace reboot, re-jailbreak).
@@ -12,9 +14,24 @@
 // off. Persist them under the jbroot so they survive with the rest of the jailbreak.
 #define JBSETTINGS_PLIST "/basebin/.jbsettings.plist"
 
+// NOTE: JBROOT_PATH allocates its buffer with alloca() in the *caller's* stack
+// frame, so it must never be returned from a function — the pointer dangles the
+// moment that frame dies. That is exactly what made this flaky: fopen() below
+// sometimes opened a path built from clobbered stack bytes, failed, and left the
+// settings at their zeroed defaults, which looked like the toggle turning itself
+// off. Build the path into a static buffer instead.
 static const char *jbsettings_path(void)
 {
-	return JBROOT_PATH(JBSETTINGS_PLIST);
+	static char path[PATH_MAX];
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		path[0] = '\0';
+		const char *jbroot = get_jbroot();
+		if (!jbroot) return;
+		strlcpy(path, jbroot, sizeof(path));
+		strlcat(path, JBSETTINGS_PLIST, sizeof(path));
+	});
+	return path[0] ? path : NULL;
 }
 
 void jbsettings_load(void)

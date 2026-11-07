@@ -697,20 +697,41 @@ static int app_hide_run_jbctl(const char *command, const char *arg)
 
 static void app_hide_do_hide(void)
 {
-	// Kill running jailbreak apps first, so they don't keep writing into the
+	// Kill running jailbreak apps first, so they do not keep writing into the
 	// real jbroot after /var/jb is removed below.
 	app_hide_kill_jailbreak_apps();
 
 	// Unmount fakelib FIRST so the re-entrant jbctl spawn below runs without
 	// systemhook injection (same proven pattern as ensure_fakelib_mounted()).
-	unmount("/usr/lib", MNT_FORCE);
+	//
+	// The result matters: on iOS 15 this intermittently fails with EBUSY while a
+	// process still holds a vnode under /usr/lib. jbctl then spawns against the
+	// mounted fakelib, its audit pass cannot move anything, and the hide ends up
+	// doing nothing - one of the ways it silently stopped working.
+	errno = 0;
+	int unmountRet = unmount("/usr/lib", MNT_FORCE);
+	if (unmountRet != 0) {
+		app_hide_log([NSString stringWithFormat:@"do_hide: unmount(/usr/lib) FAILED (errno %d)", errno]);
+		// One retry after a short settle: the usual cause is a just-released vnode
+		// reference that has not dropped yet.
+		usleep(100 * 1000);
+		errno = 0;
+		unmountRet = unmount("/usr/lib", MNT_FORCE);
+		app_hide_log([NSString stringWithFormat:@"do_hide: unmount retry %@ (errno %d)",
+					  unmountRet == 0 ? @"OK" : @"FAILED", errno]);
+	}
 
-	// Quarantine the jailbreak files a bare app can still see (the "suspicious
-	// files" under /var/mobile/Library). Pure file-rename, no uicache.
-	app_hide_run_jbctl("audit", "hide");
+	// Quarantine the jailbreak files a bare app can still see (the suspicious
+	// files under /var/mobile/Library). Pure file-rename, no uicache.
+	int auditRet = app_hide_run_jbctl("audit", "hide");
+	if (auditRet != 0) {
+		app_hide_log([NSString stringWithFormat:@"do_hide: audit hide returned %d, hide may be incomplete", auditRet]);
+	}
 
 	// Remove the /var/jb symlink last.
-	unlink("/var/jb");
+	if (unlink("/var/jb") != 0) {
+		app_hide_log([NSString stringWithFormat:@"do_hide: unlink(/var/jb) FAILED (errno %d)", errno]);
+	}
 }
 
 static void app_hide_do_restore(void)
