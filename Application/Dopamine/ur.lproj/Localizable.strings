@@ -137,3 +137,6 @@
 // Additional page
 "Additional" = "اضافی";
 "Enhanced Spinlock Fix (iOS 15)" = "بہتر اسپن لاک فکس (iOS 15)";
+// NoInject auto-close
+"NoInject_Auto_Close" = "NoInject خودکار بند";
+"NoInject_Auto_Close_Description" = "اس مدت کے بعد NoInject چھپانا خودکار طور پر ہٹا دیتا ہے۔ زیادہ دیر زیادہ دیر تک چھپاتا ہے، لیکن اس دوران جیل بریک فائلیں دوسری ایپس کو نظر نہیں آتیں۔";

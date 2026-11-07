@@ -173,3 +173,6 @@
 "Mount_Input_Message" = "Enter the original folder path. It will be bind-mounted read-only to a copy under /var/jb/mnt/.";
 "Error_Mount_Empty" = "Please enter a folder path.";
 "Empty_Mount_List" = "No mounts yet.";
+// NoInject auto-close
+"NoInject_Auto_Close" = "NoInject Auto-Close";
+"NoInject_Auto_Close_Description" = "Automatically lifts the NoInject hide after this delay. Longer delays stay hidden longer but keep the jailbreak files unavailable to other apps for that time.";

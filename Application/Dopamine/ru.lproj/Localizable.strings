@@ -137,3 +137,6 @@
 // Additional page
 "Additional" = "Дополнительно";
 "Enhanced Spinlock Fix (iOS 15)" = "Улучшенное исправление Spinlock (iOS 15)";
+// NoInject auto-close
+"NoInject_Auto_Close" = "Автозакрытие NoInject";
+"NoInject_Auto_Close_Description" = "По истечении этого времени скрытие NoInject снимается автоматически. Дольше — скрытие длится дольше, но всё это время файлы джейлбрейка недоступны другим приложениям.";

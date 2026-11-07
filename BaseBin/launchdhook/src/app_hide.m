@@ -454,6 +454,17 @@ static bool app_hide_set_remove(pid_t pid)
 // given back in exchange for the device behaving normally.
 #define APP_HIDE_RESTORE_DELAY_SEC 30
 
+// The delay actually used. The stored value is a multiplier on the 30s baseline
+// so the UI can offer the same 1x..4x list the Jetsam multiplier uses. Anything
+// unset or out of range falls back to 1x, which is the previous hardcoded 30s
+// and therefore the old behaviour for anyone who never touches the setting.
+static int app_hide_restore_delay_seconds(void)
+{
+	double multiplier = jbsetting(noInjectRestoreMultiplier);
+	if (multiplier <= 0 || multiplier > 16) multiplier = 1;
+	return (int)(APP_HIDE_RESTORE_DELAY_SEC * multiplier);
+}
+
 // True once the delayed restore has run, so a long-running window does not re-arm
 // the timer on every spawn. It does NOT mean the jailbreak is visible: the tracked
 // app set can still be non-empty, and that app will keep us hidden on its exit.
@@ -485,7 +496,7 @@ static void app_hide_restore_after_timeout(void)
 	}
 
 	app_hide_log([NSString stringWithFormat:@"timeout: lifting the hide after %ds, jailbreak stays visible from here on",
-				  APP_HIDE_RESTORE_DELAY_SEC]);
+				  app_hide_restore_delay_seconds()]);
 
 	// Full restore, exactly what exiting the last no-inject app would have done:
 	// rebuild /var/jb, remount fakelib, move the quarantined config files back.
@@ -538,13 +549,17 @@ static void app_hide_schedule_restore_timeout(void)
 	// running so the deadline stays anchored to when the window opened.
 	if (gNoInjectRestoreTimer) return;
 
+	int delaySec = app_hide_restore_delay_seconds();
 	gNoInjectRestoreTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
 		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
 	dispatch_source_set_timer(gNoInjectRestoreTimer,
-		dispatch_time(DISPATCH_TIME_NOW, APP_HIDE_RESTORE_DELAY_SEC * NSEC_PER_SEC),
+		dispatch_time(DISPATCH_TIME_NOW, (uint64_t)delaySec * NSEC_PER_SEC),
 		DISPATCH_TIME_FOREVER, 1 * NSEC_PER_SEC);
 	dispatch_source_set_event_handler(gNoInjectRestoreTimer, ^{
-		app_hide_restore_after_timeout();
+		// launchd's dispatch workers carry no autorelease pool of their own.
+		@autoreleasepool {
+			app_hide_restore_after_timeout();
+		}
 		// One shot: clear the handle so a later hide can arm a fresh timer.
 		dispatch_source_cancel(gNoInjectRestoreTimer);
 		gNoInjectRestoreTimer = nil;

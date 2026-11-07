@@ -137,3 +137,6 @@
 // Additional page
 "Additional" = "إضافي";
 "Enhanced Spinlock Fix (iOS 15)" = "إصلاح Spinlock المحسّن (iOS 15)";
+// NoInject auto-close
+"NoInject_Auto_Close" = "إغلاق NoInject التلقائي";
+"NoInject_Auto_Close_Description" = "يرفع إخفاء NoInject تلقائيًا بعد هذه المدة. المدة الأطول تخفي لفترة أطول، لكن ملفات الجلبريك تبقى مخفية عن التطبيقات الأخرى خلالها.";

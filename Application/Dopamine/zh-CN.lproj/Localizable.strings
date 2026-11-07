@@ -164,3 +164,6 @@
 // Additional page
 "Additional" = "附加";
 "Enhanced Spinlock Fix (iOS 15)" = "自旋锁增强修复（仅 iOS 15）";
+// NoInject auto-close
+"NoInject_Auto_Close" = "无注入自动关闭";
+"NoInject_Auto_Close_Description" = "在此时长后自动解除无注入隐藏。时间越长隐藏越久，但越狱文件在更长时间内对其他 App 不可见。";

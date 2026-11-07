@@ -465,6 +465,14 @@ static void runJailbreakLibraryAudit(void)
 			@"whitelistRegex": @[@"^com\\.apple\\."],
 			@"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.hbang.Terminal", @"xyz.willy.Zebra"]
 		},
+		@"/var/root/Library/HTTPStorages": @{
+			// root's own storage, where shshd keeps its blob cache. Every
+			// jailbroken device has this directory, so it is blacklisted by name
+			// rather than relying on a default rule.
+			@"default": @"blacklist",
+			@"whitelistRegex": @[@"^com\\.apple\\."],
+			@"blacklist": @[@"shshd"]
+		},
 		@"/var/mobile/Documents": @{
 			@"blacklist": @[@"DumpDecrypter", @"Dumplpa", @"wiki.qaq.chromatic", @"TheosProject", @"DebBackup", @"Settings_Customizer", @"Background_Files", @"ProGestureConfigs", @"Saved_Fonts", @"Included_Audio", @"Saved_Operations", @"Saved_Locks", @"Anilaunch", @"AD-deb", @"Debra", @".Xinaf1re", @"PerfectDynamiclsland", @"Cowabunga_Audio", @".DynamicCowBackups", @".PlampyUIPro"]
 		},

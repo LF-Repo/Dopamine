@@ -60,6 +60,14 @@ void jbsettings_load(void)
 		}
 	}
 
+	numValue = CFDictionaryGetValue(dict, CFSTR("noInjectRestoreMultiplier"));
+	if (numValue && CFGetTypeID(numValue) == CFNumberGetTypeID()) {
+		double d = 0;
+		if (CFNumberGetValue(numValue, kCFNumberDoubleType, &d)) {
+			gSystemInfo.jailbreakSettings.noInjectRestoreMultiplier = d;
+		}
+	}
+
 	boolValue = CFDictionaryGetValue(dict, CFSTR("spinlockFixEnhanced"));
 	if (boolValue && CFGetTypeID(boolValue) == CFBooleanGetTypeID()) {
 		gSystemInfo.jailbreakSettings.spinlockFixEnhanced = CFBooleanGetValue(boolValue);
@@ -85,6 +93,13 @@ static void jbsettings_save(void)
 	if (jetsamNum) {
 		CFDictionarySetValue(dict, CFSTR("jetsamMultiplier"), jetsamNum);
 		CFRelease(jetsamNum);
+	}
+
+	double restoreMult = jbsetting(noInjectRestoreMultiplier);
+	CFNumberRef restoreNum = CFNumberCreate(kCFAllocatorDefault, kCFNumberDoubleType, &restoreMult);
+	if (restoreNum) {
+		CFDictionarySetValue(dict, CFSTR("noInjectRestoreMultiplier"), restoreNum);
+		CFRelease(restoreNum);
 	}
 
 	CFDictionarySetValue(dict, CFSTR("spinlockFixEnhanced"),
@@ -119,6 +134,10 @@ int jbsettings_get(const char *key, xpc_object_t *valueOut)
 		*valueOut = xpc_bool_create(jbsetting(spinlockFixEnhanced));
 		return 0;
 	}
+	else if (!strcmp(key, "noInjectRestoreMultiplier")) {
+		*valueOut = xpc_double_create(jbsetting(noInjectRestoreMultiplier));
+		return 0;
+	}
 	return -1;
 }
 
@@ -138,6 +157,11 @@ int jbsettings_set(const char *key, xpc_object_t value)
 	}
 	else if (!strcmp(key, "spinlockFixEnhanced") && xpc_get_type(value) == XPC_TYPE_BOOL) {
 		gSystemInfo.jailbreakSettings.spinlockFixEnhanced = xpc_bool_get_value(value);
+		jbsettings_save();
+		return 0;
+	}
+	else if (!strcmp(key, "noInjectRestoreMultiplier") && xpc_get_type(value) == XPC_TYPE_DOUBLE) {
+		gSystemInfo.jailbreakSettings.noInjectRestoreMultiplier = xpc_double_get_value(value);
 		jbsettings_save();
 		return 0;
 	}

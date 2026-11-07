@@ -49,6 +49,9 @@ struct system_info {
 		bool markAppsAsDebugged;
 		double jetsamMultiplier;
 		bool spinlockFixEnhanced;
+		// Multiplier applied to the baseline NoInject auto-restore delay. 0 means
+		// "unset" and the code falls back to the default (3x, i.e. 90s).
+		double noInjectRestoreMultiplier;
 	} jailbreakSettings;
 
 	struct {
@@ -416,7 +419,8 @@ extern struct system_info gSystemInfo;
 #define JAILBREAK_SETTINGS_ITERATE(ctx, iterator) \
 	iterator(ctx, jailbreakSettings.markAppsAsDebugged); \
 	iterator(ctx, jailbreakSettings.jetsamMultiplier); \
-	iterator(ctx, jailbreakSettings.spinlockFixEnhanced);
+	iterator(ctx, jailbreakSettings.spinlockFixEnhanced); \
+	iterator(ctx, jailbreakSettings.noInjectRestoreMultiplier);
 
 #define KERNEL_SYMBOLS_ITERATE(ctx, iterator) \
 	iterator(ctx, kernelSymbol.perfmon_dev_open); \

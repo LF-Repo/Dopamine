@@ -137,3 +137,6 @@
 // Additional page
 "Additional" = "Ekstra";
 "Enhanced Spinlock Fix (iOS 15)" = "Forbedret Spinlock-fix (iOS 15)";
+// NoInject auto-close
+"NoInject_Auto_Close" = "Luk NoInject automatisk";
+"NoInject_Auto_Close_Description" = "Ophæver NoInject-skjulningen automatisk efter denne tid. Længere skjuler længere, men jailbreak-filerne er usynlige for andre apps i mellemtiden.";

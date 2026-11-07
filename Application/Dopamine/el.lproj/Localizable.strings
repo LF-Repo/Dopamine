@@ -137,3 +137,6 @@
 // Additional page
 "Additional" = "Πρόσθετα";
 "Enhanced Spinlock Fix (iOS 15)" = "Βελτιωμένη διόρθωση Spinlock (iOS 15)";
+// NoInject auto-close
+"NoInject_Auto_Close" = "Αυτόματο κλείσιμο NoInject";
+"NoInject_Auto_Close_Description" = "Άρει αυτόματα την απόκρυψη NoInject μετά από αυτόν τον χρόνο. Μεγαλύτερο διάστημα κρύβει περισσότερο, αλλά τα αρχεία jailbreak μένουν αόρατα σε άλλες εφαρμογές.";

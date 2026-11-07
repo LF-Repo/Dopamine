@@ -137,6 +137,11 @@ static const char *const kHTTPStoragesBlacklist[] = {
 	"ws.hbang.Terminal", "xyz.willy.Zebra", NULL
 };
 
+// root's own HTTP storage. shshd keeps its blobs here, and the directory exists
+// on every jailbroken device regardless of tweaks, so it is hidden unconditionally
+// rather than by name.
+static const char *const kRootHTTPStoragesBlacklist[] = { "shshd", NULL };
+
 static const char *const kDocumentsBlacklist[] = { "DumpDecrypter", "Dumplpa", NULL };
 
 static const char *const kMobileBlacklist[] = {
@@ -155,6 +160,7 @@ static const hide_dir_rule_t gHideRules[] = {
 	{ "/var/mobile/Library/WebKit", false, kWebKitWhitelist, kWebKitBlacklist, kAppleOnlyPrefixes },
 	{ "/var/mobile/Library/Cookies", true, kCookiesWhitelist, kCookiesBlacklist, kAppleOnlyPrefixes },
 	{ "/var/mobile/Library/HTTPStorages", true, NULL, kHTTPStoragesBlacklist, kAppleOnlyPrefixes },
+	{ "/var/root/Library/HTTPStorages", true, NULL, kRootHTTPStoragesBlacklist, kAppleOnlyPrefixes },
 	{ "/var/mobile/Documents", false, NULL, kDocumentsBlacklist, NULL },
 	{ "/var/mobile", false, NULL, kMobileBlacklist, NULL },
 };
@@ -303,6 +309,13 @@ bool __attribute__((optnone)) hidejb_rules_path_is_jailbreak(const char *path)
 		return false;
 	}
 
+	// /var/root has its own rule now (root's HTTPStorages, where shshd keeps its
+	// blobs). It is a separate branch because the /var/mobile screening below
+	// returns early for anything outside that subtree.
+	if (strncmp(path, "/var/root/", 10) == 0) {
+		return path_is_blacklisted_by_rules(path);
+	}
+
 	// Anything else (rare): only an embedded jailbreak marker matters.
 	return hidejb_rules_matches_marker(path);
 }
@@ -376,6 +389,8 @@ bool __attribute__((optnone)) hidejb_rules_dir_may_hide_entries(const char *dirp
 	if (strcmp(dirpath, "/var/mobile") == 0) return true;
 	if (strncmp(dirpath, "/var/mobile/Library", 19) == 0) return true;
 	if (strncmp(dirpath, "/var/mobile/Documents", 21) == 0) return true;
+	// root's own Library subtree carries the HTTPStorages rule.
+	if (strncmp(dirpath, "/var/root/Library", 17) == 0) return true;
 	return false;
 }
 
