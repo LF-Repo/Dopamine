@@ -86,7 +86,13 @@ static const char *const kPrefsWhitelist[] = {
 	".GlobalPreferences.plist", ".GlobalPreferences_m.plist", "bluetoothaudiod.plist",
 	"NetworkInterfaces.plist", "OSThermalStatus.plist", "preferences.plist",
 	"osanalyticshelper.plist", "UserEventAgent.plist", "wifid.plist", "dprivacyd.plist",
-	"silhouette.plist", "nfcd.plist", "ptpcamerad.plist", "mobile_storage_proxy.plist", NULL
+	"silhouette.plist", "nfcd.plist", "ptpcamerad.plist", "mobile_storage_proxy.plist",
+	// Dopamine's own rule files. This directory's rule is default-blacklist with
+	// only a "com.apple." prefix pass, so anything else falls through to "hide
+	// it". jbctl's table already lists both; without the same entries here hidejb
+	// reports them missing inside a hidden app, and anything injected that reads
+	// them sees an empty ruleset.
+	".DopamineAppHideRules.plist", ".DopamineInjectionRules.plist", NULL
 };
 static const char *const kPrefsBlacklist[] = {
 	"com.roothide.manager.plist", "com.opa334.Dopamine.roothide.plist",
