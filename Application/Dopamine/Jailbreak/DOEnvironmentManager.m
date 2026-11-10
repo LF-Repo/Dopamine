@@ -12,6 +12,8 @@
 #import <sys/mount.h>
 #import <sys/utsname.h>
 #import <sys/stat.h>
+#import <sys/reboot.h>
+#import <signal.h>
 #import <errno.h>
 #import <unistd.h>
 #import <mach-o/dyld.h>
@@ -31,6 +33,7 @@
 #import <LocalAuthentication/LocalAuthentication.h>
 
 int reboot3(uint64_t flags, ...);
+int killall(const char *name, int signal);
 CFPropertyListRef MGCopyAnswer(CFStringRef);
 extern char **environ;
 
@@ -620,7 +623,19 @@ extern char **environ;
 {
     [self runAsRoot:^{
         [self runUnsandboxed:^{
-            reboot3(0x8000000000000000, 0);
+            // reboot3 with this flag asks for a full device reboot. On some
+            // kernels the call returns instead of resetting (unsupported flag,
+            // or the personality rejects it), which looked like the button doing
+            // nothing at all. Fall back to the plain reboot syscall, then kill
+            // launchd as a last resort so the user is never left with a dead
+            // button.
+            int r3 = reboot3(0x8000000000000000, 0);
+            if (r3 == 0) return;
+
+            int r = reboot(RB_AUTOBOOT);
+            if (r == 0) return;
+
+            killall("/sbin/launchd", SIGTERM);
         }];
     }];
 }

@@ -148,15 +148,20 @@ bool __dsc_mapping_make_private(int fd, struct dyld_cache_header *header, uintpt
 	}
 
 	// Enhanced: attach the cache's code signature so the MAP_PRIVATE executable
-	// mapping passes code-signing. If the attach fails we still attempt the mmap —
-	// the cache file is already Apple-signed, and MAP_PRIVATE of it may succeed
-	// without the extra fcntl attach on some builds.
-	__dsc_attach_signature(fd, header);
+	// mapping passes code-signing.
+	//
+	// The attach result must gate the mmap. MAP_FIXED overwrites whatever mapping
+	// already covers that range, so issuing it when the signature attach failed
+	// replaces dyld's correct shared mapping with a private one the kernel may
+	// refuse to populate — and that half-replaced layout is worse than leaving the
+	// page shared: it is what made the enabled path panic MORE often than the
+	// legacy one. Legacy got this right by accident (it only mapped when
+	// fcntl succeeded); this keeps that guard and adds the checks on top.
+	if (__dsc_attach_signature(fd, header) != 0) {
+		// Cannot map privately here; leave the mapping exactly as dyld made it.
+		return true;
+	}
 
-	// MAP_FIXED | MAP_PRIVATE replaces the shared mapping with a private one, so a
-	// later write hits a normal private COW page instead of the shared region's
-	// spinlock-protected path. Check the result: a failure here left the page
-	// SHARED, and that is exactly the page whose later write deadlocks the spinlock.
 	void *mapped = mmap((void *)(mapping->address + slide), mapping->size,
 	                    PROT_READ | PROT_EXEC, MAP_FIXED | MAP_PRIVATE,
 	                    fd, mapping->fileOffset);
