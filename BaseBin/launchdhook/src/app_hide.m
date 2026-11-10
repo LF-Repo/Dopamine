@@ -474,7 +474,14 @@ static int app_hide_restore_delay_seconds(void)
 {
 	double multiplier = app_hide_restore_multiplier();
 	if (multiplier <= 0) return 0;
-	return (int)(APP_HIDE_RESTORE_DELAY_SEC * multiplier);
+
+	int seconds = (int)(APP_HIDE_RESTORE_DELAY_SEC * multiplier);
+	// Never allow a sub-second window: a truncated or corrupt multiplier (an
+	// unexpected 0.01, say) would otherwise schedule the restore immediately,
+	// which looks exactly like "the hide did nothing". Half the baseline is still
+	// a valid, short-but-not-instant delay.
+	if (seconds < APP_HIDE_RESTORE_DELAY_SEC / 2) seconds = APP_HIDE_RESTORE_DELAY_SEC / 2;
+	return seconds;
 }
 
 // True once the delayed restore has run, so a long-running window does not re-arm
@@ -492,6 +499,12 @@ static bool gIdleRestoreAttempted = false;
 // Runs on a timer rather than on the spawn path, so its ordering with respect to
 // do_hide()/do_restore() is decided by gNoInjectActionLock like every other state
 // change. Idempotent.
+// Delay that was actually armed, for the log line below. Kept as a plain int so
+// the message reports what was scheduled rather than re-deriving it at fire time
+// (the two could disagree, which is how "after 0s" appeared in a log while the
+// hide had really been armed for 30).
+static int gNoInjectArmedDelaySec = 0;
+
 static void app_hide_restore_after_timeout(void)
 {
 	pthread_mutex_lock(&gNoInjectActionLock);
@@ -508,7 +521,7 @@ static void app_hide_restore_after_timeout(void)
 	}
 
 	app_hide_log([NSString stringWithFormat:@"timeout: lifting the hide after %ds, jailbreak stays visible from here on",
-				  app_hide_restore_delay_seconds()]);
+				  gNoInjectArmedDelaySec]);
 
 	// Full restore, exactly what exiting the last no-inject app would have done:
 	// rebuild /var/jb, remount fakelib, move the quarantined config files back.
@@ -566,6 +579,7 @@ static void app_hide_schedule_restore_timeout(void)
 	if (app_hide_restore_multiplier() <= 0) return;
 
 	int delaySec = app_hide_restore_delay_seconds();
+	gNoInjectArmedDelaySec = delaySec;
 	gNoInjectRestoreTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
 		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
 	dispatch_source_set_timer(gNoInjectRestoreTimer,

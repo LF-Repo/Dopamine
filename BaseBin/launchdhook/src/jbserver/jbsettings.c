@@ -10,9 +10,14 @@
 // The jailbreak settings live in gSystemInfo, which is plain in-memory state and
 // resets to zero whenever launchd restarts (userspace reboot, re-jailbreak).
 // Without a copy on disk the UI reads them back as "off" even though the user
-// turned them on, which is what made the spinlock toggle appear to switch itself
-// off. Persist them under the jbroot so they survive with the rest of the jailbreak.
-#define JBSETTINGS_PLIST "/basebin/.jbsettings.plist"
+// turned them on, which is what made the toggle appear to switch itself off.
+
+// They must live somewhere a re-jailbreak does not wipe. The old location was
+// <jbroot>/basebin, which is rebuilt from scratch on every jailbreak — that is
+// why the file was reported missing right after each one. /var/mobile/Library is
+// user data and survives, the same place the hide rules already live.
+#define JBSETTINGS_PLIST_NEW "/var/mobile/Library/Preferences/.DopamineJBSettings.plist"
+#define JBSETTINGS_PLIST_OLD "/basebin/.jbsettings.plist"
 
 // NOTE: JBROOT_PATH allocates its buffer with alloca() in the *caller's* stack
 // frame, so it must never be returned from a function — the pointer dangles the
@@ -25,11 +30,22 @@ static const char *jbsettings_path(void)
 	static char path[PATH_MAX];
 	static dispatch_once_t onceToken;
 	dispatch_once(&onceToken, ^{
+		strlcpy(path, JBSETTINGS_PLIST_NEW, sizeof(path));
+	});
+	return path;
+}
+
+// Previous location, read only to migrate a value written before the move.
+static const char *jbsettings_legacyPath(void)
+{
+	static char path[PATH_MAX];
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
 		path[0] = '\0';
 		const char *jbroot = get_jbroot();
 		if (!jbroot) return;
 		strlcpy(path, jbroot, sizeof(path));
-		strlcat(path, JBSETTINGS_PLIST, sizeof(path));
+		strlcat(path, JBSETTINGS_PLIST_OLD, sizeof(path));
 	});
 	return path[0] ? path : NULL;
 }
@@ -41,6 +57,8 @@ static const char *jbsettings_path(void)
 // makes that self-healing instead of permanent.
 static bool gJBSettingsLoaded = false;
 
+static void jbsettings_save(void);
+
 static bool jbsettings_memoryIsZeroed(void)
 {
 	return !jbsetting(markAppsAsDebugged)
@@ -49,41 +67,33 @@ static bool jbsettings_memoryIsZeroed(void)
 	    && !jbsetting(spinlockFixEnhanced);
 }
 
-void jbsettings_load(void)
+// Parse the plist at `path` into gSystemInfo. Returns true when a usable
+// dictionary was read and applied.
+static bool jbsettings_loadFrom(const char *path)
 {
-	if (gJBSettingsLoaded) return;
-
-	const char *path = jbsettings_path();
-	if (!path) return;
+	if (!path) return false;
 
 	FILE *f = fopen(path, "rb");
-	if (!f) {
-		// Diagnostic: the file is absent. Recorded once per launchd start so a
-		// fresh install that never touched a setting is distinguishable from a
-		// settings file that went missing.
-		FILE *log = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-		if (log) { fprintf(log, "jbsettings_load: NO FILE at %s\n", path); fclose(log); }
-		return;
-	}
+	if (!f) return false;
 
 	long size = -1;
 	if (fseek(f, 0, SEEK_END) == 0) size = ftell(f);
-	if (size <= 0 || size > 4096) { fclose(f); return; }
+	if (size <= 0 || size > 4096) { fclose(f); return false; }
 	rewind(f);
 
 	unsigned char buf[4096];
 	size_t got = fread(buf, 1, (size_t)size, f);
-	if (got != (size_t)size) { fclose(f); return; }
+	if (got != (size_t)size) { fclose(f); return false; }
 	fclose(f);
 
 	CFDataRef data = CFDataCreate(kCFAllocatorDefault, buf, (CFIndex)size);
-	if (!data) return;
+	if (!data) return false;
 
 	CFPropertyListRef plist = CFPropertyListCreateWithData(kCFAllocatorDefault, data, kCFPropertyListImmutable, NULL, NULL);
 	CFRelease(data);
 	if (!plist || CFGetTypeID(plist) != CFDictionaryGetTypeID()) {
 		if (plist) CFRelease(plist);
-		return;
+		return false;
 	}
 
 	CFDictionaryRef dict = (CFDictionaryRef)plist;
@@ -118,7 +128,8 @@ void jbsettings_load(void)
 	// "hide did nothing" report can be tied to a missing/zeroed value.
 	FILE *log = fopen("/var/mobile/Documents/noinject_log.txt", "a");
 	if (log) {
-		fprintf(log, "jbsettings_load: OK spinlock=%d jetsam=%.2f restoreMult=%.2f debugged=%d\n",
+		fprintf(log, "jbsettings_load: OK from %s spinlock=%d jetsam=%.2f restoreMult=%.2f debugged=%d\n",
+				path,
 				(int)jbsetting(spinlockFixEnhanced),
 				jbsetting(jetsamMultiplier),
 				jbsetting(noInjectRestoreMultiplier),
@@ -127,6 +138,36 @@ void jbsettings_load(void)
 	}
 
 	CFRelease(plist);
+	return true;
+}
+
+// Load once per launchd start. Reads the user-data copy first; if that is absent
+// (first run after this change) it falls back to the old in-basebin location so an
+// existing value is not lost, and immediately rewrites it to the durable path.
+void jbsettings_load(void)
+{
+	if (gJBSettingsLoaded) return;
+
+	bool ok = jbsettings_loadFrom(jbsettings_path());
+
+	if (!ok) {
+		const char *legacy = jbsettings_legacyPath();
+		if (legacy && jbsettings_loadFrom(legacy)) {
+			jbsettings_save();	// migrate to the durable location
+			unlink(legacy);
+		}
+	}
+
+	if (ok || gJBSettingsLoaded) return;
+
+	// Nothing on disk at all: normal on a device that never changed a setting.
+	FILE *log = fopen("/var/mobile/Documents/noinject_log.txt", "a");
+	if (log) {
+		fprintf(log, "jbsettings_load: NO FILE at %s (using defaults)\n", jbsettings_path());
+		fclose(log);
+	}
+	// Mark as loaded even when absent: otherwise every read retries the disk and
+	// spams the log, and a fresh device never reaches a stable state.
 	gJBSettingsLoaded = true;
 }
 
