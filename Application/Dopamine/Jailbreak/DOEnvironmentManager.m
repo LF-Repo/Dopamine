@@ -12,7 +12,6 @@
 #import <sys/mount.h>
 #import <sys/utsname.h>
 #import <sys/stat.h>
-#import <sys/reboot.h>
 #import <signal.h>
 #import <errno.h>
 #import <unistd.h>
@@ -34,6 +33,10 @@
 
 int reboot3(uint64_t flags, ...);
 int killall(const char *name, int signal);
+
+// The iOS SDK does not ship <sys/reboot.h>. Declare the plain reboot(2) entry
+// point directly; 0 is the "reboot now" command and needs no constants.
+int reboot(int howto);
 CFPropertyListRef MGCopyAnswer(CFStringRef);
 extern char **environ;
 
@@ -632,7 +635,7 @@ extern char **environ;
             int r3 = reboot3(0x8000000000000000, 0);
             if (r3 == 0) return;
 
-            int r = reboot(RB_AUTOBOOT);
+            int r = reboot(0);
             if (r == 0) return;
 
             killall("/sbin/launchd", SIGTERM);
