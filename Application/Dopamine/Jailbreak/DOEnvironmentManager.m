@@ -32,10 +32,10 @@
 #import <LocalAuthentication/LocalAuthentication.h>
 
 int reboot3(uint64_t flags, ...);
-int killall(const char *name, int signal);
 
 // The iOS SDK does not ship <sys/reboot.h>. Declare the plain reboot(2) entry
 // point directly; 0 is the "reboot now" command and needs no constants.
+// killall is already declared by libjailbreak/util.h as returning void.
 int reboot(int howto);
 CFPropertyListRef MGCopyAnswer(CFStringRef);
 extern char **environ;
