@@ -28,7 +28,12 @@ bool app_hide_is_blacklisted_pid(pid_t pid);
 // RootHide-style "no-injection" mode: temporarily hide the jailbreak globally
 // (remove /var/jb, unmount fakelib) so a bare-spawned (uninjected) app sees a
 // clean system, then restore once the app exits.
-void app_hide_global_hide(void);
+//
+// Returns false when fakelib could not be unmounted. The caller must then skip
+// the spawn entirely: the app would see a half-hidden system (fakelib still
+// mounted, /var/jb gone), and that inconsistent view of /usr/lib corrupts
+// libdispatch state in the child (user-space spinlock timeout panic).
+bool app_hide_global_hide(void);
 void app_hide_global_restore(void);
 void app_hide_watch_exit(pid_t pid);
 

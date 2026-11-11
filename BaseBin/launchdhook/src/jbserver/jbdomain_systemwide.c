@@ -546,7 +546,7 @@ static int systemwide_blacklist_check(uint64_t pid, bool *blacklisted)
 
 static int systemwide_set_app_hidden(bool hidden)
 {
-	extern void app_hide_global_hide(void);
+	extern bool app_hide_global_hide(void);
 	extern void app_hide_global_restore(void);
 	if (hidden) app_hide_global_hide();
 	else app_hide_global_restore();

@@ -400,7 +400,20 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			}
 
 			// Foreground launch: global hide + bare spawn + restore on exit.
-			app_hide_global_hide();
+			if (!app_hide_global_hide()) {
+				// fakelib could not be unmounted (EBUSY while a process still holds a
+				// vnode under /usr/lib). Spawning now would boot the app into a
+				// half-hidden system — fakelib mounted, /var/jb already gone — and the
+				// mismatch between the two views of /usr/lib is what deadlocks
+				// libdispatch in the child and panics the kernel with a spinlock
+				// timeout. Undo the hide and refuse this launch instead: a failed
+				// launch is recoverable, a panic is not.
+				FILE *lf = fopen(APP_HIDE_LOG_PATH, "a");
+				if (lf) { fprintf(lf, "noinject: aborting spawn, fakelib unmount failed\n"); fclose(lf); }
+				app_hide_abort_pending_hide();
+				app_hide_global_restore();
+				return EAGAIN;
+			}
 			pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
 			int r = crashreporter_spawn_without_reporting(blacklistedPidp, path, desc, argv, (char *const *)envp);
 			crashreporter_resume();

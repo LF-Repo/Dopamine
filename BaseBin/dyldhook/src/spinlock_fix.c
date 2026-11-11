@@ -37,26 +37,46 @@ static void __dsc_u32_to_str(char *out, uint32_t value)
 char *__locate_dsc(void)
 {
 	static char dscPath[PATH_MAX] = {};
-	if (dscPath[0]) return dscPath;
+	static bool resolved = false;
+	if (resolved) return dscPath[0] ? dscPath : NULL;
+	resolved = true;
 
+	const char *base = "/System/Library/Caches/com.apple.dyld/dyld_shared_cache";
+
+	// This whole file is compiled only for iOS 15 on arm64e, so the device's main
+	// cache is always the _arm64e one.
+	//
+	// The enhanced path used to probe "_arm64e", then "_arm64", then the bare name.
+	// That fallback was the bug: an arm64e process racing through a cache built for
+	// arm64 (or a stale variant) gets mapping addresses and a slide that do not
+	// describe the pages it actually has mapped, and __dsc_mapping_make_private
+	// then MAP_FIXED-maps unrelated pages on top of live mappings. Keeping the
+	// lookup strict is what makes the enhanced path at least as safe as the legacy
+	// one instead of deadlocking instantly.
 	if (!gSpinlockFixEnhanced) {
-		// Legacy: hardcoded single path (pre-fix behaviour). If the cache is not
-		// exactly this file, open() fails and the private-mapping pass skips.
-		strlcpy(dscPath, "/System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e", sizeof(dscPath));
+		// Legacy: hardcoded single path (pre-fix behaviour).
+		strlcpy(dscPath, base, sizeof(dscPath));
+		strlcat(dscPath, "_arm64e", sizeof(dscPath));
 		return dscPath;
 	}
 
-	// Enhanced: probe suffix candidates so a device whose cache is named _arm64e
-	// vs _arm64 (or carries a variant) still gets found.
-	const char *base = "/System/Library/Caches/com.apple.dyld/dyld_shared_cache";
-	const char *suffixes[] = { "_arm64e", "_arm64", "" };
-	for (size_t i = 0; i < sizeof(suffixes) / sizeof(*suffixes); i++) {
-		strlcpy(dscPath, base, sizeof(dscPath));
-		strlcat(dscPath, suffixes[i], sizeof(dscPath));
-		if (access(dscPath, F_OK) == 0) return dscPath;
-	}
 	strlcpy(dscPath, base, sizeof(dscPath));
-	return dscPath;
+	strlcat(dscPath, "_arm64e", sizeof(dscPath));
+
+	// Probe with open() rather than access(): this runs before every sandbox
+	// extension is guaranteed to be consumed, and access() reports EACCES where
+	// open() would have succeeded.
+	int probeFd = open(dscPath, O_RDONLY);
+	if (probeFd >= 0) {
+		close(probeFd);
+		return dscPath;
+	}
+
+	// No usable cache file. Returning a different architecture's cache here would
+	// be worse than doing nothing, so report "none" and let the caller skip the
+	// entire remap pass.
+	dscPath[0] = '\0';
+	return NULL;
 }
 
 void __dsc_file_enumerate_mappings(int fd, struct dyld_cache_header *header, uintptr_t slide, bool (*enumeratorFunc)(int fd, struct dyld_cache_header *header, uintptr_t slide, struct dyld_cache_mapping_info *mapping))
@@ -74,6 +94,7 @@ void __dsc_file_enumerate_mappings(int fd, struct dyld_cache_header *header, uin
 void __dsc_enumerate_mappings(uintptr_t slide, bool (*enumeratorFunc)(int fd, struct dyld_cache_header *header, uintptr_t slide, struct dyld_cache_mapping_info *mapping))
 {
 	char *dscPath = __locate_dsc();
+	if (!dscPath) return;
 
 	int dscFd = open(dscPath, O_RDONLY);
 	if (dscFd < 0) return;
@@ -162,6 +183,23 @@ bool __dsc_mapping_make_private(int fd, struct dyld_cache_header *header, uintpt
 		return true;
 	}
 
+	// Sanity-check the mapping against the cache file before touching live pages.
+	// MAP_FIXED replaces whatever covers the target range regardless of what was
+	// there, so a mapping entry that does not match this cache's own geometry
+	// (wrong file offset, wrong size, unaligned address) would clobber unrelated
+	// pages and deadlock the process. Only the file-derived facts are checked here
+	// because dyldhook must stay self-contained: it cannot call vm_region().
+	uint64_t fileEnd = mapping->fileOffset + mapping->size;
+	if (fileEnd < mapping->fileOffset) return true;			// overflow
+	if (fileEnd > header->codeSignatureOffset) return true;	// beyond the file's data
+	// mmap requires a page-aligned address and offset; iOS arm64e uses 16 KB pages.
+	// Hardcode it rather than calling getpagesize(): dyldhook is built with a
+	// self-contained-symbols check and that call has no trampoline here.
+	const uint64_t pageMask = 0x3FFF;
+	if (mapping->address & pageMask) return true;
+	if (mapping->size & pageMask) return true;
+	if (mapping->fileOffset & pageMask) return true;
+
 	void *mapped = mmap((void *)(mapping->address + slide), mapping->size,
 	                    PROT_READ | PROT_EXEC, MAP_FIXED | MAP_PRIVATE,
 	                    fd, mapping->fileOffset);
@@ -177,6 +215,13 @@ extern bool ORIG(_ZN5dyld313loadDyldCacheERKNS_18SharedCacheOptionsEPNS_19Shared
 bool HOOK(_ZN5dyld313loadDyldCacheERKNS_18SharedCacheOptionsEPNS_19SharedCacheLoadInfoE)(uintptr_t options, uintptr_t results)
 {
 	bool r = ORIG(_ZN5dyld313loadDyldCacheERKNS_18SharedCacheOptionsEPNS_19SharedCacheLoadInfoE)(options, results);
+
+	// Only remap when the cache actually loaded. On failure dyld leaves `results`
+	// in an unspecified state, and reading a slide out of it then MAP_FIXED-mapping
+	// pages at a garbage address is far worse than doing nothing: it can replace
+	// unrelated mappings in the process, which is one of the ways this path produced
+	// spinlock panics instead of simply leaving the cache shared.
+	if (!r) return r;
 
 	bool forcePrivate = *(bool *)(options + 8);
 	if (!forcePrivate) {

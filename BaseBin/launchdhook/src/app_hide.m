@@ -709,7 +709,11 @@ static int app_hide_run_jbctl(const char *command, const char *arg)
 // Actual (reversible) hide/restore bodies, shared by the no-inject refcount
 // path and the "jailbreak app resurrection" path.
 
-static void app_hide_do_hide(void)
+// Returns false when fakelib could not be taken down. The caller must not spawn
+// the app in that case: the app would then run with fakelib still mounted AND
+// /var/jb removed, i.e. half hidden, and the mismatch between the two views of
+// /usr/lib is what corrupts libdispatch state in the child.
+static bool app_hide_do_hide(void)
 {
 	// Kill running jailbreak apps first, so they do not keep writing into the
 	// real jbroot after /var/jb is removed below.
@@ -734,6 +738,7 @@ static void app_hide_do_hide(void)
 		app_hide_log([NSString stringWithFormat:@"do_hide: unmount retry %@ (errno %d)",
 					  unmountRet == 0 ? @"OK" : @"FAILED", errno]);
 	}
+	bool fakelibGone = (unmountRet == 0);
 
 	// Quarantine the jailbreak files a bare app can still see (the suspicious
 	// files under /var/mobile/Library). Pure file-rename, no uicache.
@@ -746,6 +751,8 @@ static void app_hide_do_hide(void)
 	if (unlink("/var/jb") != 0) {
 		app_hide_log([NSString stringWithFormat:@"do_hide: unlink(/var/jb) FAILED (errno %d)", errno]);
 	}
+
+	return fakelibGone;
 }
 
 static void app_hide_do_restore(void)
@@ -906,7 +913,12 @@ static void app_hide_reconcile(const char *reason)
 	pthread_mutex_unlock(&gNoInjectActionLock);
 }
 
-void app_hide_global_hide(void)
+// Returns true when fakelib was successfully taken down (or was already gone).
+// False means the hide is only half applied, and the caller must not spawn the
+// app: it would run with fakelib mounted while /var/jb is gone, and that mismatch
+// between the two views of /usr/lib corrupts libdispatch state in the child
+// (observed as a user-space spinlock timeout panic in the hidden app).
+bool app_hide_global_hide(void)
 {
 	pthread_mutex_lock(&gNoInjectLock);
 	// "Needs the jailbreak hidden" is active OR suspended: while a jailbreak app is
@@ -937,11 +949,12 @@ void app_hide_global_hide(void)
 	// scheduling first means the countdown starts when the window actually opens.
 	app_hide_schedule_restore_timeout();
 
-	if (wasHidden) return;
+	if (wasHidden) return true;
 
 	pthread_mutex_lock(&gNoInjectActionLock);
-	app_hide_do_hide();
+	bool ok = app_hide_do_hide();
 	pthread_mutex_unlock(&gNoInjectActionLock);
+	return ok;
 }
 
 void app_hide_global_restore(void)
