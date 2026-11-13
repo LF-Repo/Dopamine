@@ -17,7 +17,6 @@
 #include <unistd.h>
 #include "jbserver/jbserver_local.h"
 #include "hookd_provider.h"
-#include "execd_provider.h"
 #include "app_hide.h"
 #import <Foundation/Foundation.h>
 #include <mach/mach.h>
@@ -186,7 +185,6 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			gInEarlyBoot = true;
 
 			hookd_provider_teardown();
-			execd_provider_teardown();
 
 			// If the jailbreak is currently hidden, fakelib is not mounted
 			// It needs to be mounted to regain launchd code execution after the userspace reboot
@@ -342,13 +340,6 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 		crashreporter_resume();
 		if (pid) *pid = *plainPidp;
 		app_hide_commit_pid(plainPidp);
-		// No injection means no in-process hooks, so the child's own signal and
-		// exception state would stay untouched and detectable. execd attaches
-		// with PT_ATTACHEXC, patches after the exec, then restores the exception
-		// ports it saved, leaving no trace once it detaches.
-		if (plainR == 0 && *plainPidp > 0) {
-			execd_trace_process(*plainPidp);
-		}
 		return plainR;
 	}
 
@@ -405,11 +396,6 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 				pid_t childPid = *blacklistedPidp;
 				if (pid) *pid = childPid;
 				app_hide_commit_pid(blacklistedPidp);
-				// Same reasoning as the plain bare-spawn path: no injection, so
-				// execd is the only way to leave the child looking untouched.
-				if (r == 0 && childPid > 0) {
-					execd_trace_process(childPid);
-				}
 				return r;
 			}
 
@@ -435,10 +421,6 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			if (pid) *pid = childPid;
 			app_hide_commit_pid(blacklistedPidp);
 			if (r == 0) {
-				// Same reasoning as the other bare-spawn paths: with no systemhook
-				// inside the child, execd is what keeps the process from carrying
-				// detectable signal and exception-port state after its exec.
-				execd_trace_process(childPid);
 				// Track the app so the hide can be re-derived from real liveness
 				// later. This must happen before any restore path can run.
 				app_hide_note_pid(childPid);
