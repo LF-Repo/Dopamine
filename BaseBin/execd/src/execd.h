@@ -38,12 +38,10 @@ int execd_trace_start(pid_t pid, uint64_t traced_flag_addr, uint64_t detached_fl
 // saved ports are restored and the process detaches.
 int execd_trace_cancel(pid_t pid, uint64_t detached_flag_addr);
 
-// The patch step run between "exec detected" and "ports restored".
-//
-// NOTE: this must be installed from *inside* execd. A function pointer cannot
-// cross a process boundary, so launchdhook (a different process) cannot call
-// this. Until execd has its own patch implementation, g_patch_hook stays NULL
-// and execd only does the exception-port save/restore half of the trace.
-void execd_set_patch_hook(int (*hook)(pid_t pid));
+// The patch step run between "exec detected" and "ports restored", equivalent
+// to RootHide's roothide_patch_proc. It runs inside this daemon and uses kernel
+// r/w primitives acquired from boomerang, so no cross-process callback is
+// needed.
+int execd_patch_proc(pid_t pid);
 
 #endif // EXECD_H

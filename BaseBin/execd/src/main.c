@@ -19,9 +19,8 @@
 //      ports, no leftover signal handlers from the tracing itself.
 //
 // This mirrors RootHide's libroothider/src/exec_trace.m. The port save/restore
-// logic is the whole point; the patching step that RootHide runs in between is
-// intentionally left to a callback (g_patch_hook), because the patch function in
-// Dopamine differs from RootHide's roothide_patch_proc.
+// logic is the whole point; the patch step RootHide runs in between lives in
+// execd_patch_proc below, the equivalent of roothide_patch_proc.
 
 #include <mach/mach.h>
 #include <mach/exception_types.h>
@@ -51,6 +50,9 @@
 #include <sys/ptrace.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include <libjailbreak/libjailbreak.h>
+#include <libjailbreak/codesign.h>
 
 #include "execd.h"
 
@@ -108,13 +110,27 @@ typedef struct {
 static pthread_mutex_t g_trace_lock = PTHREAD_MUTEX_INITIALIZER;
 static execd_trace_t *g_traces[EXECD_MAX_TRACES];
 
-// Called once the target has exec'ed and before the ports are restored. Kept as
-// a hook so this daemon stays independent of Dopamine's patch implementation.
-static int (*g_patch_hook)(pid_t pid) = NULL;
+// ---------------------------------------------------------------------------
+// patch step (RootHide's roothide_patch_proc equivalent)
+// ---------------------------------------------------------------------------
 
-void execd_set_patch_hook(int (*hook)(pid_t pid))
+// Corresponds to RootHide's roothide_patch_proc(pid). RootHide picks between a
+// dyld patch and a CS flags patch via dyld_patch_enabled() ||
+// process_force_dyld_patch(); this daemon has no dyld patch path wired up, so
+// only the CS flags route is implemented, which is the equivalent of RootHide's
+// proc_patch_csflags.
+int execd_patch_proc(pid_t pid)
 {
-	g_patch_hook = hook;
+	if (pid <= 0) return -1;
+
+	uint64_t proc = proc_find(pid);
+	if (!proc) {
+		execd_log("patch: proc_find(%d) failed", pid);
+		return -2;
+	}
+
+	proc_csflags_set(proc, CS_PLATFORM_BINARY);
+	return 0;
 }
 
 static execd_trace_t *trace_lookup_locked(pid_t pid)
@@ -240,13 +256,21 @@ static void execd_handle_exception(mach_msg_header_t *msg, mach_port_t reply_por
 		}
 		isExec = (tr == KERN_SUCCESS && readSize == sizeof(infoArrayCount) && infoArrayCount == 0);
 
-		int (*patch)(pid_t) = g_patch_hook;
-		if (isExec && patch) {
-			if (patch(pid) != 0) {
-				execd_log("patch hook failed for pid %d", pid);
-			}
-		}
 		execd_log("exec detected for pid %d (isExec=%d)", pid, isExec);
+
+		if (isExec && execd_patch_proc(pid) != 0) {
+			// RootHide bails out here rather than leaving a patched-nothing
+			// process running: finish_process_trace(.., false) detaches and kills.
+			execd_log("patch failed for pid %d, detaching and killing", pid);
+			pthread_mutex_lock(&g_trace_lock);
+			execd_restore_ports(trace, task_port);
+			ptrace(PT_DETACH, pid, NULL, SIGSTOP);
+			trace_remove_locked(trace);
+			pthread_mutex_unlock(&g_trace_lock);
+			kill(pid, SIGQUIT);
+			kill(pid, SIGKILL);
+			goto reply;
+		}
 	}
 
 	// Restore the exact ports that were there before we attached, then detach.
@@ -441,6 +465,16 @@ static int execd_server_loop(mach_port_t serverPort)
 int main(int argc, char **argv)
 {
 	execd_log("execd: starting");
+
+	// Kernel r/w primitives come from boomerang. Without them proc_find /
+	// proc_csflags_set cannot run, and the patch step would fail every time.
+	// jbctl does the same thing right after gaining root.
+	if (jbclient_initialize_primitives() != 0) {
+		execd_log("execd: failed to acquire krw primitives, patch step disabled");
+	}
+	else {
+		execd_log("execd: krw primitives ready");
+	}
 
 	// Create the exception port up front: the server thread needs it before any
 	// trace can be installed.
