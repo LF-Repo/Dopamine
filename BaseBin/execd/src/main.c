@@ -29,7 +29,6 @@
 #include <mach/vm_map.h>
 #include <mach/mach_types.h>
 #include <mach/ndr.h>
-#include <mach/exc.h>
 #include <mach/message.h>
 
 #include <mach-o/dyld_images.h>
@@ -47,7 +46,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/proc_info.h>
-#include <sys/ptrace.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -56,18 +54,38 @@
 
 #include "execd.h"
 
-// The public SDK ships sys/ptrace.h (it has PT_ATTACHEXC), but the enum values
-// needed here are also defined in execd.h so the daemon does not depend on a
-// particular SDK revision layout.
-#ifndef PT_ATTACHEXC
-#define PT_ATTACHEXC 14
-#endif
-#ifndef PT_DETACH
-#define PT_DETACH 11
-#endif
-#ifndef PT_CONTINUE
-#define PT_CONTINUE 7
-#endif
+// The iOS SDK does not ship <sys/ptrace.h>, so declare what is needed here.
+// The syscall number and constants match XNU; the same approach is used in
+// systemhook/src/common/private.h.
+#define SYS_ptrace 0x1A
+
+int ptrace(int request, pid_t pid, caddr_t addr, int data);
+
+#define PT_CONTINUE  7
+#define PT_DETACH   11
+#define PT_ATTACHEXC 14  /* attach to running process with signal exception */
+
+// The iOS SDK does not ship <mach/exc.h> or <mach/mach_exc.h> either, so the
+// exception_raise request/reply layout is declared here. These two structs match
+// the MIG output for mach_exc.defs (subsystem 2405) exactly, which is what the
+// kernel sends when the exception port was set up with MACH_EXCEPTION_CODES.
+// RootHide carries the same definitions in libroothider/src/mach_exc.h.
+typedef struct {
+	mach_msg_header_t Head;
+	mach_msg_body_t msgh_body;
+	mach_msg_port_descriptor_t thread;
+	mach_msg_port_descriptor_t task;
+	NDR_record_t NDR;
+	exception_type_t exception;
+	mach_msg_type_number_t codeCnt;
+	int64_t code[2];
+} execd_exception_raise_request_t;
+
+typedef struct {
+	mach_msg_header_t Head;
+	NDR_record_t NDR;
+	kern_return_t RetCode;
+} execd_exception_raise_reply_t;
 
 #define EXECD_LOG_PATH "/var/mobile/Documents/execd_log.txt"
 
@@ -182,12 +200,12 @@ static void execd_restore_ports(execd_trace_t *trace, mach_port_t task)
 	}
 }
 
-// Simplified exception handler. Uses the SDK's exception_raise MIG layout
-// (mach/exc.h). The daemon only needs the exception type and code, not the
-// register state, so the reply can be generic.
+// Exception handler. Parses the mach_exception_raise layout declared at the top
+// of this file. Only the exception type and code are needed, not the register
+// state, so the reply is a bare RetCode.
 static void execd_handle_exception(mach_msg_header_t *msg, mach_port_t reply_port)
 {
-	__Request__exception_raise_t *req = (__Request__exception_raise_t *)msg;
+	execd_exception_raise_request_t *req = (execd_exception_raise_request_t *)msg;
 
 	mach_port_t task_port = req->task.name;
 	mach_port_t thread_port = req->thread.name;
@@ -284,12 +302,13 @@ static void execd_handle_exception(mach_msg_header_t *msg, mach_port_t reply_por
 
 reply:;
 	// Reply header: mirror the send right back, id + 100 per the MIG convention.
-	__Reply__exception_raise_t reply = {0};
+	execd_exception_raise_reply_t reply = {0};
 	reply.Head.msgh_bits = MACH_MSGH_BITS(MACH_MSGH_BITS_REMOTE(msg->msgh_bits), 0);
 	reply.Head.msgh_size = sizeof(reply);
 	reply.Head.msgh_remote_port = msg->msgh_remote_port;
 	reply.Head.msgh_local_port = MACH_PORT_NULL;
 	reply.Head.msgh_id = msg->msgh_id + 100;
+	reply.NDR = ((execd_exception_raise_request_t *)msg)->NDR;
 	reply.RetCode = KERN_SUCCESS;
 
 	mach_msg(&reply.Head, MACH_SEND_MSG, reply.Head.msgh_size, 0, MACH_PORT_NULL, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
@@ -391,7 +410,7 @@ int execd_trace_start(pid_t pid, uint64_t traced_flag_addr, uint64_t detached_fl
 	// exception port set does not reliably pause the target (see RootHide's
 	// note in finish_process_trace).
 	kr = task_set_exception_ports(task, EXC_MASK_SOFTWARE, g_exception_port,
-		EXCEPTION_DEFAULT, ARM_THREAD_STATE64);
+		EXCEPTION_DEFAULT | MACH_EXCEPTION_CODES, ARM_THREAD_STATE64);
 	if (kr != KERN_SUCCESS) {
 		execd_log("task_set_exception_ports(%d) failed: 0x%x", pid, kr);
 		pthread_mutex_lock(&g_trace_lock);
